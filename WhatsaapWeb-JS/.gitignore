@@ -8,8 +8,6 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# Grafo local de analisis (no versionar)
-graphify-out/
 
 # WhatsApp Web datos
 profile-data/

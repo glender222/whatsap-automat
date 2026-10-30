@@ -37,9 +37,6 @@ tmp_uploads/
 */tmp_uploads/
 
 # Backups y temporales
-graphify-out-backup*
-graphify-out-*-backup*
-graphify-out-unificado-backup/
 *.backup
 *.bak
 *.tmp
