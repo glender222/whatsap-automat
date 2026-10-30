@@ -1,0 +1,172 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer components {
+  .input {
+    @apply w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100;
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-[10px] bg-[#128C7E] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#0E766A] disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .admin-control {
+    @apply h-11 w-full rounded-[10px] border border-[#D9E5DF] bg-white px-3 text-sm text-[#10231C] outline-none transition placeholder:text-[#5B6F66]/70 focus:border-[#128C7E] focus:ring-2 focus:ring-[#128C7E]/15 disabled:cursor-not-allowed disabled:bg-[#EEF4F1] disabled:text-[#5B6F66];
+  }
+
+  .admin-select {
+    @apply h-11 w-full appearance-none rounded-[10px] border border-[#D9E5DF] bg-white px-3 pr-10 text-sm text-[#10231C] outline-none transition focus:border-[#128C7E] focus:ring-2 focus:ring-[#128C7E]/15 disabled:cursor-not-allowed disabled:bg-[#EEF4F1] disabled:text-[#5B6F66];
+  }
+
+  .admin-textarea {
+    @apply w-full rounded-[10px] border border-[#D9E5DF] bg-white px-3 py-2.5 text-sm text-[#10231C] outline-none transition placeholder:text-[#5B6F66]/70 focus:border-[#128C7E] focus:ring-2 focus:ring-[#128C7E]/15;
+  }
+
+  .admin-button-primary {
+    @apply inline-flex h-11 items-center justify-center gap-2 rounded-[10px] bg-[#128C7E] px-4 text-sm font-semibold text-white transition hover:bg-[#0E766A] disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .admin-button-secondary {
+    @apply inline-flex h-11 items-center justify-center gap-2 rounded-[10px] border border-[#D9E5DF] bg-white px-4 text-sm font-semibold text-[#10231C] transition hover:bg-[#EEF4F1] disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .admin-icon-button {
+    @apply inline-flex h-9 w-9 items-center justify-center rounded-[10px] border border-[#D9E5DF] bg-white text-[#5B6F66] transition hover:bg-[#EEF4F1] hover:text-[#128C7E] disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .admin-panel {
+    @apply rounded-[16px] border border-[#D9E5DF] bg-white shadow-sm;
+  }
+
+  .catalog-chip {
+    @apply inline-flex h-10 items-center gap-2 rounded-full border border-[#D9E5DF] bg-white px-4 text-sm font-semibold text-[#5B6F66] transition hover:bg-[#EEF4F1] hover:text-[#10231C];
+  }
+
+  .catalog-chip-active {
+    @apply border-[#128C7E] bg-[#DDF4EF] text-[#128C7E];
+  }
+
+  .admin-badge {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold;
+  }
+
+  .admin-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: #D9E5DF transparent;
+  }
+
+  .admin-scrollbar::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .admin-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .admin-scrollbar::-webkit-scrollbar-thumb {
+    background-color: #D9E5DF;
+    border-radius: 999px;
+  }
+
+  .admin-scrollbar:hover::-webkit-scrollbar-thumb {
+    background-color: #9CAEAA;
+  }
+}
+
+
+
+
+/* Animación de fade-in */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.3s ease-out;
+}
+
+/* Animación de spin (ya viene con Tailwind pero por si acaso) */
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
+/* Hover effect para botones */
+.hover-scale {
+  transition: transform 0.2s ease;
+}
+
+.hover-scale:hover {
+  transform: scale(1.05);
+}
+
+/* Animación de scale-in para check completado */
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-scale-in {
+  animation: scaleIn 0.5s ease-out;
+}
+
+/* Animación shimmer para skeleton loaders */
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* Animación fade-in suave para media cargada */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.4s ease-out forwards;
+}
+
+/* Animación slide-in para carga progresiva de chats */
+@keyframes slideInChat {
+  from {
+    opacity: 0;
+    transform: translateX(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.animate-slideIn {
+  animation: slideInChat 0.25s ease-out forwards;
+}

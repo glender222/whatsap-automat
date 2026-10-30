@@ -1,0 +1,70 @@
+{
+  "generated_at": "2026-07-21T22:24:42.151780+00:00",
+  "nodes": {
+    "frontend_py_whatsaapweb_src_shared_axios_http": {
+      "code_fingerprint": "d9ecaf8cc9dd874cebb0b740d29af5592a97c7e561987774a14f4207c3747c9b",
+      "label": "http.ts",
+      "last": "2026-07-21T21:27:19.898238+00:00",
+      "provenance": [
+        {
+          "date": "2026-07-21T21:27:19.898238+00:00",
+          "outcome": "useful",
+          "q": "Continúa desde el estado actual del repositorio. Inspecciona y normaliza la integración entre Meta Developers, WhatsApp Cloud API, webhook, Cloudflare Tunnel y variables de entorno, sin modificar código; entrega arquitectura, flujo, problemas, riesgos, propuesta, plan por archivo y criterios OpenAI Build Week."
+        }
+      ],
+      "score": 0.999079903,
+      "source_file": "Frontend_py_whatsaapweb/src/shared/axios/http.ts",
+      "status": "tentative",
+      "uses": 1
+    },
+    "whatsaapweb_js_scripts_dev_tunnel": {
+      "code_fingerprint": "0841e5587c41b277dde6c73cd16d9adc6d1abc478e20a8428f9c42f1be14a6ea",
+      "label": "dev-tunnel.ts",
+      "last": "2026-07-21T21:27:19.898238+00:00",
+      "provenance": [
+        {
+          "date": "2026-07-21T21:27:19.898238+00:00",
+          "outcome": "useful",
+          "q": "Continúa desde el estado actual del repositorio. Inspecciona y normaliza la integración entre Meta Developers, WhatsApp Cloud API, webhook, Cloudflare Tunnel y variables de entorno, sin modificar código; entrega arquitectura, flujo, problemas, riesgos, propuesta, plan por archivo y criterios OpenAI Build Week."
+        }
+      ],
+      "score": 0.999079903,
+      "source_file": "WhatsaapWeb-JS/scripts/dev-tunnel.ts",
+      "status": "tentative",
+      "uses": 1
+    },
+    "whatsaapweb_js_src_modules_ai_application_airuntimeorchestrator_airuntimeorchestrator": {
+      "code_fingerprint": "15a9f8dd320330a91dca316c31bcb16182c927c6ad4d1bcbd8f64b51ed0b6e56",
+      "label": "AiRuntimeOrchestrator",
+      "last": "2026-07-21T21:27:19.898238+00:00",
+      "provenance": [
+        {
+          "date": "2026-07-21T21:27:19.898238+00:00",
+          "outcome": "useful",
+          "q": "Continúa desde el estado actual del repositorio. Inspecciona y normaliza la integración entre Meta Developers, WhatsApp Cloud API, webhook, Cloudflare Tunnel y variables de entorno, sin modificar código; entrega arquitectura, flujo, problemas, riesgos, propuesta, plan por archivo y criterios OpenAI Build Week."
+        }
+      ],
+      "score": 0.999079903,
+      "source_file": "WhatsaapWeb-JS/src/modules/ai/application/AiRuntimeOrchestrator.ts",
+      "status": "tentative",
+      "uses": 1
+    },
+    "whatsaapweb_js_src_routes_metawebhookroutes": {
+      "code_fingerprint": "7f19bbf5719aa6b05db8836a500b66abd3577e1548302512557c59fef7d343f8",
+      "label": "metaWebhookRoutes.ts",
+      "last": "2026-07-21T21:27:19.898238+00:00",
+      "provenance": [
+        {
+          "date": "2026-07-21T21:27:19.898238+00:00",
+          "outcome": "useful",
+          "q": "Continúa desde el estado actual del repositorio. Inspecciona y normaliza la integración entre Meta Developers, WhatsApp Cloud API, webhook, Cloudflare Tunnel y variables de entorno, sin modificar código; entrega arquitectura, flujo, problemas, riesgos, propuesta, plan por archivo y criterios OpenAI Build Week."
+        }
+      ],
+      "score": 0.999079903,
+      "source_file": "WhatsaapWeb-JS/src/routes/metaWebhookRoutes.ts",
+      "status": "tentative",
+      "uses": 1
+    }
+  },
+  "version": 1
+}

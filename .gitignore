@@ -1,0 +1,63 @@
+# Dependencias y compilados
+node_modules/
+*/node_modules/
+dist/
+*/dist/
+dist-ssr/
+*/dist-ssr/
+.tools/
+*/.tools/
+
+# Variables de entorno y secretos (solo los .env.example se versionan)
+.env
+.env.*
+*/.env
+*/.env.*
+!.env.example
+!*/.env.example
+*.pem
+*.key
+
+# URLs y tokens temporales de túneles
+.cloudflare-webhook-url.txt
+*/.cloudflare-webhook-url.txt
+.ngrok-webhook-url.txt
+*/.ngrok-webhook-url.txt
+
+# WhatsApp Web datos y multimedia local
+profile-data/
+*/profile-data/
+.wwebjs_auth/
+*/.wwebjs_auth/
+.wwebjs_cache/
+*/.wwebjs_cache/
+uploads/
+*/uploads/
+tmp_uploads/
+*/tmp_uploads/
+
+# Backups y temporales
+graphify-out-backup*
+graphify-out-*-backup*
+graphify-out-unificado-backup/
+*.backup
+*.bak
+*.tmp
+*.temp
+
+# Logs
+logs/
+*/logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# IDE y Sistema Operativo
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+*.swo

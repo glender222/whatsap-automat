@@ -1,0 +1,131 @@
+import { Pool } from 'pg';
+import * as fs from 'fs';
+import * as path from 'path';
+import pool from '../config/database';
+
+export interface Migration {
+  version: string;
+  filename: string;
+  applied: boolean;
+}
+
+export class Migrator {
+  private pool: Pool;
+  private migrationsDir: string;
+  private dryRun: boolean;
+
+  constructor(options: { pool?: Pool; migrationsDir?: string; dryRun?: boolean } = {}) {
+    this.pool = options.pool || pool;
+    this.dryRun = options.dryRun || false;
+    this.migrationsDir = options.migrationsDir || path.join(__dirname, 'migrations');
+  }
+
+  /**
+   * Asegura la existencia de la tabla de control de migraciones.
+   * En dry-run no toca la base de datos.
+   */
+  async init(): Promise<void> {
+    if (this.dryRun) return;
+    await this.pool.query(`
+      CREATE TABLE IF NOT EXISTS schema_migrations (
+        version VARCHAR(255) PRIMARY KEY,
+        applied_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+  }
+
+  /**
+   * Lista todas las migraciones disponibles y su estado.
+   */
+  async listMigrations(): Promise<Migration[]> {
+    if (!fs.existsSync(this.migrationsDir)) {
+      return [];
+    }
+
+    const files = fs.readdirSync(this.migrationsDir)
+      .filter(f => f.endsWith('.sql'))
+      .sort();
+
+    if (this.dryRun) {
+      return files.map(filename => {
+        const version = path.basename(filename, '.sql');
+        return { version, filename, applied: false };
+      });
+    }
+
+    let appliedSet = new Set<string>();
+    try {
+      const { rows } = await this.pool.query<{ version: string }>(
+        'SELECT version FROM schema_migrations'
+      );
+      appliedSet = new Set(rows.map(r => r.version));
+    } catch (err: any) {
+      throw err;
+    }
+
+    return files.map(filename => {
+      const version = path.basename(filename, '.sql');
+      return { version, filename, applied: appliedSet.has(version) };
+    });
+  }
+
+  /**
+   * Aplica las migraciones pendientes en orden.
+   * Retorna las aplicadas y las omitidas (ya aplicadas).
+   */
+  async migrate(): Promise<{ applied: string[]; skipped: string[] }> {
+    const migrations = await this.listMigrations();
+    const applied: string[] = [];
+    const skipped: string[] = [];
+
+    for (const migration of migrations) {
+      if (migration.applied) {
+        skipped.push(migration.version);
+        console.log(`⏭️  Migration ${migration.version} already applied`);
+        continue;
+      }
+
+      const filePath = path.join(this.migrationsDir, migration.filename);
+      const sql = fs.readFileSync(filePath, 'utf-8');
+
+      if (this.dryRun) {
+        console.log(`[DRY RUN] Would apply ${migration.version}`);
+        applied.push(migration.version);
+        continue;
+      }
+
+      const client = await this.pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query(sql);
+        await client.query(
+          'INSERT INTO schema_migrations (version) VALUES ($1)',
+          [migration.version]
+        );
+        await client.query('COMMIT');
+        console.log(`✅ Applied migration ${migration.version}`);
+        applied.push(migration.version);
+      } catch (err) {
+        await client.query('ROLLBACK').catch(() => { /* ignore rollback errors */ });
+        console.error(`❌ Failed to apply migration ${migration.version}:`, err);
+        throw err;
+      } finally {
+        client.release();
+      }
+    }
+
+    return { applied, skipped };
+  }
+
+  /**
+   * Imprime el estado de cada migración.
+   */
+  async printStatus(): Promise<void> {
+    const migrations = await this.listMigrations();
+    console.log('Migration status:');
+    for (const m of migrations) {
+      const mark = m.applied ? '✅' : '⏳';
+      console.log(`  ${mark} ${m.version}`);
+    }
+  }
+}

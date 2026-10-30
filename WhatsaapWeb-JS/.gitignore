@@ -1,0 +1,60 @@
+# Dependencias
+node_modules/
+.tools/
+
+# TypeScript build output
+dist/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Grafo local de analisis (no versionar)
+graphify-out/
+
+# WhatsApp Web datos
+profile-data/
+.wwebjs_auth/
+.wwebjs_cache/
+uploads/
+
+# Ignorar archivos temporales o multimedia
+tmp_uploads/
+*.mp4
+*.mp3
+*.mov
+*.zip
+*.rar
+*.7z
+
+
+# Logs
+logs/
+*.log
+
+# Variables de entorno
+.env
+.env.*
+!.env.example
+
+# Artefactos runtime del tunel (nunca versionar URLs ni tokens)
+.cloudflare-webhook-url.txt
+.ngrok-webhook-url.txt
+
+# Archivos temporales
+*.tmp
+*.temp
+
+# IDE
+.atl/
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Respaldos
+*.backup
+*.bak

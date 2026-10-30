@@ -1,0 +1,3602 @@
+{
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/metadata.json": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "5cd9ae4fc688353236c3b92e8f06dfcc",
+    "semantic_hash": "5cd9ae4fc688353236c3b92e8f06dfcc"
+  },
+  "Frontend_py_whatsaapweb/EJEMPLOS_PERMISOS.ts": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "b1ec51b29fdf895099e2c5d5dc78be81",
+    "semantic_hash": "b1ec51b29fdf895099e2c5d5dc78be81"
+  },
+  "Frontend_py_whatsaapweb/eslint.config.js": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "5f0a08403b753db39d2ab3b563ad28c2",
+    "semantic_hash": "5f0a08403b753db39d2ab3b563ad28c2"
+  },
+  "Frontend_py_whatsaapweb/package.json": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "67cc438cc9b65fe243e4ded23e65bd73",
+    "semantic_hash": "67cc438cc9b65fe243e4ded23e65bd73"
+  },
+  "Frontend_py_whatsaapweb/postcss.config.js": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "ef3ba2a81ba19f8ea5ddf625521e96f0",
+    "semantic_hash": "ef3ba2a81ba19f8ea5ddf625521e96f0"
+  },
+  "Frontend_py_whatsaapweb/recovered_SettingsModal.tsx": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "9253c19f751eb68dfd65eda825daf726",
+    "semantic_hash": "9253c19f751eb68dfd65eda825daf726"
+  },
+  "Frontend_py_whatsaapweb/recovered_useSocketSimple.tsx": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "1d29822b9e251fab22592e61d73de419",
+    "semantic_hash": "1d29822b9e251fab22592e61d73de419"
+  },
+  "Frontend_py_whatsaapweb/refactor_types.cjs": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "a53eb8922c88f0d274952735c103dc65",
+    "semantic_hash": "a53eb8922c88f0d274952735c103dc65"
+  },
+  "Frontend_py_whatsaapweb/refactor_types.js": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "27c9c78789917c8e9b439b817f0c0d22",
+    "semantic_hash": "27c9c78789917c8e9b439b817f0c0d22"
+  },
+  "Frontend_py_whatsaapweb/src/App.tsx": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "c6dac120703edc1b8ce7ca039072957d",
+    "semantic_hash": "c6dac120703edc1b8ce7ca039072957d"
+  },
+  "Frontend_py_whatsaapweb/src/factures/GestionWeb.tsx": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "507d07bdd2a3906eece3619692ea6f2d",
+    "semantic_hash": "507d07bdd2a3906eece3619692ea6f2d"
+  },
+  "Frontend_py_whatsaapweb/src/factures/agentes/components/RuntimeLogsViewer.tsx": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "553e1445a9616c546531f1b07ed9567d",
+    "semantic_hash": "553e1445a9616c546531f1b07ed9567d"
+  },
+  "Frontend_py_whatsaapweb/src/factures/agentes/pages/AgentTestSessionPage.tsx": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "14cae1a955f10c70d8eda2b7b7732402",
+    "semantic_hash": "14cae1a955f10c70d8eda2b7b7732402"
+  },
+  "Frontend_py_whatsaapweb/src/factures/agentes/pages/AgentsPage.tsx": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "e30d57f149dee7685f7286faefc52c2a",
+    "semantic_hash": "e30d57f149dee7685f7286faefc52c2a"
+  },
+  "Frontend_py_whatsaapweb/src/factures/agentes/pages/AiDomainsPage.tsx": {
+    "mtime": 1784672184.4590988,
+    "ast_hash": "082fd1e50700570316191113e5b03fea",
+    "semantic_hash": ""
+  },
+  "Frontend_py_whatsaapweb/src/factures/agentes/services/agentService.ts": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "ea7f1617938e0ed48877a3699a404426",
+    "semantic_hash": "ea7f1617938e0ed48877a3699a404426"
+  },
+  "Frontend_py_whatsaapweb/src/factures/auth/components/AppLogo.tsx": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "0f852a7b3b6df32cb9be8d9a62717295",
+    "semantic_hash": "0f852a7b3b6df32cb9be8d9a62717295"
+  },
+  "Frontend_py_whatsaapweb/src/factures/auth/components/ForgotPasswordForm.tsx": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "85ce09362e503c788f082e0b114fac9f",
+    "semantic_hash": "85ce09362e503c788f082e0b114fac9f"
+  },
+  "Frontend_py_whatsaapweb/src/factures/auth/components/LoginForm.tsx": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "ae6aa3959ee875a5423170944b9e8812",
+    "semantic_hash": "ae6aa3959ee875a5423170944b9e8812"
+  },
+  "Frontend_py_whatsaapweb/src/factures/auth/components/RegisterForm.tsx": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "1007deb5f234cc8377c8f93d2e9f0bf0",
+    "semantic_hash": "1007deb5f234cc8377c8f93d2e9f0bf0"
+  },
+  "Frontend_py_whatsaapweb/src/factures/auth/hook/useAuth.ts": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "ea3cf47608624f39ca70e52ca73d1fc1",
+    "semantic_hash": "ea3cf47608624f39ca70e52ca73d1fc1"
+  },
+  "Frontend_py_whatsaapweb/src/factures/auth/pages/ForgotPasswordPage.tsx": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "a1b8c4183f53eb7a6a3d301df5db1168",
+    "semantic_hash": "a1b8c4183f53eb7a6a3d301df5db1168"
+  },
+  "Frontend_py_whatsaapweb/src/factures/auth/pages/LoginPage.tsx": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "049c59d67ec838658a191c946354d010",
+    "semantic_hash": "049c59d67ec838658a191c946354d010"
+  },
+  "Frontend_py_whatsaapweb/src/factures/auth/pages/RegisterPage.tsx": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "1513eb27d1b23a28ca78c476dde8c2c6",
+    "semantic_hash": "1513eb27d1b23a28ca78c476dde8c2c6"
+  },
+  "Frontend_py_whatsaapweb/src/factures/auth/services/authService.ts": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "554ec6c911e23ff039ca85cf3e69e7de",
+    "semantic_hash": "554ec6c911e23ff039ca85cf3e69e7de"
+  },
+  "Frontend_py_whatsaapweb/src/factures/auth/services/logService.ts": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "Frontend_py_whatsaapweb/src/factures/auth/types/auth.ts": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "1e0518092afbb6567cbd1df34e5466fb",
+    "semantic_hash": "1e0518092afbb6567cbd1df34e5466fb"
+  },
+  "Frontend_py_whatsaapweb/src/factures/auth/types/logTypes.ts": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "faa3c53e855b414b8a79e6b0bc2500ab",
+    "semantic_hash": "faa3c53e855b414b8a79e6b0bc2500ab"
+  },
+  "Frontend_py_whatsaapweb/src/factures/dashboard/components/ActionCards.tsx": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "ab33be514955f5fbb34d2aeb3af19732",
+    "semantic_hash": "ab33be514955f5fbb34d2aeb3af19732"
+  },
+  "Frontend_py_whatsaapweb/src/factures/dashboard/components/DashboardLayout.tsx": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "526c4e52299001244a26b0f0a05881df",
+    "semantic_hash": "526c4e52299001244a26b0f0a05881df"
+  },
+  "Frontend_py_whatsaapweb/src/factures/dashboard/components/DashboardSidebar.tsx": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "af9d74d184dccbc16a458ff255a55730",
+    "semantic_hash": "af9d74d184dccbc16a458ff255a55730"
+  },
+  "Frontend_py_whatsaapweb/src/factures/dashboard/components/DashboardTopbar.tsx": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "a0db9d375ca4f6f99faffd6d7737864c",
+    "semantic_hash": "a0db9d375ca4f6f99faffd6d7737864c"
+  },
+  "Frontend_py_whatsaapweb/src/factures/dashboard/components/HandoffWidget.tsx": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "07bf15b534a315d217add4f5fb9a7a7e",
+    "semantic_hash": "07bf15b534a315d217add4f5fb9a7a7e"
+  },
+  "Frontend_py_whatsaapweb/src/factures/dashboard/components/MessageHeatmap.tsx": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "3f79237a2d086fdc088c51a6a6f0c6aa",
+    "semantic_hash": "3f79237a2d086fdc088c51a6a6f0c6aa"
+  },
+  "Frontend_py_whatsaapweb/src/factures/dashboard/components/QuickStatsRow.tsx": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "fbc6e3b7c09479e8f5aff3afc7bb74b3",
+    "semantic_hash": "fbc6e3b7c09479e8f5aff3afc7bb74b3"
+  },
+  "Frontend_py_whatsaapweb/src/factures/dashboard/components/SlaAlertsList.tsx": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "5084c1ae5b625fcf0e6fb4e5f6be2a81",
+    "semantic_hash": "5084c1ae5b625fcf0e6fb4e5f6be2a81"
+  },
+  "Frontend_py_whatsaapweb/src/factures/dashboard/components/index.ts": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "4c0f23689794b5d94d9883cade46ef80",
+    "semantic_hash": "4c0f23689794b5d94d9883cade46ef80"
+  },
+  "Frontend_py_whatsaapweb/src/factures/dashboard/hooks/useAgentState.ts": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "f5c11b9a14986f5bbc3bb5644edcbe46",
+    "semantic_hash": "f5c11b9a14986f5bbc3bb5644edcbe46"
+  },
+  "Frontend_py_whatsaapweb/src/factures/dashboard/hooks/useDashboardStats.ts": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "d1650f2c6a9f83834ff6611fca56ee10",
+    "semantic_hash": "d1650f2c6a9f83834ff6611fca56ee10"
+  },
+  "Frontend_py_whatsaapweb/src/factures/dashboard/pages/DashboardPage.tsx": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "8098f095abc6f6f72a0463401299f545",
+    "semantic_hash": "8098f095abc6f6f72a0463401299f545"
+  },
+  "Frontend_py_whatsaapweb/src/factures/dashboard/pages/HandoffPage.tsx": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "327962910f7eb3a9f52cc8348bb7d635",
+    "semantic_hash": "327962910f7eb3a9f52cc8348bb7d635"
+  },
+  "Frontend_py_whatsaapweb/src/factures/dashboard/pages/IaSettingsPage.tsx": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "672f10d3982f207d5bf43c2c4fc90fb4",
+    "semantic_hash": "672f10d3982f207d5bf43c2c4fc90fb4"
+  },
+  "Frontend_py_whatsaapweb/src/factures/dashboard/pages/PaymentsPage.tsx": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "34c0dee41f94da2a1de6569391027ed3",
+    "semantic_hash": "34c0dee41f94da2a1de6569391027ed3"
+  },
+  "Frontend_py_whatsaapweb/src/factures/dashboard/services/dashboardService.ts": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "4951b62b8e5d778e31773a99a74087b1",
+    "semantic_hash": "4951b62b8e5d778e31773a99a74087b1"
+  },
+  "Frontend_py_whatsaapweb/src/factures/dashboard/services/iaService.ts": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "e0d90ac73fda8752b94e38acd378d701",
+    "semantic_hash": "e0d90ac73fda8752b94e38acd378d701"
+  },
+  "Frontend_py_whatsaapweb/src/factures/dashboard/services/paymentsService.ts": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "a888c09cd903cdff8cc7bd43e0c2139d",
+    "semantic_hash": "a888c09cd903cdff8cc7bd43e0c2139d"
+  },
+  "Frontend_py_whatsaapweb/src/factures/estaciones/components/EstacionCard.tsx": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "51497e21fb77a589006562cf0f9a0124",
+    "semantic_hash": "51497e21fb77a589006562cf0f9a0124"
+  },
+  "Frontend_py_whatsaapweb/src/factures/estaciones/components/RangoTrabajoBot.tsx": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "0a6361671c4714eb2756c7cfc9cd6bc3",
+    "semantic_hash": "0a6361671c4714eb2756c7cfc9cd6bc3"
+  },
+  "Frontend_py_whatsaapweb/src/factures/estaciones/components/RolSelector.tsx": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "36f87989c05c6d5573eb69ab8fec2d24",
+    "semantic_hash": "36f87989c05c6d5573eb69ab8fec2d24"
+  },
+  "Frontend_py_whatsaapweb/src/factures/estaciones/components/StationCard.tsx": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "0edf98b661377a76c7c7ce825da3a075",
+    "semantic_hash": "0edf98b661377a76c7c7ce825da3a075"
+  },
+  "Frontend_py_whatsaapweb/src/factures/estaciones/components/Toast.tsx": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "7f9e1dfb36401d1fc418367b0c064f3d",
+    "semantic_hash": "7f9e1dfb36401d1fc418367b0c064f3d"
+  },
+  "Frontend_py_whatsaapweb/src/factures/estaciones/components/index.ts": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "84839a796b922edd062c3dfc45ad9b0f",
+    "semantic_hash": "84839a796b922edd062c3dfc45ad9b0f"
+  },
+  "Frontend_py_whatsaapweb/src/factures/estaciones/components/modals/ChangePasswordModal.tsx": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "f032d3df6bfbeb27900292231397c810",
+    "semantic_hash": "f032d3df6bfbeb27900292231397c810"
+  },
+  "Frontend_py_whatsaapweb/src/factures/estaciones/components/modals/CreateStationModal.tsx": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "40b3234a9f8c0fdbb6a53f8fdc6305e8",
+    "semantic_hash": "40b3234a9f8c0fdbb6a53f8fdc6305e8"
+  },
+  "Frontend_py_whatsaapweb/src/factures/estaciones/components/modals/EditStationModal.tsx": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "026e5eeb346b22926072f1506bc32769",
+    "semantic_hash": "026e5eeb346b22926072f1506bc32769"
+  },
+  "Frontend_py_whatsaapweb/src/factures/estaciones/components/modals/ViewCredentialsModal.tsx": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "7ff900b48a7bad2d8ed64b53d6e20599",
+    "semantic_hash": "7ff900b48a7bad2d8ed64b53d6e20599"
+  },
+  "Frontend_py_whatsaapweb/src/factures/estaciones/components/modals/index.ts": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "c54265fcbcb35ecbff0821187bc2f9cd",
+    "semantic_hash": "c54265fcbcb35ecbff0821187bc2f9cd"
+  },
+  "Frontend_py_whatsaapweb/src/factures/estaciones/hooks/index.ts": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "d88917dbe71f50bed84b00085493fc1f",
+    "semantic_hash": "d88917dbe71f50bed84b00085493fc1f"
+  },
+  "Frontend_py_whatsaapweb/src/factures/estaciones/hooks/useModals.ts": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "bec274830c632e12b37caa5aa5c61d6c",
+    "semantic_hash": "bec274830c632e12b37caa5aa5c61d6c"
+  },
+  "Frontend_py_whatsaapweb/src/factures/estaciones/hooks/useStationOperations.ts": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "a831aba3360484c9793e7860b4b13ce5",
+    "semantic_hash": "a831aba3360484c9793e7860b4b13ce5"
+  },
+  "Frontend_py_whatsaapweb/src/factures/estaciones/hooks/useStations.ts": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "6a624f95339f810a2c7298c7e84c1eb7",
+    "semantic_hash": "6a624f95339f810a2c7298c7e84c1eb7"
+  },
+  "Frontend_py_whatsaapweb/src/factures/estaciones/hooks/useToast.ts": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "ad8888e824f176c556b3720661927405",
+    "semantic_hash": "ad8888e824f176c556b3720661927405"
+  },
+  "Frontend_py_whatsaapweb/src/factures/estaciones/pages/administradorestaciones.tsx": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "c49450c73cd49afa66c747a3d411838d",
+    "semantic_hash": "c49450c73cd49afa66c747a3d411838d"
+  },
+  "Frontend_py_whatsaapweb/src/factures/estaciones/services/employeeService.ts": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "9f69cd6f8ad3201871f404272fd19f4c",
+    "semantic_hash": "9f69cd6f8ad3201871f404272fd19f4c"
+  },
+  "Frontend_py_whatsaapweb/src/factures/estaciones/types/Employee.ts": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "2b175206791598f85d0fc6f8a49d4d8d",
+    "semantic_hash": "2b175206791598f85d0fc6f8a49d4d8d"
+  },
+  "Frontend_py_whatsaapweb/src/factures/estaciones/types/Station.ts": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "b4b7936c70db721b646ebea6c14066cb",
+    "semantic_hash": "b4b7936c70db721b646ebea6c14066cb"
+  },
+  "Frontend_py_whatsaapweb/src/factures/estadisticos/Reportes.tsx": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "544cab18a639e8d633625bae0fcdf899",
+    "semantic_hash": "544cab18a639e8d633625bae0fcdf899"
+  },
+  "Frontend_py_whatsaapweb/src/factures/estadisticos/components/ChartCard.tsx": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "5d867e870eeca082d54475991705d575",
+    "semantic_hash": "5d867e870eeca082d54475991705d575"
+  },
+  "Frontend_py_whatsaapweb/src/factures/estadisticos/components/ExportSection.tsx": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "f95f02d93171f508a88fda342292d428",
+    "semantic_hash": "f95f02d93171f508a88fda342292d428"
+  },
+  "Frontend_py_whatsaapweb/src/factures/estadisticos/components/HeatmapGrid.tsx": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "d4ee5a5ec78e3d1d47c1010d51a32d01",
+    "semantic_hash": "d4ee5a5ec78e3d1d47c1010d51a32d01"
+  },
+  "Frontend_py_whatsaapweb/src/factures/estadisticos/components/MetricCard.tsx": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "0da72981d317b4deb4a8844b9b81a9b8",
+    "semantic_hash": "0da72981d317b4deb4a8844b9b81a9b8"
+  },
+  "Frontend_py_whatsaapweb/src/factures/estadisticos/components/SimpleBarChart.tsx": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "a3b589b032e32935322d69ba2269f37d",
+    "semantic_hash": "a3b589b032e32935322d69ba2269f37d"
+  },
+  "Frontend_py_whatsaapweb/src/factures/estadisticos/components/SimplePieChart.tsx": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "598d4ee6198ff39b35ff29cb96637f95",
+    "semantic_hash": "598d4ee6198ff39b35ff29cb96637f95"
+  },
+  "Frontend_py_whatsaapweb/src/factures/estadisticos/components/TopChatsList.tsx": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "8e0d32ecab53a5ffb4231f09bc186723",
+    "semantic_hash": "8e0d32ecab53a5ffb4231f09bc186723"
+  },
+  "Frontend_py_whatsaapweb/src/factures/estadisticos/hooks/useReports.ts": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "6eee6884d3af3be60f8fa2627ab10c47",
+    "semantic_hash": "6eee6884d3af3be60f8fa2627ab10c47"
+  },
+  "Frontend_py_whatsaapweb/src/factures/estadisticos/services/reportsService.ts": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "6b3e19945628236661d024dbe625cb1b",
+    "semantic_hash": "6b3e19945628236661d024dbe625cb1b"
+  },
+  "Frontend_py_whatsaapweb/src/factures/estadisticos/utils/exportUtils.ts": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "16a7b6ad7b2ccbcf82d8adec3644d1d7",
+    "semantic_hash": "16a7b6ad7b2ccbcf82d8adec3644d1d7"
+  },
+  "Frontend_py_whatsaapweb/src/factures/inventario/pages/CatalogsPage.tsx": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "498153738c90f867d30d10409941fef3",
+    "semantic_hash": "498153738c90f867d30d10409941fef3"
+  },
+  "Frontend_py_whatsaapweb/src/factures/inventario/pages/InventoryPage.tsx": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "7e0204cc6bd68a90e757e20a988e3e02",
+    "semantic_hash": "7e0204cc6bd68a90e757e20a988e3e02"
+  },
+  "Frontend_py_whatsaapweb/src/factures/inventario/services/productService.ts": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "e9d9c461529e67b2144c4877e31cdbe5",
+    "semantic_hash": "e9d9c461529e67b2144c4877e31cdbe5"
+  },
+  "Frontend_py_whatsaapweb/src/factures/landing/components/Button.tsx": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "bc3df0b0bd85d9473d660b70cd5d869e",
+    "semantic_hash": "bc3df0b0bd85d9473d660b70cd5d869e"
+  },
+  "Frontend_py_whatsaapweb/src/factures/landing/components/ContactSection.tsx": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "82abd7e32535a0a86facaa3820fa60cf",
+    "semantic_hash": "82abd7e32535a0a86facaa3820fa60cf"
+  },
+  "Frontend_py_whatsaapweb/src/factures/landing/components/HeroSection.tsx": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "1f417c92137315437ebd3de2e8491bd0",
+    "semantic_hash": "1f417c92137315437ebd3de2e8491bd0"
+  },
+  "Frontend_py_whatsaapweb/src/factures/landing/components/HowItWorks.tsx": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "1b9cb1977b4dba57d3f7f358c8068953",
+    "semantic_hash": "1b9cb1977b4dba57d3f7f358c8068953"
+  },
+  "Frontend_py_whatsaapweb/src/factures/landing/components/Navbar.tsx": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "746a121eb556a0aed0e4781b5f03c3ac",
+    "semantic_hash": "746a121eb556a0aed0e4781b5f03c3ac"
+  },
+  "Frontend_py_whatsaapweb/src/factures/landing/components/PricingSection.tsx": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "10ff896e1255d23a2c83cf1fb89c2b15",
+    "semantic_hash": "10ff896e1255d23a2c83cf1fb89c2b15"
+  },
+  "Frontend_py_whatsaapweb/src/factures/landing/hook/usePricingToggle.ts": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "6a48426f80f832c421ab39235cc39da5",
+    "semantic_hash": "6a48426f80f832c421ab39235cc39da5"
+  },
+  "Frontend_py_whatsaapweb/src/factures/landing/pages/LandingPage.tsx": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "77ad14fc42507e799683f42e9f7cbe51",
+    "semantic_hash": "77ad14fc42507e799683f42e9f7cbe51"
+  },
+  "Frontend_py_whatsaapweb/src/factures/landing/services/contactService.ts": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "5918cfa9f5766abaa98b7b8dea1397b8",
+    "semantic_hash": "5918cfa9f5766abaa98b7b8dea1397b8"
+  },
+  "Frontend_py_whatsaapweb/src/factures/landing/types/pricing.ts": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "95c895daf70716deb472d151db42e597",
+    "semantic_hash": "95c895daf70716deb472d151db42e597"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/Inicio.tsx": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "daa97cd0869921e53a5ae18dbdeecf8a",
+    "semantic_hash": "daa97cd0869921e53a5ae18dbdeecf8a"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/components/ChatContainer.tsx": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "06c496d69d94ee924aee4d9f6849f90e",
+    "semantic_hash": "06c496d69d94ee924aee4d9f6849f90e"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/components/MobileHeader.tsx": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "54b900dcbbf0120c2599b7a6ee83fff8",
+    "semantic_hash": "54b900dcbbf0120c2599b7a6ee83fff8"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/components/TagManager.tsx": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "824a9d1ca709d4dc3c67d565483fb56b",
+    "semantic_hash": "824a9d1ca709d4dc3c67d565483fb56b"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/components/TagModal.tsx": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "ed30ec6cc245fb560666b8e7070d6eb0",
+    "semantic_hash": "ed30ec6cc245fb560666b8e7070d6eb0"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/components/bandeja de chats/ChatFilePreview.tsx": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "e0ea82750341f7413b641a8ec0ee95e9",
+    "semantic_hash": "e0ea82750341f7413b641a8ec0ee95e9"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/components/bandeja de chats/ChatSidebar.tsx": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "046c6b4108c92914438ddcf452ee466b",
+    "semantic_hash": "046c6b4108c92914438ddcf452ee466b"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/components/bandeja de chats/ChatSkeleton.tsx": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "14cad693693b607445c8e630d66d5eb9",
+    "semantic_hash": "14cad693693b607445c8e630d66d5eb9"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/components/bandeja de chats/FilePreviewCard.tsx": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "93a4132871942331c3752d5815a59fe5",
+    "semantic_hash": "93a4132871942331c3752d5815a59fe5"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/components/bandeja de chats/LocalTopbar.tsx": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "7775ee11dac74b535d3ec19981f21e80",
+    "semantic_hash": "7775ee11dac74b535d3ec19981f21e80"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/components/bandeja de chats/MediaPreview.tsx": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "4e9eda3167631773062ed941c60674eb",
+    "semantic_hash": "4e9eda3167631773062ed941c60674eb"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/components/bandeja de chats/MessageInputBar.tsx": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "2867808e32552069aefe58c0f21c825b",
+    "semantic_hash": "2867808e32552069aefe58c0f21c825b"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/components/bandeja de chats/MessagesPanel.tsx": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "047de9fc8545bd7622571f78708dbc62",
+    "semantic_hash": "047de9fc8545bd7622571f78708dbc62"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/components/bandeja de chats/MessagesPanelLoader.tsx": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "da701ac9222b4bd7fe9a9c527916abea",
+    "semantic_hash": "da701ac9222b4bd7fe9a9c527916abea"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/components/bandeja de chats/QuickReplies.tsx": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "20b63e98a9e2773eda79f6aced9053c9",
+    "semantic_hash": "20b63e98a9e2773eda79f6aced9053c9"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/components/customer-history/CustomerHistoryPanel.tsx": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "fd74743420a44ae5bac20ad5edd17195",
+    "semantic_hash": "fd74743420a44ae5bac20ad5edd17195"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/components/extras/AudioMessage.tsx": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "f9279a739c8a65ced1f6985bcd49706b",
+    "semantic_hash": "f9279a739c8a65ced1f6985bcd49706b"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/components/extras/AvatarCircle.tsx": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "69e76670116f096c07ff175dd6fe78e6",
+    "semantic_hash": "69e76670116f096c07ff175dd6fe78e6"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/components/extras/EmojiPicker.tsx": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "e4d47de4e6ca509977bd15872ddbfb1b",
+    "semantic_hash": "e4d47de4e6ca509977bd15872ddbfb1b"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/components/extras/ImageCarousel.tsx": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "101420bf71a0231f67b6bef3c77e348b",
+    "semantic_hash": "101420bf71a0231f67b6bef3c77e348b"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/components/extras/ImageGalleryModal.tsx": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "eabcc1ec20a97f1de1696421f42616c0",
+    "semantic_hash": "eabcc1ec20a97f1de1696421f42616c0"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/components/extras/MediaViewer.tsx": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "7b16e6151344ba5db2df4748a58a871e",
+    "semantic_hash": "7b16e6151344ba5db2df4748a58a871e"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/components/extras/UserMediaPanel.tsx": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "f5827695eda0586ae3f60fb915bc1d67",
+    "semantic_hash": "f5827695eda0586ae3f60fb915bc1d67"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/components/extras/UserMediaPanelV2.tsx": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/hooks/useChatsManagement.ts": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "bbc3a43ef2dec821680e050b8bddd9aa",
+    "semantic_hash": "bbc3a43ef2dec821680e050b8bddd9aa"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/hooks/useContactPanel.ts": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "3e20651356861873c90c01d1d8ea98a1",
+    "semantic_hash": "3e20651356861873c90c01d1d8ea98a1"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/hooks/useCustomerHistory.ts": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "3ff222a3bdafc425bb32de728d3091d1",
+    "semantic_hash": "3ff222a3bdafc425bb32de728d3091d1"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/hooks/useFileUpload.tsx": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "30cc475736fb38ba3bcde1142613bf26",
+    "semantic_hash": "30cc475736fb38ba3bcde1142613bf26"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/hooks/useGalleryModal.ts": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "2f238b3f2e162991890d505ef43f548a",
+    "semantic_hash": "2f238b3f2e162991890d505ef43f548a"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/hooks/useIndexedMessages.tsx": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "ece1119dae981a9f1dd3d34d3d2f8b3a",
+    "semantic_hash": "ece1119dae981a9f1dd3d34d3d2f8b3a"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/hooks/useMediaQueue.ts": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "0e10f89685343c8c8bcdb8d0d1e03bb9",
+    "semantic_hash": "0e10f89685343c8c8bcdb8d0d1e03bb9"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/hooks/useMessagesManagement.ts": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "ba57ba4453740627b5235b2e4e7651bc",
+    "semantic_hash": "ba57ba4453740627b5235b2e4e7651bc"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/hooks/useProfilePhotos.ts": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "a71af4e1fc7064ff7ad7e0442fc7231c",
+    "semantic_hash": "a71af4e1fc7064ff7ad7e0442fc7231c"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/hooks/useSocketSimple.tsx": {
+    "mtime": 1784671777.4138906,
+    "ast_hash": "294072f15acb1e280bdde114ec153be0",
+    "semantic_hash": ""
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/hooks/useTagsManagement.ts": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "f0bd4504c510be4afbfc990386bf4110",
+    "semantic_hash": "f0bd4504c510be4afbfc990386bf4110"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/hooks/useWhatsAppInitialization.ts": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "631dd233fa66aa03989cda05a60a5307",
+    "semantic_hash": "631dd233fa66aa03989cda05a60a5307"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/services/chatService.ts": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "756fad6567132235401d11c0e52cb39f",
+    "semantic_hash": "756fad6567132235401d11c0e52cb39f"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/services/customerHistoryService.ts": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "5df5991c9de97606bda50b980af57453",
+    "semantic_hash": "5df5991c9de97606bda50b980af57453"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/services/mediaCacheService.ts": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "5f56ff850854e7e3d3e2b9fb9204a585",
+    "semantic_hash": "5f56ff850854e7e3d3e2b9fb9204a585"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/services/mediaRequestQueue.ts": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "8fab26b9e4e6ddbec8409934c0222a09",
+    "semantic_hash": "8fab26b9e4e6ddbec8409934c0222a09"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/services/mediaService.ts": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "287f3b113a6bdf8a8613c4d6b865840e",
+    "semantic_hash": "287f3b113a6bdf8a8613c4d6b865840e"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/services/messageService.ts": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "61edfb7b6c78871b1ca699d3462f21d9",
+    "semantic_hash": "61edfb7b6c78871b1ca699d3462f21d9"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/services/permissionService.ts": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "a7904e95efcb28abb68f66a7b43cd1fa",
+    "semantic_hash": "a7904e95efcb28abb68f66a7b43cd1fa"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/services/preloadService.ts": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "131248effe65dfc3ed34137eab4fb014",
+    "semantic_hash": "131248effe65dfc3ed34137eab4fb014"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/services/profilePhotoService.ts": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "4eb32ff6036430cbcf0a0d340cf2663f",
+    "semantic_hash": "4eb32ff6036430cbcf0a0d340cf2663f"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/services/sessionService.ts": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "7f880c5e891f3acee750b60bcc6505b0",
+    "semantic_hash": "7f880c5e891f3acee750b60bcc6505b0"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/services/tagsService.ts": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "98c7aaa810f7a2e58b3f604aa4970c27",
+    "semantic_hash": "98c7aaa810f7a2e58b3f604aa4970c27"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/services/templateService.ts": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "af0ffd67260981f40ae1dba7e9eb22e0",
+    "semantic_hash": "af0ffd67260981f40ae1dba7e9eb22e0"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/types/customerHistoryTypes.ts": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "73af840f5d382306904713ccc37fd367",
+    "semantic_hash": "73af840f5d382306904713ccc37fd367"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/types/permissionTypes.ts": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "64e6aac24edab74b864b44695a1b2327",
+    "semantic_hash": "64e6aac24edab74b864b44695a1b2327"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/types/sessionTypes.ts": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "f4f8b1ec17dc678dabbeb1511e33e55e",
+    "semantic_hash": "f4f8b1ec17dc678dabbeb1511e33e55e"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/types/tagTypes.ts": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "7d6c24de140832aaa7b55ec87691520d",
+    "semantic_hash": "7d6c24de140832aaa7b55ec87691520d"
+  },
+  "Frontend_py_whatsaapweb/src/factures/permisos/components/PermissionManager.tsx": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "b4887f3fa004e4d6963b87f5173bd21a",
+    "semantic_hash": "b4887f3fa004e4d6963b87f5173bd21a"
+  },
+  "Frontend_py_whatsaapweb/src/factures/permisos/pages/PermissionsPage.tsx": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "6e47c8085ecdaef716f5b128612add12",
+    "semantic_hash": "6e47c8085ecdaef716f5b128612add12"
+  },
+  "Frontend_py_whatsaapweb/src/factures/permisos/services/employeeTagService.ts": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "88d73c522d63552ff222beb436314b49",
+    "semantic_hash": "88d73c522d63552ff222beb436314b49"
+  },
+  "Frontend_py_whatsaapweb/src/factures/permisos/types/employeeTagTypes.ts": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "2a5f62c19e525da35ea9a91993bcbbcf",
+    "semantic_hash": "2a5f62c19e525da35ea9a91993bcbbcf"
+  },
+  "Frontend_py_whatsaapweb/src/factures/setting/SettingsModal.tsx": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "7acfc853d3e346b3c30cf1733218b4c8",
+    "semantic_hash": "7acfc853d3e346b3c30cf1733218b4c8"
+  },
+  "Frontend_py_whatsaapweb/src/factures/setting/components/AutoDownloadSection.tsx": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "c722f9892e472aedd63bd120a7b85918",
+    "semantic_hash": "c722f9892e472aedd63bd120a7b85918"
+  },
+  "Frontend_py_whatsaapweb/src/factures/setting/components/BotModalitySection.tsx": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "34cc8ae735f79c590a1636da888597ef",
+    "semantic_hash": "34cc8ae735f79c590a1636da888597ef"
+  },
+  "Frontend_py_whatsaapweb/src/factures/setting/components/BotOptionsManager.tsx": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "4581f4dd5b468ab92296169738898d85",
+    "semantic_hash": "4581f4dd5b468ab92296169738898d85"
+  },
+  "Frontend_py_whatsaapweb/src/factures/setting/components/BotWordsManager.tsx": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "7647f9e601c2d91df14a06aef429706a",
+    "semantic_hash": "7647f9e601c2d91df14a06aef429706a"
+  },
+  "Frontend_py_whatsaapweb/src/factures/setting/components/LoadingChatsOverlay.tsx": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "37ac89995974cb9d1c27e09407aed7bf",
+    "semantic_hash": "37ac89995974cb9d1c27e09407aed7bf"
+  },
+  "Frontend_py_whatsaapweb/src/factures/setting/components/LogoutOverlay.tsx": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "66f03ce1dc33c4fdcd6373a3b76916ab",
+    "semantic_hash": "66f03ce1dc33c4fdcd6373a3b76916ab"
+  },
+  "Frontend_py_whatsaapweb/src/factures/setting/components/SettingsHeader.tsx": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "6c678202b8b7cbdb40efbad94354645b",
+    "semantic_hash": "6c678202b8b7cbdb40efbad94354645b"
+  },
+  "Frontend_py_whatsaapweb/src/factures/setting/components/SettingsModal.tsx": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "5bcb491e0444f4150ce62a0a18ef83cc",
+    "semantic_hash": "5bcb491e0444f4150ce62a0a18ef83cc"
+  },
+  "Frontend_py_whatsaapweb/src/factures/setting/components/SettingsSidebar.tsx": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "7c427c194fe57d2a367902c4919966a0",
+    "semantic_hash": "7c427c194fe57d2a367902c4919966a0"
+  },
+  "Frontend_py_whatsaapweb/src/factures/setting/components/Sidebar.tsx": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "4282a73709e6bb34722ab8ea2d34a748",
+    "semantic_hash": "4282a73709e6bb34722ab8ea2d34a748"
+  },
+  "Frontend_py_whatsaapweb/src/factures/setting/components/ThemeSection.tsx": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "448e7687e6ca63654e54ad3c0a47e1cd",
+    "semantic_hash": "448e7687e6ca63654e54ad3c0a47e1cd"
+  },
+  "Frontend_py_whatsaapweb/src/factures/setting/components/WhatsAppConnectionSection.tsx": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "90b68ecc8677c24b604439cc57a773e9",
+    "semantic_hash": "90b68ecc8677c24b604439cc57a773e9"
+  },
+  "Frontend_py_whatsaapweb/src/factures/setting/hooks/useSettings.ts": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "8b7295d1540ffbe5c6f6da5fcc4c0360",
+    "semantic_hash": "8b7295d1540ffbe5c6f6da5fcc4c0360"
+  },
+  "Frontend_py_whatsaapweb/src/factures/setting/hooks/useSocketEvents.ts": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "347876f9ea466aa0e39a4666b6ca8e0e",
+    "semantic_hash": "347876f9ea466aa0e39a4666b6ca8e0e"
+  },
+  "Frontend_py_whatsaapweb/src/factures/setting/hooks/useWhatsAppConnection.ts": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "f8229d57a48c3eb8b2c9509f57664046",
+    "semantic_hash": "f8229d57a48c3eb8b2c9509f57664046"
+  },
+  "Frontend_py_whatsaapweb/src/factures/setting/pages/BotSettingsPage.tsx": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "923789a751ec2088db72ca5fe294a51e",
+    "semantic_hash": "923789a751ec2088db72ca5fe294a51e"
+  },
+  "Frontend_py_whatsaapweb/src/factures/setting/pages/GeneralSettingsPage.tsx": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "7cdc246d9623f2eea94d09cc01270aa4",
+    "semantic_hash": "7cdc246d9623f2eea94d09cc01270aa4"
+  },
+  "Frontend_py_whatsaapweb/src/factures/setting/pages/SettingsPage.tsx": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "7093f43224614133458954d940534cf8",
+    "semantic_hash": "7093f43224614133458954d940534cf8"
+  },
+  "Frontend_py_whatsaapweb/src/factures/setting/services/companyService.ts": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "91606b435f2c8db9a024273848b5f650",
+    "semantic_hash": "91606b435f2c8db9a024273848b5f650"
+  },
+  "Frontend_py_whatsaapweb/src/factures/setting/services/whatsappService.ts": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "7a59cfc44facf290cc97cb4017b82ce9",
+    "semantic_hash": "7a59cfc44facf290cc97cb4017b82ce9"
+  },
+  "Frontend_py_whatsaapweb/src/factures/setting/types/settings.types.ts": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "8a59e8781c461e3039eea66c207fc488",
+    "semantic_hash": "8a59e8781c461e3039eea66c207fc488"
+  },
+  "Frontend_py_whatsaapweb/src/jotai/middleware/useAuthJotai.ts": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "91a0a0be7cba22b706db0e881bbcc5bf",
+    "semantic_hash": "91a0a0be7cba22b706db0e881bbcc5bf"
+  },
+  "Frontend_py_whatsaapweb/src/jotai/middleware/useGlobalTransition.ts": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "a1d8c0313d65b6c333c9c52f9390fbc1",
+    "semantic_hash": "a1d8c0313d65b6c333c9c52f9390fbc1"
+  },
+  "Frontend_py_whatsaapweb/src/jotai/middleware/useThemeJotai.ts": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "437c209c936f45efae414a0445747807",
+    "semantic_hash": "437c209c936f45efae414a0445747807"
+  },
+  "Frontend_py_whatsaapweb/src/jotai/middleware/useUserRoleJotai.ts": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "5f71ab07f65504dabad9d92a5ab9c6b4",
+    "semantic_hash": "5f71ab07f65504dabad9d92a5ab9c6b4"
+  },
+  "Frontend_py_whatsaapweb/src/jotai/middleware/userRoleAtom.ts": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "1da9ad5f116782265d1f0d0e9645d8aa",
+    "semantic_hash": "1da9ad5f116782265d1f0d0e9645d8aa"
+  },
+  "Frontend_py_whatsaapweb/src/jotai/slices/agentStateAtom.ts": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "803917e5636d7393b4a83e1fe8b461f2",
+    "semantic_hash": "803917e5636d7393b4a83e1fe8b461f2"
+  },
+  "Frontend_py_whatsaapweb/src/jotai/slices/authAtoms.ts": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "c9f371b803962ae52828afbbaeea1280",
+    "semantic_hash": "c9f371b803962ae52828afbbaeea1280"
+  },
+  "Frontend_py_whatsaapweb/src/jotai/slices/globalTransitionAtom.ts": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "d5f71bf6f140b1d10d4ef96c45eb8f93",
+    "semantic_hash": "d5f71bf6f140b1d10d4ef96c45eb8f93"
+  },
+  "Frontend_py_whatsaapweb/src/jotai/slices/messagesAtoms.ts": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "97de6e7d44c4c35cf0cdb925da8fe0a0",
+    "semantic_hash": "97de6e7d44c4c35cf0cdb925da8fe0a0"
+  },
+  "Frontend_py_whatsaapweb/src/jotai/slices/themeAtom.ts": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "2679027e7db1e23ee705dd28acab39d4",
+    "semantic_hash": "2679027e7db1e23ee705dd28acab39d4"
+  },
+  "Frontend_py_whatsaapweb/src/lib/db.ts": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "aebc7f04d8d8765a56ecd6d2da0ae3b1",
+    "semantic_hash": "aebc7f04d8d8765a56ecd6d2da0ae3b1"
+  },
+  "Frontend_py_whatsaapweb/src/lib/settings.ts": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "a57cb8f8b0812f3c6ee23b68b27c78dd",
+    "semantic_hash": "a57cb8f8b0812f3c6ee23b68b27c78dd"
+  },
+  "Frontend_py_whatsaapweb/src/main.tsx": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "2abae6e3fdeba7e3db3453cfb9fc04c3",
+    "semantic_hash": "2abae6e3fdeba7e3db3453cfb9fc04c3"
+  },
+  "Frontend_py_whatsaapweb/src/routes/AppRoutes.tsx": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "b425b181e9b71d4d19a8ded49bbb35cf",
+    "semantic_hash": "b425b181e9b71d4d19a8ded49bbb35cf"
+  },
+  "Frontend_py_whatsaapweb/src/shared/axios/http.ts": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "ad7f6b1947db165be1910b4f8741b08a",
+    "semantic_hash": "ad7f6b1947db165be1910b4f8741b08a"
+  },
+  "Frontend_py_whatsaapweb/src/shared/components/ConfirmModal.tsx": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "d4213bc75254a7446b354b82308536bd",
+    "semantic_hash": "d4213bc75254a7446b354b82308536bd"
+  },
+  "Frontend_py_whatsaapweb/src/shared/components/FilePreview.tsx": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "69f08f4337d11333dec97e085d8d0810",
+    "semantic_hash": "69f08f4337d11333dec97e085d8d0810"
+  },
+  "Frontend_py_whatsaapweb/src/shared/components/GlobalTransition.tsx": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "6e27f651abf508f7dc7399ebc22a5d15",
+    "semantic_hash": "6e27f651abf508f7dc7399ebc22a5d15"
+  },
+  "Frontend_py_whatsaapweb/src/shared/services/chatsService.ts": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "e6e4e49a3f943bf56349d3a7761ab02f",
+    "semantic_hash": "e6e4e49a3f943bf56349d3a7761ab02f"
+  },
+  "Frontend_py_whatsaapweb/src/shared/services/informoUserService.ts": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "Frontend_py_whatsaapweb/src/shared/services/permissionsService.ts": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "6a07cfa836a63d54f966ec83696f4af5",
+    "semantic_hash": "6a07cfa836a63d54f966ec83696f4af5"
+  },
+  "Frontend_py_whatsaapweb/src/shared/services/tagService.ts": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "c1a0020a81ef14418d07b7d51038f0df",
+    "semantic_hash": "c1a0020a81ef14418d07b7d51038f0df"
+  },
+  "Frontend_py_whatsaapweb/src/shared/services/userService.ts": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "37c0afee79bd8f2c13245f816dd4e0bc",
+    "semantic_hash": "37c0afee79bd8f2c13245f816dd4e0bc"
+  },
+  "Frontend_py_whatsaapweb/src/shared/services/userServiceWithAuth.ts": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "Frontend_py_whatsaapweb/src/shared/types/api.types.ts": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "b5d93a8fd24a746546f515f1f674d339",
+    "semantic_hash": "b5d93a8fd24a746546f515f1f674d339"
+  },
+  "Frontend_py_whatsaapweb/src/shared/types/user.types.ts": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "bd50b1fb00fa458ed433537eb1a14b59",
+    "semantic_hash": "bd50b1fb00fa458ed433537eb1a14b59"
+  },
+  "Frontend_py_whatsaapweb/src/shared/types/wsp.ts": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "788bf240d6d3706162f51ffb7ae11fe2",
+    "semantic_hash": "788bf240d6d3706162f51ffb7ae11fe2"
+  },
+  "Frontend_py_whatsaapweb/src/shared/utils/urls.ts": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "777b1a2f65c81b9943fa563f26bdb8f1",
+    "semantic_hash": "777b1a2f65c81b9943fa563f26bdb8f1"
+  },
+  "Frontend_py_whatsaapweb/src/utils/socket.ts": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "b080f8d6c88a628488b50960c42f5450",
+    "semantic_hash": "b080f8d6c88a628488b50960c42f5450"
+  },
+  "Frontend_py_whatsaapweb/src/vite-env.d.ts": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "0352474ba2918efe13895edbc3780d94",
+    "semantic_hash": "0352474ba2918efe13895edbc3780d94"
+  },
+  "Frontend_py_whatsaapweb/tailwind.config.js": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "088803e09b4ef08f273ade1282ae82ce",
+    "semantic_hash": "088803e09b4ef08f273ade1282ae82ce"
+  },
+  "Frontend_py_whatsaapweb/tsconfig.app.json": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "a6649b605da0764778407fc0af6ae7eb",
+    "semantic_hash": "a6649b605da0764778407fc0af6ae7eb"
+  },
+  "Frontend_py_whatsaapweb/tsconfig.json": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "a3d39fa780ebff65444de257f291ce6c",
+    "semantic_hash": "a3d39fa780ebff65444de257f291ce6c"
+  },
+  "Frontend_py_whatsaapweb/tsconfig.node.json": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "ed5b9fa266f2566993c4b9c21924f3d7",
+    "semantic_hash": "ed5b9fa266f2566993c4b9c21924f3d7"
+  },
+  "Frontend_py_whatsaapweb/vite.config.ts": {
+    "mtime": 1784662951.628932,
+    "ast_hash": "3091d71d954e2962938e64e415d4e59c",
+    "semantic_hash": "3091d71d954e2962938e64e415d4e59c"
+  },
+  "WhatsaapWeb-JS/index.js": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "a54dd20e239390ce5d15d454a885eb97",
+    "semantic_hash": "a54dd20e239390ce5d15d454a885eb97"
+  },
+  "WhatsaapWeb-JS/package.json": {
+    "mtime": 1784670399.1782246,
+    "ast_hash": "438e3f2acf3faef1948a5493566fed54",
+    "semantic_hash": ""
+  },
+  "WhatsaapWeb-JS/scripts/db-migrate.ts": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "efa1d46e50a72bf338d65c28c92fec09",
+    "semantic_hash": "efa1d46e50a72bf338d65c28c92fec09"
+  },
+  "WhatsaapWeb-JS/scripts/dev-tunnel.ts": {
+    "mtime": 1784671777.2538884,
+    "ast_hash": "72518004aebcb199154db9baced2abbc",
+    "semantic_hash": ""
+  },
+  "WhatsaapWeb-JS/scripts/seed-router-dev.ts": {
+    "mtime": 1784672447.7981129,
+    "ast_hash": "b21a459769912f4558653327a7631fb0",
+    "semantic_hash": ""
+  },
+  "WhatsaapWeb-JS/scripts/verify-companies-core.ts": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "6f2172563742d064b5d2e5851ea76be2",
+    "semantic_hash": "6f2172563742d064b5d2e5851ea76be2"
+  },
+  "WhatsaapWeb-JS/scripts/verify-conversations-core.ts": {
+    "mtime": 1784670260.2849634,
+    "ast_hash": "6e3bac02dba1a082cb11a2736d3d3a91",
+    "semantic_hash": ""
+  },
+  "WhatsaapWeb-JS/scripts/verify-pr2.ts": {
+    "mtime": 1784670260.3809648,
+    "ast_hash": "48fac8902f4e43bd96449a5d2c32a695",
+    "semantic_hash": ""
+  },
+  "WhatsaapWeb-JS/scripts/verify-pr3.ts": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "9b9dc790c29d735bb1fa840ffd5d1ca2",
+    "semantic_hash": "9b9dc790c29d735bb1fa840ffd5d1ca2"
+  },
+  "WhatsaapWeb-JS/src/app.js": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "339dc6155d249b326c0e9754be645546",
+    "semantic_hash": "339dc6155d249b326c0e9754be645546"
+  },
+  "WhatsaapWeb-JS/src/app.ts": {
+    "mtime": 1784672447.698112,
+    "ast_hash": "c2225a81b63b5ba2ac3c3bf9e73e6b47",
+    "semantic_hash": ""
+  },
+  "WhatsaapWeb-JS/src/config/database.js": {
+    "mtime": 1784670260.1289613,
+    "ast_hash": "227596c2142927a3992cdd4609128137",
+    "semantic_hash": ""
+  },
+  "WhatsaapWeb-JS/src/config/database.ts": {
+    "mtime": 1784672425.1098955,
+    "ast_hash": "be2291ee096755b85bab904c3e169919",
+    "semantic_hash": ""
+  },
+  "WhatsaapWeb-JS/src/config/index.js": {
+    "mtime": 1784670260.0529602,
+    "ast_hash": "f4293800d072399f50f948786e3a5168",
+    "semantic_hash": ""
+  },
+  "WhatsaapWeb-JS/src/config/index.ts": {
+    "mtime": 1784670111.4109578,
+    "ast_hash": "7082bbdc6d930b429113af9186a51ddb",
+    "semantic_hash": ""
+  },
+  "WhatsaapWeb-JS/src/config/swagger.js": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "ac3641633e239029451cc5ee4efc3ff0",
+    "semantic_hash": "ac3641633e239029451cc5ee4efc3ff0"
+  },
+  "WhatsaapWeb-JS/src/config/swagger.ts": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "58d870238a9111cc4944b99e657e1196",
+    "semantic_hash": "58d870238a9111cc4944b99e657e1196"
+  },
+  "WhatsaapWeb-JS/src/controllers/authController.js": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "8a7101d118f8c53949862ccec0bf4804",
+    "semantic_hash": "8a7101d118f8c53949862ccec0bf4804"
+  },
+  "WhatsaapWeb-JS/src/controllers/chatController.js": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "749654cd0a9b3c14b6e1b4ff1ba06dde",
+    "semantic_hash": "749654cd0a9b3c14b6e1b4ff1ba06dde"
+  },
+  "WhatsaapWeb-JS/src/controllers/mediaController.js": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "59dadddca2b7b4bae983e513df39ab6e",
+    "semantic_hash": "59dadddca2b7b4bae983e513df39ab6e"
+  },
+  "WhatsaapWeb-JS/src/controllers/userController.js": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "bdde65c8d25d067f8cbbc4db07d78bba",
+    "semantic_hash": "bdde65c8d25d067f8cbbc4db07d78bba"
+  },
+  "WhatsaapWeb-JS/src/core/application/dtos/conversation.dtos.ts": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "e2ee31df89d09b42364b325bf30bf867",
+    "semantic_hash": "e2ee31df89d09b42364b325bf30bf867"
+  },
+  "WhatsaapWeb-JS/src/core/application/helpers/idempotency.helper.ts": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "73e35248850ee5093891d5d5ae39365f",
+    "semantic_hash": "73e35248850ee5093891d5d5ae39365f"
+  },
+  "WhatsaapWeb-JS/src/core/application/helpers/tenant.helper.ts": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "de43d526ef0879a8c5033ada93784949",
+    "semantic_hash": "de43d526ef0879a8c5033ada93784949"
+  },
+  "WhatsaapWeb-JS/src/core/application/ports/attachmentRepository.port.ts": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "93261ed004dfda06472c21dca9a1b7b7",
+    "semantic_hash": "93261ed004dfda06472c21dca9a1b7b7"
+  },
+  "WhatsaapWeb-JS/src/core/application/ports/auditLogRepository.port.ts": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "b61a91248863b154e869b4514084e0c0",
+    "semantic_hash": "b61a91248863b154e869b4514084e0c0"
+  },
+  "WhatsaapWeb-JS/src/core/application/ports/companyRepository.port.ts": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "a7cef1115e503b5fab16d1ead763e617",
+    "semantic_hash": "a7cef1115e503b5fab16d1ead763e617"
+  },
+  "WhatsaapWeb-JS/src/core/application/ports/contactRepository.port.ts": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "695cbd3c24397bd6febe30de01340394",
+    "semantic_hash": "695cbd3c24397bd6febe30de01340394"
+  },
+  "WhatsaapWeb-JS/src/core/application/ports/conversationRepository.port.ts": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "dccfb124b89bec9812ba2432f86b1580",
+    "semantic_hash": "dccfb124b89bec9812ba2432f86b1580"
+  },
+  "WhatsaapWeb-JS/src/core/application/ports/messageChannel.port.ts": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "85a942a8b191ad1dbc74f42f2e09c917",
+    "semantic_hash": "85a942a8b191ad1dbc74f42f2e09c917"
+  },
+  "WhatsaapWeb-JS/src/core/application/ports/messageRepository.port.ts": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "f17c78f3aa845e8b81ff1d7140a32a1a",
+    "semantic_hash": "f17c78f3aa845e8b81ff1d7140a32a1a"
+  },
+  "WhatsaapWeb-JS/src/core/application/ports/statusRepository.port.ts": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "c4643cd67680933234d00f94899c1ae3",
+    "semantic_hash": "c4643cd67680933234d00f94899c1ae3"
+  },
+  "WhatsaapWeb-JS/src/core/application/ports/whatsappChannel.port.ts": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "9e0472d1e1bd2130bc0a1939f566d123",
+    "semantic_hash": "9e0472d1e1bd2130bc0a1939f566d123"
+  },
+  "WhatsaapWeb-JS/src/core/application/services/conversationService.ts": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "dc413f44d2ffc272a251300d617b70bc",
+    "semantic_hash": "dc413f44d2ffc272a251300d617b70bc"
+  },
+  "WhatsaapWeb-JS/src/core/coreModel.ts": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "195d45fc5d636058173eece02b92bd2e",
+    "semantic_hash": "195d45fc5d636058173eece02b92bd2e"
+  },
+  "WhatsaapWeb-JS/src/core/domain/attachment.entity.ts": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "23cf7cdf52fde25bf9e8c0a648fe1c32",
+    "semantic_hash": "23cf7cdf52fde25bf9e8c0a648fe1c32"
+  },
+  "WhatsaapWeb-JS/src/core/domain/auditLog.entity.ts": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "e98fc7313b7d325dc9807ec32331fceb",
+    "semantic_hash": "e98fc7313b7d325dc9807ec32331fceb"
+  },
+  "WhatsaapWeb-JS/src/core/domain/company.entity.ts": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "8527d47f9e6ea1372bb9eb033390e897",
+    "semantic_hash": "8527d47f9e6ea1372bb9eb033390e897"
+  },
+  "WhatsaapWeb-JS/src/core/domain/contact.entity.ts": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "4a0b7598add8645f61aca79ea9cb7bb5",
+    "semantic_hash": "4a0b7598add8645f61aca79ea9cb7bb5"
+  },
+  "WhatsaapWeb-JS/src/core/domain/conversation.entity.ts": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "efa7f3e85173e8a9d8cc1e57448277c5",
+    "semantic_hash": "efa7f3e85173e8a9d8cc1e57448277c5"
+  },
+  "WhatsaapWeb-JS/src/core/domain/message.entity.ts": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "fcc5f5fed09867e30d1568f1c0e0d385",
+    "semantic_hash": "fcc5f5fed09867e30d1568f1c0e0d385"
+  },
+  "WhatsaapWeb-JS/src/core/domain/messageStatus.entity.ts": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "4546a96b73a46f7cf30d584f820dac2f",
+    "semantic_hash": "4546a96b73a46f7cf30d584f820dac2f"
+  },
+  "WhatsaapWeb-JS/src/core/infrastructure/channels/whatsapp/adapters/WhatsappWebAdapter.ts": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "45b2710f6d1c1d6afa79144f1ca19667",
+    "semantic_hash": "45b2710f6d1c1d6afa79144f1ca19667"
+  },
+  "WhatsaapWeb-JS/src/core/infrastructure/channels/whatsapp/mappers/whatsappWeb.mapper.ts": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "1e1112c44be90201dd03b9e51974de17",
+    "semantic_hash": "1e1112c44be90201dd03b9e51974de17"
+  },
+  "WhatsaapWeb-JS/src/core/infrastructure/db/mappers/attachment.mapper.ts": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "5cf12d782fcad91c0512aebe9aad23e1",
+    "semantic_hash": "5cf12d782fcad91c0512aebe9aad23e1"
+  },
+  "WhatsaapWeb-JS/src/core/infrastructure/db/mappers/auditLog.mapper.ts": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "1f9328fa2835e1b275cbb3ca11af5efe",
+    "semantic_hash": "1f9328fa2835e1b275cbb3ca11af5efe"
+  },
+  "WhatsaapWeb-JS/src/core/infrastructure/db/mappers/company.mapper.ts": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "1e8e4a22a989c8a421326f9ecb4e7fad",
+    "semantic_hash": "1e8e4a22a989c8a421326f9ecb4e7fad"
+  },
+  "WhatsaapWeb-JS/src/core/infrastructure/db/mappers/contact.mapper.ts": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "39fab977c360b1220f23dbfd8aaa6650",
+    "semantic_hash": "39fab977c360b1220f23dbfd8aaa6650"
+  },
+  "WhatsaapWeb-JS/src/core/infrastructure/db/mappers/conversation.mapper.ts": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "b6507688e5d326d1ff456d3067c7f818",
+    "semantic_hash": "b6507688e5d326d1ff456d3067c7f818"
+  },
+  "WhatsaapWeb-JS/src/core/infrastructure/db/mappers/message.mapper.ts": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "0aff81190f125bfa79f11c9697a8b810",
+    "semantic_hash": "0aff81190f125bfa79f11c9697a8b810"
+  },
+  "WhatsaapWeb-JS/src/core/infrastructure/db/mappers/status.mapper.ts": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "f7db80f837d8c3762ed83c64ea856390",
+    "semantic_hash": "f7db80f837d8c3762ed83c64ea856390"
+  },
+  "WhatsaapWeb-JS/src/core/infrastructure/db/repositories/attachmentRepository.ts": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "36a9aea9326b7ce773a45f1a4b48a5d8",
+    "semantic_hash": "36a9aea9326b7ce773a45f1a4b48a5d8"
+  },
+  "WhatsaapWeb-JS/src/core/infrastructure/db/repositories/auditLogRepository.ts": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "54525b85d2bac80afeee6c2cd1570254",
+    "semantic_hash": "54525b85d2bac80afeee6c2cd1570254"
+  },
+  "WhatsaapWeb-JS/src/core/infrastructure/db/repositories/companyRepository.ts": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "eec095400895746a121dd41006a3bb1b",
+    "semantic_hash": "eec095400895746a121dd41006a3bb1b"
+  },
+  "WhatsaapWeb-JS/src/core/infrastructure/db/repositories/contactRepository.ts": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "bcfd2a754320825c91311ee5c1867f67",
+    "semantic_hash": "bcfd2a754320825c91311ee5c1867f67"
+  },
+  "WhatsaapWeb-JS/src/core/infrastructure/db/repositories/conversationRepository.ts": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "1a976af7f55ab2c146f6a201332e9271",
+    "semantic_hash": "1a976af7f55ab2c146f6a201332e9271"
+  },
+  "WhatsaapWeb-JS/src/core/infrastructure/db/repositories/messageRepository.ts": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "9018e60d42e5c68d845d43f60de6f028",
+    "semantic_hash": "9018e60d42e5c68d845d43f60de6f028"
+  },
+  "WhatsaapWeb-JS/src/core/infrastructure/db/repositories/statusRepository.ts": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "6ef1aa866d0518d09e66fe13105946b6",
+    "semantic_hash": "6ef1aa866d0518d09e66fe13105946b6"
+  },
+  "WhatsaapWeb-JS/src/core/infrastructure/integration/conversationCore.ts": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "57ee114a031d00e7ab31758beafafce8",
+    "semantic_hash": "57ee114a031d00e7ab31758beafafce8"
+  },
+  "WhatsaapWeb-JS/src/db/Migrator.ts": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "f969834883f902f5c404c53d8abcb881",
+    "semantic_hash": "f969834883f902f5c404c53d8abcb881"
+  },
+  "WhatsaapWeb-JS/src/db/migrations/000_create_operational_core.sql": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "a3999af36144a3615369a0b180d45005",
+    "semantic_hash": "a3999af36144a3615369a0b180d45005"
+  },
+  "WhatsaapWeb-JS/src/db/migrations/001_create_companies.sql": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "16fa06f584c460272895021ba0dd73a0",
+    "semantic_hash": "16fa06f584c460272895021ba0dd73a0"
+  },
+  "WhatsaapWeb-JS/src/db/migrations/002_expand_whatsapp_business_inbox.sql": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "35419667ba9120ea5cccf7c70ef06c9f",
+    "semantic_hash": "35419667ba9120ea5cccf7c70ef06c9f"
+  },
+  "WhatsaapWeb-JS/src/db/migrations/003_add_user_company_scope.sql": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "5127a0690ef48e0a5889f29cdc338152",
+    "semantic_hash": "5127a0690ef48e0a5889f29cdc338152"
+  },
+  "WhatsaapWeb-JS/src/db/migrations/004_add_whatsapp_account_credentials.sql": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "eb99b3c9b7eac14ead48b49186bb5f7c",
+    "semantic_hash": "eb99b3c9b7eac14ead48b49186bb5f7c"
+  },
+  "WhatsaapWeb-JS/src/db/migrations/005_create_ai_agents.sql": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "9ee50779b88b94ac792cd52fa4ebbfef",
+    "semantic_hash": "9ee50779b88b94ac792cd52fa4ebbfef"
+  },
+  "WhatsaapWeb-JS/src/db/migrations/006_refine_agent_knowledge_and_hours.sql": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "8ce744a84d7c4906513128f09817e078",
+    "semantic_hash": "8ce744a84d7c4906513128f09817e078"
+  },
+  "WhatsaapWeb-JS/src/db/migrations/007_create_agent_runtime_logs.sql": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "a9621a40c58b05044cbb0faa932a05a6",
+    "semantic_hash": "a9621a40c58b05044cbb0faa932a05a6"
+  },
+  "WhatsaapWeb-JS/src/db/migrations/008_create_tags.sql": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "fd2323a4252c2edf4c75e79906acfbc6",
+    "semantic_hash": "fd2323a4252c2edf4c75e79906acfbc6"
+  },
+  "WhatsaapWeb-JS/src/db/migrations/009_create_operational_orders_actions.sql": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "a7773aaa87102c3005d250d37808cf3d",
+    "semantic_hash": "a7773aaa87102c3005d250d37808cf3d"
+  },
+  "WhatsaapWeb-JS/src/db/migrations/010_optimize_sprint5_reports.sql": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "e94f8ba25a1d9e4f018e7cf471642901",
+    "semantic_hash": "e94f8ba25a1d9e4f018e7cf471642901"
+  },
+  "WhatsaapWeb-JS/src/db/migrations/011_create_inventory_and_order_items.sql": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "8d79f1b699f4234c3ffa52aa61ba6d27",
+    "semantic_hash": "8d79f1b699f4234c3ffa52aa61ba6d27"
+  },
+  "WhatsaapWeb-JS/src/db/migrations/012_ai_commercial_catalog.sql": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "7b624873d036542be1d2d09a8ec374bb",
+    "semantic_hash": "7b624873d036542be1d2d09a8ec374bb"
+  },
+  "WhatsaapWeb-JS/src/db/migrations/013_create_commercial_catalogs.sql": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "9fc0a3f56595d38290188220d5a24687",
+    "semantic_hash": "9fc0a3f56595d38290188220d5a24687"
+  },
+  "WhatsaapWeb-JS/src/db/migrations/014_hu15_assisted_catalog_sections.sql": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "ecbc3e9fd9fcb37768bd68408f53585f",
+    "semantic_hash": "ecbc3e9fd9fcb37768bd68408f53585f"
+  },
+  "WhatsaapWeb-JS/src/db/migrations/015_dashboard_gaps.sql": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "e4a479c30f5925cbc5dfc46d5ad2bf50",
+    "semantic_hash": "e4a479c30f5925cbc5dfc46d5ad2bf50"
+  },
+  "WhatsaapWeb-JS/src/db/migrations/016_ia_automator.sql": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "856f24a203bdedb83bd7a26a8c34fa8d",
+    "semantic_hash": "856f24a203bdedb83bd7a26a8c34fa8d"
+  },
+  "WhatsaapWeb-JS/src/db/migrations/017_payment_gateways_mercadopago.sql": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "ccac0d3341573e25774db039fba45313",
+    "semantic_hash": "ccac0d3341573e25774db039fba45313"
+  },
+  "WhatsaapWeb-JS/src/db/migrations/018_hu15_ai_commercial_ecosystem.sql": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "ec82ced1e3246fe0945137ef21a5694d",
+    "semantic_hash": "ec82ced1e3246fe0945137ef21a5694d"
+  },
+  "WhatsaapWeb-JS/src/db/migrations/019_hu15_tools_reales_ia.sql": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "94dc18556b26bb4e885ae1c16d0d2943",
+    "semantic_hash": "94dc18556b26bb4e885ae1c16d0d2943"
+  },
+  "WhatsaapWeb-JS/src/db/migrations/020_ai_domains.sql": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "b2c4593cfc07d7442f0b5b215e147ab1",
+    "semantic_hash": "b2c4593cfc07d7442f0b5b215e147ab1"
+  },
+  "WhatsaapWeb-JS/src/db/migrations/021_ai_chat_sessions.sql": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "6564e54ed848853ca6954599ff5dbd15",
+    "semantic_hash": "6564e54ed848853ca6954599ff5dbd15"
+  },
+  "WhatsaapWeb-JS/src/index.ts": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "a6f6901dfd8f83e4ca6f51ed84c965ca",
+    "semantic_hash": "a6f6901dfd8f83e4ca6f51ed84c965ca"
+  },
+  "WhatsaapWeb-JS/src/middleware/authMiddleware.js": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "d0b664a0645eb3ada13c8a91a47fb917",
+    "semantic_hash": "d0b664a0645eb3ada13c8a91a47fb917"
+  },
+  "WhatsaapWeb-JS/src/middleware/errorHandler.js": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "37f7319de29df4bd5ef151177e51bf6e",
+    "semantic_hash": "37f7319de29df4bd5ef151177e51bf6e"
+  },
+  "WhatsaapWeb-JS/src/middleware/jwtAuth.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "767d00d81df859be57218328a78a88ed",
+    "semantic_hash": "767d00d81df859be57218328a78a88ed"
+  },
+  "WhatsaapWeb-JS/src/modules/ai/application/AgentDecisionEngine.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "5de1762ca5a1a3852de03216b15f2000",
+    "semantic_hash": "5de1762ca5a1a3852de03216b15f2000"
+  },
+  "WhatsaapWeb-JS/src/modules/ai/application/AgentHandoffService.ts": {
+    "mtime": 1784669950.4408052,
+    "ast_hash": "c03bfcf2b3ca5ab6da82759b74cd8b62",
+    "semantic_hash": ""
+  },
+  "WhatsaapWeb-JS/src/modules/ai/application/AgentPauseService.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "5467672d3878f196c898306521126342",
+    "semantic_hash": "5467672d3878f196c898306521126342"
+  },
+  "WhatsaapWeb-JS/src/modules/ai/application/AgentPaymentLinkService.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "a0f50cc38ccb77225426495b241f6414",
+    "semantic_hash": "a0f50cc38ccb77225426495b241f6414"
+  },
+  "WhatsaapWeb-JS/src/modules/ai/application/AgentRouterService.ts": {
+    "mtime": 1784672108.430121,
+    "ast_hash": "6cb2ed309846d3dc4788289d112daf11",
+    "semantic_hash": ""
+  },
+  "WhatsaapWeb-JS/src/modules/ai/application/AgentToolExecutor.ts": {
+    "mtime": 1784672217.803528,
+    "ast_hash": "af9f3d85e4f6ac0c426d7a54e9ca3773",
+    "semantic_hash": ""
+  },
+  "WhatsaapWeb-JS/src/modules/ai/application/AgentToolLogger.ts": {
+    "mtime": 1784672218.0715315,
+    "ast_hash": "6bad481b5ea08260442db63bab275f85",
+    "semantic_hash": ""
+  },
+  "WhatsaapWeb-JS/src/modules/ai/application/AgentToolRegistry.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "27420a71252bce7ad749744e783afc32",
+    "semantic_hash": "27420a71252bce7ad749744e783afc32"
+  },
+  "WhatsaapWeb-JS/src/modules/ai/application/AgentToolRuntimeLoop.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "c98d48d1254de77dea14122c2fd15d77",
+    "semantic_hash": "c98d48d1254de77dea14122c2fd15d77"
+  },
+  "WhatsaapWeb-JS/src/modules/ai/application/AgentVoucherService.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "531dafd7e420950ada553acf407539e7",
+    "semantic_hash": "531dafd7e420950ada553acf407539e7"
+  },
+  "WhatsaapWeb-JS/src/modules/ai/application/AiChatSessionService.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "401e21c703a9ccab9537b0576aaf166e",
+    "semantic_hash": "401e21c703a9ccab9537b0576aaf166e"
+  },
+  "WhatsaapWeb-JS/src/modules/ai/application/AiRuntimeOrchestrator.ts": {
+    "mtime": 1784672218.1555326,
+    "ast_hash": "a99bf3f354fd8d7e24cd76ecc1f6e029",
+    "semantic_hash": ""
+  },
+  "WhatsaapWeb-JS/src/modules/ai/application/AiSessionEventService.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "6f1c8c821c698568fed05f01e2ce5ada",
+    "semantic_hash": "6f1c8c821c698568fed05f01e2ce5ada"
+  },
+  "WhatsaapWeb-JS/src/modules/ai/application/tools/AvailabilityToolService.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "ca97237d4cb25d55bcc14f24c315e849",
+    "semantic_hash": "ca97237d4cb25d55bcc14f24c315e849"
+  },
+  "WhatsaapWeb-JS/src/modules/ai/application/tools/CommercialCatalogToolService.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "e78060c411a6a28ea78923bad477dc93",
+    "semantic_hash": "e78060c411a6a28ea78923bad477dc93"
+  },
+  "WhatsaapWeb-JS/src/modules/ai/application/tools/CommercialStateToolService.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "dee9e4868652b1cdeadd2ec980dd03e7",
+    "semantic_hash": "dee9e4868652b1cdeadd2ec980dd03e7"
+  },
+  "WhatsaapWeb-JS/src/modules/ai/application/tools/HandoffToolService.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "e2d03097dbf9e22403e32c627e849914",
+    "semantic_hash": "e2d03097dbf9e22403e32c627e849914"
+  },
+  "WhatsaapWeb-JS/src/modules/ai/application/tools/MessageSendProductCardToolService.ts": {
+    "mtime": 1784672217.9835305,
+    "ast_hash": "cbcf57b193cf859dcf30ed23873dafe5",
+    "semantic_hash": ""
+  },
+  "WhatsaapWeb-JS/src/modules/ai/application/tools/PreorderToolService.ts": {
+    "mtime": 1784672217.8955293,
+    "ast_hash": "49e522e3e2e54959e4b6995b81a4b79b",
+    "semantic_hash": ""
+  },
+  "WhatsaapWeb-JS/src/modules/ai/application/tools/SystemTagToolService.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "3be9e8a38ea5bc47c8cb7d58fca8e958",
+    "semantic_hash": "3be9e8a38ea5bc47c8cb7d58fca8e958"
+  },
+  "WhatsaapWeb-JS/src/modules/ai/application/tools/index.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "4dc304656b7a203dcc2a09aee061cf61",
+    "semantic_hash": "4dc304656b7a203dcc2a09aee061cf61"
+  },
+  "WhatsaapWeb-JS/src/modules/ai/domain/agent.types.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "4d95be6f2b1358da1ceada3d6aa46d8b",
+    "semantic_hash": "4d95be6f2b1358da1ceada3d6aa46d8b"
+  },
+  "WhatsaapWeb-JS/src/modules/ai/domain/paymentGateway.types.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "092845a292b5e59de1d6f742e90672c5",
+    "semantic_hash": "092845a292b5e59de1d6f742e90672c5"
+  },
+  "WhatsaapWeb-JS/src/modules/ai/domain/provider.types.ts": {
+    "mtime": 1784670054.2741916,
+    "ast_hash": "8452266dfc82d90853270cc680454f4f",
+    "semantic_hash": ""
+  },
+  "WhatsaapWeb-JS/src/modules/ai/domain/runtime.types.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "07f344683a6abcb811f007e3c2350f78",
+    "semantic_hash": "07f344683a6abcb811f007e3c2350f78"
+  },
+  "WhatsaapWeb-JS/src/modules/ai/domain/tool.types.ts": {
+    "mtime": 1784672217.707527,
+    "ast_hash": "a1d513b775ffd9081de2984e7e4718ec",
+    "semantic_hash": ""
+  },
+  "WhatsaapWeb-JS/src/modules/ai/index.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "7b6d01b699701caf5629d1a583df86c9",
+    "semantic_hash": "7b6d01b699701caf5629d1a583df86c9"
+  },
+  "WhatsaapWeb-JS/src/modules/ai/infra/db/AgentRepositoryPg.ts": {
+    "mtime": 1784672090.9858968,
+    "ast_hash": "de12f89f865bf5394975d923eab503c2",
+    "semantic_hash": ""
+  },
+  "WhatsaapWeb-JS/src/modules/ai/infra/db/AgentRuntimeLogRepositoryPg.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "aaf459126dacfbcbb1aee25511cf7830",
+    "semantic_hash": "aaf459126dacfbcbb1aee25511cf7830"
+  },
+  "WhatsaapWeb-JS/src/modules/ai/infra/db/AiSessionRepositoryPg.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "a2a7f297f444d0871acbecc43b80bc02",
+    "semantic_hash": "a2a7f297f444d0871acbecc43b80bc02"
+  },
+  "WhatsaapWeb-JS/src/modules/ai/infra/db/HandoffTicketRepositoryPg.ts": {
+    "mtime": 1784669950.360804,
+    "ast_hash": "0fcde909a3637d06c750d40de5caa9ed",
+    "semantic_hash": ""
+  },
+  "WhatsaapWeb-JS/src/modules/ai/infra/db/IaPauseOverrideRepositoryPg.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "36c2dbe03e621ea10686c06505f690a3",
+    "semantic_hash": "36c2dbe03e621ea10686c06505f690a3"
+  },
+  "WhatsaapWeb-JS/src/modules/ai/infra/db/PaymentGatewayRepositoryPg.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "937ad49e17fbbaf085668bad61e642ef",
+    "semantic_hash": "937ad49e17fbbaf085668bad61e642ef"
+  },
+  "WhatsaapWeb-JS/src/modules/ai/infra/provider/AiProviderFactory.ts": {
+    "mtime": 1784670054.4861944,
+    "ast_hash": "e0142e84d51b7af9d8b2f373a77a51fe",
+    "semantic_hash": ""
+  },
+  "WhatsaapWeb-JS/src/modules/ai/infra/provider/OpenCodeProvider.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "2b15120e60a706eb953131d6147b4920",
+    "semantic_hash": "2b15120e60a706eb953131d6147b4920"
+  },
+  "WhatsaapWeb-JS/src/modules/companies/application/GetCompanyLimits.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "5418b6d07da62709fd02826fbfd9bce3",
+    "semantic_hash": "5418b6d07da62709fd02826fbfd9bce3"
+  },
+  "WhatsaapWeb-JS/src/modules/companies/application/GetCompanySettings.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "42542c840a5aefd8cdebfd2023f3b226",
+    "semantic_hash": "42542c840a5aefd8cdebfd2023f3b226"
+  },
+  "WhatsaapWeb-JS/src/modules/companies/application/ports/CompanyRepositoryPort.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "0ed3ea792e25e6c23d33fe22eb4b0010",
+    "semantic_hash": "0ed3ea792e25e6c23d33fe22eb4b0010"
+  },
+  "WhatsaapWeb-JS/src/modules/companies/domain/Company.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "1cd85278846e2b67836c7ce70bfb53d9",
+    "semantic_hash": "1cd85278846e2b67836c7ce70bfb53d9"
+  },
+  "WhatsaapWeb-JS/src/modules/companies/domain/CompanyLimits.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "c54f1b1451702ba18b11eba631d7136b",
+    "semantic_hash": "c54f1b1451702ba18b11eba631d7136b"
+  },
+  "WhatsaapWeb-JS/src/modules/companies/domain/CompanySettings.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "2e59e79ce932f4d138d2ccf0bd17552b",
+    "semantic_hash": "2e59e79ce932f4d138d2ccf0bd17552b"
+  },
+  "WhatsaapWeb-JS/src/modules/companies/domain/Plan.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "93103f62e61f3c9aab427cc7b1b4b556",
+    "semantic_hash": "93103f62e61f3c9aab427cc7b1b4b556"
+  },
+  "WhatsaapWeb-JS/src/modules/companies/index.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "2d10e511c20df4598fa81c3586826cf9",
+    "semantic_hash": "2d10e511c20df4598fa81c3586826cf9"
+  },
+  "WhatsaapWeb-JS/src/modules/companies/infra/db/CompanyRepositoryPg.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "aa50cfed7a26dcce6cd2a438d8ae3fd0",
+    "semantic_hash": "aa50cfed7a26dcce6cd2a438d8ae3fd0"
+  },
+  "WhatsaapWeb-JS/src/modules/companies/infra/db/mappers/CompanyLimitsMapper.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "d06d1f57a2663ff9eab0a471a42944c7",
+    "semantic_hash": "d06d1f57a2663ff9eab0a471a42944c7"
+  },
+  "WhatsaapWeb-JS/src/modules/companies/infra/db/mappers/CompanyMapper.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "66b09a8d5c3371bde221fc1b81476c44",
+    "semantic_hash": "66b09a8d5c3371bde221fc1b81476c44"
+  },
+  "WhatsaapWeb-JS/src/modules/companies/infra/db/mappers/CompanySettingsMapper.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "9ca3cb274b77675fb834a87740b84691",
+    "semantic_hash": "9ca3cb274b77675fb834a87740b84691"
+  },
+  "WhatsaapWeb-JS/src/modules/companies/infra/db/mappers/PlanMapper.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "75b0462903654caeddf8d158ab90a787",
+    "semantic_hash": "75b0462903654caeddf8d158ab90a787"
+  },
+  "WhatsaapWeb-JS/src/modules/companies/infra/db/migrations/001_create_companies.sql": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "3f0f9ee766a5c13491017bc4f12e540e",
+    "semantic_hash": "3f0f9ee766a5c13491017bc4f12e540e"
+  },
+  "WhatsaapWeb-JS/src/modules/conversations/facade.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "c2cdbe7a6720714a8a72a0876e5455b9",
+    "semantic_hash": "c2cdbe7a6720714a8a72a0876e5455b9"
+  },
+  "WhatsaapWeb-JS/src/modules/conversations/index.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "e88c3cb518e149ddf74abdf2d92508aa",
+    "semantic_hash": "e88c3cb518e149ddf74abdf2d92508aa"
+  },
+  "WhatsaapWeb-JS/src/modules/customerHistory/application/CustomerHistoryService.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "ea785d307dc7cb79cc0235ec857e5db3",
+    "semantic_hash": "ea785d307dc7cb79cc0235ec857e5db3"
+  },
+  "WhatsaapWeb-JS/src/modules/customerHistory/application/ports/CustomerHistoryRepositoryPort.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "dd93546321bee34fa86f558ad8672ef6",
+    "semantic_hash": "dd93546321bee34fa86f558ad8672ef6"
+  },
+  "WhatsaapWeb-JS/src/modules/customerHistory/domain/customerHistory.types.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "3cbfef4449c6494e87c6023b1c91e260",
+    "semantic_hash": "3cbfef4449c6494e87c6023b1c91e260"
+  },
+  "WhatsaapWeb-JS/src/modules/customerHistory/index.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "89b80165abf61c785fa789704703841c",
+    "semantic_hash": "89b80165abf61c785fa789704703841c"
+  },
+  "WhatsaapWeb-JS/src/modules/customerHistory/infra/db/CustomerHistoryRepositoryPg.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "7d6993fd64444b48e413216af7654389",
+    "semantic_hash": "7d6993fd64444b48e413216af7654389"
+  },
+  "WhatsaapWeb-JS/src/modules/dashboard/application/DashboardService.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "3c685ee380469fd37596e4b7716fbc57",
+    "semantic_hash": "3c685ee380469fd37596e4b7716fbc57"
+  },
+  "WhatsaapWeb-JS/src/modules/dashboard/domain/dashboard.types.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "18d6116e3971ad9cf5127ee7e311cc74",
+    "semantic_hash": "18d6116e3971ad9cf5127ee7e311cc74"
+  },
+  "WhatsaapWeb-JS/src/modules/dashboard/index.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "c2edefb87d4284fec92ec439edee30cc",
+    "semantic_hash": "c2edefb87d4284fec92ec439edee30cc"
+  },
+  "WhatsaapWeb-JS/src/modules/dashboard/infra/db/DashboardRepositoryPg.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "9bd8f5729bd6ea9a86e5231b33140210",
+    "semantic_hash": "9bd8f5729bd6ea9a86e5231b33140210"
+  },
+  "WhatsaapWeb-JS/src/modules/inventory/application/CatalogService.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "6c6240df4758d83233c0dfe3013969ac",
+    "semantic_hash": "6c6240df4758d83233c0dfe3013969ac"
+  },
+  "WhatsaapWeb-JS/src/modules/inventory/application/ProductService.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "702e0aa71afe9209ed14ec278fd5b8ae",
+    "semantic_hash": "702e0aa71afe9209ed14ec278fd5b8ae"
+  },
+  "WhatsaapWeb-JS/src/modules/inventory/domain/inventory.types.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "244bfcc9577131c49cdd6399d449f59c",
+    "semantic_hash": "244bfcc9577131c49cdd6399d449f59c"
+  },
+  "WhatsaapWeb-JS/src/modules/inventory/index.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "11e9a449a5143e9bbb049f8d4d22bb9f",
+    "semantic_hash": "11e9a449a5143e9bbb049f8d4d22bb9f"
+  },
+  "WhatsaapWeb-JS/src/modules/inventory/infra/db/CatalogRepositoryPg.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "a77a36c889b835b3474c37b271230321",
+    "semantic_hash": "a77a36c889b835b3474c37b271230321"
+  },
+  "WhatsaapWeb-JS/src/modules/inventory/infra/db/ProductRepositoryPg.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "0702a75976ab81d44cb7249cd6438148",
+    "semantic_hash": "0702a75976ab81d44cb7249cd6438148"
+  },
+  "WhatsaapWeb-JS/src/modules/operations/application/OperationalRecordService.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "c3be8c4ce2f15141b8a73b70a839f3e4",
+    "semantic_hash": "c3be8c4ce2f15141b8a73b70a839f3e4"
+  },
+  "WhatsaapWeb-JS/src/modules/operations/application/ports/OperationalRecordRepositoryPort.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "dac3a961df9e6a545027c9916e7ac733",
+    "semantic_hash": "dac3a961df9e6a545027c9916e7ac733"
+  },
+  "WhatsaapWeb-JS/src/modules/operations/domain/operationalRecord.types.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "a7edf9e731b3ea17564b206afc6dff8a",
+    "semantic_hash": "a7edf9e731b3ea17564b206afc6dff8a"
+  },
+  "WhatsaapWeb-JS/src/modules/operations/index.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "ce7cbe493741c9794c64f1709ea8b9d2",
+    "semantic_hash": "ce7cbe493741c9794c64f1709ea8b9d2"
+  },
+  "WhatsaapWeb-JS/src/modules/operations/infra/db/OperationalRecordRepositoryPg.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "6e486a2873ad9a438e0fb6c8b26accb0",
+    "semantic_hash": "6e486a2873ad9a438e0fb6c8b26accb0"
+  },
+  "WhatsaapWeb-JS/src/modules/orders/application/OrderService.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "443172c82ea7609312e9acfe0412f59e",
+    "semantic_hash": "443172c82ea7609312e9acfe0412f59e"
+  },
+  "WhatsaapWeb-JS/src/modules/orders/domain/order.types.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "5f047d8b863ef88447316fb668cb0b5d",
+    "semantic_hash": "5f047d8b863ef88447316fb668cb0b5d"
+  },
+  "WhatsaapWeb-JS/src/modules/orders/index.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "35cd21569c250099fe1ac90e5e7867cd",
+    "semantic_hash": "35cd21569c250099fe1ac90e5e7867cd"
+  },
+  "WhatsaapWeb-JS/src/modules/orders/infra/db/OrderRepositoryPg.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "b08bdd9919dcf11896034edea47db467",
+    "semantic_hash": "b08bdd9919dcf11896034edea47db467"
+  },
+  "WhatsaapWeb-JS/src/modules/payments/application/PaymentService.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "7c8e02c4eccc90cc4346cd7665231385",
+    "semantic_hash": "7c8e02c4eccc90cc4346cd7665231385"
+  },
+  "WhatsaapWeb-JS/src/modules/payments/domain/payment.types.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "1e723f6de5198ab0bf65d3b46c19108f",
+    "semantic_hash": "1e723f6de5198ab0bf65d3b46c19108f"
+  },
+  "WhatsaapWeb-JS/src/modules/payments/index.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "cbd84f3564a4ee3a266dff665f0e1ca2",
+    "semantic_hash": "cbd84f3564a4ee3a266dff665f0e1ca2"
+  },
+  "WhatsaapWeb-JS/src/modules/payments/infra/db/PaymentRepositoryPg.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "084fab7e9d32b38071ab1157cd309c24",
+    "semantic_hash": "084fab7e9d32b38071ab1157cd309c24"
+  },
+  "WhatsaapWeb-JS/src/modules/reports/application/ReportService.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "0e96380197ab0012e3b74c0bbf1e9fde",
+    "semantic_hash": "0e96380197ab0012e3b74c0bbf1e9fde"
+  },
+  "WhatsaapWeb-JS/src/modules/reports/application/ports/ReportRepositoryPort.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "ad43dc81bacb0b36adc9eda3a6ef7091",
+    "semantic_hash": "ad43dc81bacb0b36adc9eda3a6ef7091"
+  },
+  "WhatsaapWeb-JS/src/modules/reports/domain/report.types.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "a7379f90f74c4892d13cee1f538156bc",
+    "semantic_hash": "a7379f90f74c4892d13cee1f538156bc"
+  },
+  "WhatsaapWeb-JS/src/modules/reports/index.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "f2c896ba80f6f48ef4e3c31858edac1f",
+    "semantic_hash": "f2c896ba80f6f48ef4e3c31858edac1f"
+  },
+  "WhatsaapWeb-JS/src/modules/reports/infra/db/ReportRepositoryPg.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "a040e31a6bdbfa035d63e32afba985c0",
+    "semantic_hash": "a040e31a6bdbfa035d63e32afba985c0"
+  },
+  "WhatsaapWeb-JS/src/routes/agentRoutes.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "81bfe41bf7020c75658d244301b95e21",
+    "semantic_hash": "81bfe41bf7020c75658d244301b95e21"
+  },
+  "WhatsaapWeb-JS/src/routes/authRoutes.js": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "99af281a5f92a65a0795ed90eca1ff0e",
+    "semantic_hash": "99af281a5f92a65a0795ed90eca1ff0e"
+  },
+  "WhatsaapWeb-JS/src/routes/catalogRoutes.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "f565ddd556639e21bfb253fa553acb10",
+    "semantic_hash": "f565ddd556639e21bfb253fa553acb10"
+  },
+  "WhatsaapWeb-JS/src/routes/chatCompatRoutes.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "cbcde1780671627fd226f9eb9f01d7e8",
+    "semantic_hash": "cbcde1780671627fd226f9eb9f01d7e8"
+  },
+  "WhatsaapWeb-JS/src/routes/chatRoutes.js": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "ec27a47b8b5deccf4b3f6f2876444600",
+    "semantic_hash": "ec27a47b8b5deccf4b3f6f2876444600"
+  },
+  "WhatsaapWeb-JS/src/routes/companyRoutes.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "06dcea19635a756afa3ace3f1e2e7527",
+    "semantic_hash": "06dcea19635a756afa3ace3f1e2e7527"
+  },
+  "WhatsaapWeb-JS/src/routes/conversationRoutes.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "5f771787695f8d208f8162a8d54018d5",
+    "semantic_hash": "5f771787695f8d208f8162a8d54018d5"
+  },
+  "WhatsaapWeb-JS/src/routes/customerHistoryRoutes.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "377c7a6e33f5ef83591a8360a0ec7213",
+    "semantic_hash": "377c7a6e33f5ef83591a8360a0ec7213"
+  },
+  "WhatsaapWeb-JS/src/routes/dashboardRoutes.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "21a9eb821ca9e5fdbf7a2ee0b975ebc7",
+    "semantic_hash": "21a9eb821ca9e5fdbf7a2ee0b975ebc7"
+  },
+  "WhatsaapWeb-JS/src/routes/iaPauseRoutes.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "6a27e7b715ccef116ed6f178f1faff23",
+    "semantic_hash": "6a27e7b715ccef116ed6f178f1faff23"
+  },
+  "WhatsaapWeb-JS/src/routes/mediaRoutes.js": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "982eb6c46251c752ca570b40365a3df2",
+    "semantic_hash": "982eb6c46251c752ca570b40365a3df2"
+  },
+  "WhatsaapWeb-JS/src/routes/metaWebhookRoutes.ts": {
+    "mtime": 1784669936.3166173,
+    "ast_hash": "ec24930ac48e58ed453795267dd95c8e",
+    "semantic_hash": ""
+  },
+  "WhatsaapWeb-JS/src/routes/orderRoutes.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "ab435701fde3a44ca1be7e6bee76d2c1",
+    "semantic_hash": "ab435701fde3a44ca1be7e6bee76d2c1"
+  },
+  "WhatsaapWeb-JS/src/routes/paymentRoutes.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "6aa50433169d072f25b3804e3723b36c",
+    "semantic_hash": "6aa50433169d072f25b3804e3723b36c"
+  },
+  "WhatsaapWeb-JS/src/routes/paymentWebhookRoutes.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "08e053f7ffb1e0336d03627b1aa75952",
+    "semantic_hash": "08e053f7ffb1e0336d03627b1aa75952"
+  },
+  "WhatsaapWeb-JS/src/routes/productRoutes.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "845ed1b5aeb10664d1081c5ae26bc8ce",
+    "semantic_hash": "845ed1b5aeb10664d1081c5ae26bc8ce"
+  },
+  "WhatsaapWeb-JS/src/routes/reportRoutes.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "c4b789ed04b41495a589145dce589aff",
+    "semantic_hash": "c4b789ed04b41495a589145dce589aff"
+  },
+  "WhatsaapWeb-JS/src/routes/tagRoutes.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "ab44dd41e34ef1868236a45a47d1d3d7",
+    "semantic_hash": "ab44dd41e34ef1868236a45a47d1d3d7"
+  },
+  "WhatsaapWeb-JS/src/routes/whatsappRoutes.ts": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "d55a0895e4e3c93f53aac535b2d2cd89",
+    "semantic_hash": "d55a0895e4e3c93f53aac535b2d2cd89"
+  },
+  "WhatsaapWeb-JS/src/services/ai/AgentService.ts": {
+    "mtime": 1784662876.8802693,
+    "ast_hash": "b14c41883280207c1f5324fd964655e0",
+    "semantic_hash": "b14c41883280207c1f5324fd964655e0"
+  },
+  "WhatsaapWeb-JS/src/services/ai/opencode/OpenCodeClient.ts": {
+    "mtime": 1784662876.8802693,
+    "ast_hash": "cc5c77a8c9f1b9dd96674ec0a6fced0d",
+    "semantic_hash": "cc5c77a8c9f1b9dd96674ec0a6fced0d"
+  },
+  "WhatsaapWeb-JS/src/services/authService.js": {
+    "mtime": 1784662876.8802693,
+    "ast_hash": "f78a4edde11bcd6bf186284a62afc3ea",
+    "semantic_hash": "f78a4edde11bcd6bf186284a62afc3ea"
+  },
+  "WhatsaapWeb-JS/src/services/security/SecretCipher.ts": {
+    "mtime": 1784669889.227992,
+    "ast_hash": "14718b23cbbe5c98b51688a785f799ac",
+    "semantic_hash": ""
+  },
+  "WhatsaapWeb-JS/src/services/whatsapp/ChatManager.js": {
+    "mtime": 1784662876.8802693,
+    "ast_hash": "da1ce9263ed51be7835fd4926640f7a9",
+    "semantic_hash": "da1ce9263ed51be7835fd4926640f7a9"
+  },
+  "WhatsaapWeb-JS/src/services/whatsapp/ChatValidator.js": {
+    "mtime": 1784662876.8802693,
+    "ast_hash": "54621416b342e34d9c4372f1c42e585b",
+    "semantic_hash": "54621416b342e34d9c4372f1c42e585b"
+  },
+  "WhatsaapWeb-JS/src/services/whatsapp/EventHandler.js": {
+    "mtime": 1784662876.8802693,
+    "ast_hash": "b8aa5ad67eb50cdff13ee3213fd82e1d",
+    "semantic_hash": "b8aa5ad67eb50cdff13ee3213fd82e1d"
+  },
+  "WhatsaapWeb-JS/src/services/whatsapp/MediaHandler.js": {
+    "mtime": 1784662876.8802693,
+    "ast_hash": "5b65df03d7d1a762c3506cc876a2012b",
+    "semantic_hash": "5b65df03d7d1a762c3506cc876a2012b"
+  },
+  "WhatsaapWeb-JS/src/services/whatsapp/MessageHandler.js": {
+    "mtime": 1784662876.8802693,
+    "ast_hash": "b8f107736db2e68741e797ebd353d3d0",
+    "semantic_hash": "b8f107736db2e68741e797ebd353d3d0"
+  },
+  "WhatsaapWeb-JS/src/services/whatsapp/WhatsAppClient.js": {
+    "mtime": 1784662876.8802693,
+    "ast_hash": "04f5a239ea136eb20960b437a5a9f40e",
+    "semantic_hash": "04f5a239ea136eb20960b437a5a9f40e"
+  },
+  "WhatsaapWeb-JS/src/services/whatsapp/meta/MetaAccountStore.ts": {
+    "mtime": 1784662876.8802693,
+    "ast_hash": "42a586043f69e048bc0b41383b82d78d",
+    "semantic_hash": "42a586043f69e048bc0b41383b82d78d"
+  },
+  "WhatsaapWeb-JS/src/services/whatsapp/meta/MetaCloudClient.ts": {
+    "mtime": 1784662876.8802693,
+    "ast_hash": "2001f571f0df627c6b44ac48adbe7d3a",
+    "semantic_hash": "2001f571f0df627c6b44ac48adbe7d3a"
+  },
+  "WhatsaapWeb-JS/src/services/whatsapp/meta/MetaInboxStore.ts": {
+    "mtime": 1784662876.8802693,
+    "ast_hash": "6ec97dd77c7ad809a70101c2c8c69200",
+    "semantic_hash": "6ec97dd77c7ad809a70101c2c8c69200"
+  },
+  "WhatsaapWeb-JS/src/services/whatsappService.js": {
+    "mtime": 1784662876.8802693,
+    "ast_hash": "7fcfa24001c2f5d724306b0673c72ce7",
+    "semantic_hash": "7fcfa24001c2f5d724306b0673c72ce7"
+  },
+  "WhatsaapWeb-JS/src/services/whatsappService.ts": {
+    "mtime": 1784672420.2858496,
+    "ast_hash": "715c56e165136e7967754c0fb4ba4b38",
+    "semantic_hash": ""
+  },
+  "WhatsaapWeb-JS/src/shared/PgUnitOfWork.ts": {
+    "mtime": 1784662876.8802693,
+    "ast_hash": "2fb1d0f0a60c56279c92991e22297b38",
+    "semantic_hash": "2fb1d0f0a60c56279c92991e22297b38"
+  },
+  "WhatsaapWeb-JS/src/shared/UnitOfWorkPort.ts": {
+    "mtime": 1784662876.8802693,
+    "ast_hash": "82219e6d1fee1276018e7d5c67573466",
+    "semantic_hash": "82219e6d1fee1276018e7d5c67573466"
+  },
+  "WhatsaapWeb-JS/src/shared/index.ts": {
+    "mtime": 1784662876.8802693,
+    "ast_hash": "c27faee49a19471f40aa6451a0e64393",
+    "semantic_hash": "c27faee49a19471f40aa6451a0e64393"
+  },
+  "WhatsaapWeb-JS/src/shared/types.ts": {
+    "mtime": 1784662876.8802693,
+    "ast_hash": "6f9067c54a37d4f15d411c867035a547",
+    "semantic_hash": "6f9067c54a37d4f15d411c867035a547"
+  },
+  "WhatsaapWeb-JS/src/sockets/socketEmitter.ts": {
+    "mtime": 1784662876.8802693,
+    "ast_hash": "a1693e1998d0134fcf414b8916a34bee",
+    "semantic_hash": "a1693e1998d0134fcf414b8916a34bee"
+  },
+  "WhatsaapWeb-JS/src/sockets/socketHandler.js": {
+    "mtime": 1784662876.8802693,
+    "ast_hash": "b891ef4433e184b0ff6e89f2f21ade3f",
+    "semantic_hash": "b891ef4433e184b0ff6e89f2f21ade3f"
+  },
+  "WhatsaapWeb-JS/src/test/test-db.js": {
+    "mtime": 1784670260.548967,
+    "ast_hash": "2430673a8c55502bf8d8a4a769cefb37",
+    "semantic_hash": ""
+  },
+  "WhatsaapWeb-JS/src/test/tools-reales-ia.test.ts": {
+    "mtime": 1784670389.0501413,
+    "ast_hash": "1477e171a9ec70badb209caf68b8ed23",
+    "semantic_hash": ""
+  },
+  "WhatsaapWeb-JS/src/utils/chatUtils.js": {
+    "mtime": 1784662876.8802693,
+    "ast_hash": "160247995ddb0353412b41b19eb51a9d",
+    "semantic_hash": "160247995ddb0353412b41b19eb51a9d"
+  },
+  "WhatsaapWeb-JS/src/utils/jwt.js": {
+    "mtime": 1784670260.2049623,
+    "ast_hash": "1e7df6433ebc4658f914814dcb86330e",
+    "semantic_hash": ""
+  },
+  "WhatsaapWeb-JS/src/utils/password.js": {
+    "mtime": 1784662876.8802693,
+    "ast_hash": "6367b8081b64c223de2161b58b370e97",
+    "semantic_hash": "6367b8081b64c223de2161b58b370e97"
+  },
+  "WhatsaapWeb-JS/tsconfig.json": {
+    "mtime": 1784662876.8802693,
+    "ast_hash": "290492f157e466e599fdaeb47cde75ee",
+    "semantic_hash": "290492f157e466e599fdaeb47cde75ee"
+  },
+  "WhatsaapWeb-JS/tsconfig.scripts.json": {
+    "mtime": 1784662876.8802693,
+    "ast_hash": "074c8b771e8f7cb20b5786e96664692c",
+    "semantic_hash": "074c8b771e8f7cb20b5786e96664692c"
+  },
+  "graphify-out-backup-whatsaapweb-js/.graphify_labels.json": {
+    "mtime": 1784664948.0738897,
+    "ast_hash": "1dbb1a3223b38fd637445747c782c584",
+    "semantic_hash": "1dbb1a3223b38fd637445747c782c584"
+  },
+  "graphify-out-backup-whatsaapweb-js/cache/stat-index.json": {
+    "mtime": 1784664378.3396883,
+    "ast_hash": "ba63ee606fbe723d5e83679704c25cdd",
+    "semantic_hash": "ba63ee606fbe723d5e83679704c25cdd"
+  },
+  "graphify-out-backup-whatsaapweb-js/cost.json": {
+    "mtime": 1784664967.3497944,
+    "ast_hash": "a97553be4488ecf80ddd9ed7a5105485",
+    "semantic_hash": "a97553be4488ecf80ddd9ed7a5105485"
+  },
+  "graphify-out-backup-whatsaapweb-js/graph.json": {
+    "mtime": 1784664922.2340338,
+    "ast_hash": "d09ea68a7fc5f907f26271f43d9f1302",
+    "semantic_hash": "d09ea68a7fc5f907f26271f43d9f1302"
+  },
+  "graphify-out-backup-whatsaapweb-js/manifest.json": {
+    "mtime": 1784664967.3497944,
+    "ast_hash": "0ad604082048efb508af0b52795f97d4",
+    "semantic_hash": "0ad604082048efb508af0b52795f97d4"
+  },
+  "Frontend_py_whatsaapweb/.codex/rules/api-contracts.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "dc670e158056ad3481508ed7fd761083",
+    "semantic_hash": "dc670e158056ad3481508ed7fd761083"
+  },
+  "Frontend_py_whatsaapweb/.codex/rules/development-workflow.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "bf7cb4d527c83fd0878fd1e9ca646808",
+    "semantic_hash": "bf7cb4d527c83fd0878fd1e9ca646808"
+  },
+  "Frontend_py_whatsaapweb/.codex/rules/frontend-architecture.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "7c9592cf0cd9bee4fc6fad1f69109ff0",
+    "semantic_hash": "7c9592cf0cd9bee4fc6fad1f69109ff0"
+  },
+  "Frontend_py_whatsaapweb/.codex/rules/quality.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "c249a20be9b86f7dab51fe9cc2ebb343",
+    "semantic_hash": "c249a20be9b86f7dab51fe9cc2ebb343"
+  },
+  "Frontend_py_whatsaapweb/.codex/rules/realtime-state.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "101913e79665611468e820cdce649843",
+    "semantic_hash": "101913e79665611468e820cdce649843"
+  },
+  "Frontend_py_whatsaapweb/.codex/rules/security.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "5726f5e7f6f1fddf1c549d5f030906f0",
+    "semantic_hash": "5726f5e7f6f1fddf1c549d5f030906f0"
+  },
+  "Frontend_py_whatsaapweb/.codex/rules/ui-design.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "f23431370c41fe2678aa48912d7dbdb9",
+    "semantic_hash": "f23431370c41fe2678aa48912d7dbdb9"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/clean-code/SKILL.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "2b7d815646506ee91ab2f632c499dcb7",
+    "semantic_hash": "2b7d815646506ee91ab2f632c499dcb7"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/AGENTS.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "d7783bf645d39790b10c758f69fae2f0",
+    "semantic_hash": "d7783bf645d39790b10c758f69fae2f0"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/README.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "abb5236c535db0bf7ce6f38c8998bc47",
+    "semantic_hash": "abb5236c535db0bf7ce6f38c8998bc47"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/SKILL.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "863c03e8e82ce2b15bfb5057db45dc83",
+    "semantic_hash": "863c03e8e82ce2b15bfb5057db45dc83"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/agents/openai.yaml": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "6409d1e6f60db22c6c9242839d426a01",
+    "semantic_hash": "6409d1e6f60db22c6c9242839d426a01"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/_sections.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "b8c110b45145ded6919562772afe067c",
+    "semantic_hash": "b8c110b45145ded6919562772afe067c"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/_template.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "a0d76a2f87f3f80e9a8f3a2a1054aaaf",
+    "semantic_hash": "a0d76a2f87f3f80e9a8f3a2a1054aaaf"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/advanced-event-handler-refs.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "f2a0d125f3773bfda91e187fa5bed48a",
+    "semantic_hash": "f2a0d125f3773bfda91e187fa5bed48a"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/advanced-init-once.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "0100519098b834e69a3515657a39bdc9",
+    "semantic_hash": "0100519098b834e69a3515657a39bdc9"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/advanced-use-latest.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "60309961293388c9b9e9fd4e0db344e3",
+    "semantic_hash": "60309961293388c9b9e9fd4e0db344e3"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/async-api-routes.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "344fa543b37e303660404e1ef3a4638b",
+    "semantic_hash": "344fa543b37e303660404e1ef3a4638b"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/async-defer-await.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "6c0229d5e8267c3036443b39cd1805a6",
+    "semantic_hash": "6c0229d5e8267c3036443b39cd1805a6"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/async-dependencies.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "9c5622d97b20b9e0cb79455b4322061a",
+    "semantic_hash": "9c5622d97b20b9e0cb79455b4322061a"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/async-parallel.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "a0e06a8e9985cdff4ece0312d8ee35db",
+    "semantic_hash": "a0e06a8e9985cdff4ece0312d8ee35db"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/async-suspense-boundaries.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "dbb2fc80721ca1ce32426f43219d314f",
+    "semantic_hash": "dbb2fc80721ca1ce32426f43219d314f"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/bundle-barrel-imports.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "cb9904b16c26f7670dacf4b7f8d53af8",
+    "semantic_hash": "cb9904b16c26f7670dacf4b7f8d53af8"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/bundle-conditional.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "585be2b6fc418c766e5b91cc2141d334",
+    "semantic_hash": "585be2b6fc418c766e5b91cc2141d334"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/bundle-defer-third-party.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "6d4d1d4fac411f724071428dd0bc93ba",
+    "semantic_hash": "6d4d1d4fac411f724071428dd0bc93ba"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/bundle-dynamic-imports.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "72d89583306887810f67e9f7860f06af",
+    "semantic_hash": "72d89583306887810f67e9f7860f06af"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/bundle-preload.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "924ec7e7502ca042070326d38e88f8cd",
+    "semantic_hash": "924ec7e7502ca042070326d38e88f8cd"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/client-event-listeners.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "71062add972f9735348b7ae77e778eb8",
+    "semantic_hash": "71062add972f9735348b7ae77e778eb8"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/client-localstorage-schema.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "982a459b07cbec2f8386e526b924c339",
+    "semantic_hash": "982a459b07cbec2f8386e526b924c339"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/client-passive-event-listeners.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "3853533fd5f49fa2fc98296f9c34d84f",
+    "semantic_hash": "3853533fd5f49fa2fc98296f9c34d84f"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/client-swr-dedup.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "e565fcba7836d339ca4707aad6fdaa4a",
+    "semantic_hash": "e565fcba7836d339ca4707aad6fdaa4a"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/js-batch-dom-css.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "869dbc06a931ccfb899b739316c348af",
+    "semantic_hash": "869dbc06a931ccfb899b739316c348af"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/js-cache-function-results.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "5d641ce87ef753d59e3205244e2851a1",
+    "semantic_hash": "5d641ce87ef753d59e3205244e2851a1"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/js-cache-property-access.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "5b4ae3cd853b92222a8fd8c8d8202426",
+    "semantic_hash": "5b4ae3cd853b92222a8fd8c8d8202426"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/js-cache-storage.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "828f260566ff92df56089321fa41c116",
+    "semantic_hash": "828f260566ff92df56089321fa41c116"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/js-combine-iterations.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "4f241532133637fee75304d40f016713",
+    "semantic_hash": "4f241532133637fee75304d40f016713"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/js-early-exit.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "d300cb3e57255029e446bdfa49dc4074",
+    "semantic_hash": "d300cb3e57255029e446bdfa49dc4074"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/js-flatmap-filter.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "161d9d8b444e5ec9cb58bffb0e1b76cd",
+    "semantic_hash": "161d9d8b444e5ec9cb58bffb0e1b76cd"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/js-hoist-regexp.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "ced4609a5916db47bbaccfcc3f2dcdbb",
+    "semantic_hash": "ced4609a5916db47bbaccfcc3f2dcdbb"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/js-index-maps.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "db5bcfde02e1ce9f41d6ed1f5aafc8c5",
+    "semantic_hash": "db5bcfde02e1ce9f41d6ed1f5aafc8c5"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/js-length-check-first.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "2ba208759dd91578f1085c28e6a92ce9",
+    "semantic_hash": "2ba208759dd91578f1085c28e6a92ce9"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/js-min-max-loop.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "82f654d27529dd80be7ae33d45dcdf8c",
+    "semantic_hash": "82f654d27529dd80be7ae33d45dcdf8c"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/js-set-map-lookups.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "59a278e21ecd322bff566ba4ad7f5a30",
+    "semantic_hash": "59a278e21ecd322bff566ba4ad7f5a30"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/js-tosorted-immutable.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "fd0804905877b6b7b1858e5df1b5f3c4",
+    "semantic_hash": "fd0804905877b6b7b1858e5df1b5f3c4"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/rendering-activity.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "b66bde1377564aa196ba15fc94215cd3",
+    "semantic_hash": "b66bde1377564aa196ba15fc94215cd3"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/server-after-nonblocking.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "c88a79384f87826bf1b20aa3637093a5",
+    "semantic_hash": "c88a79384f87826bf1b20aa3637093a5"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/server-auth-actions.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "d8691820d666e5dd9094ccc6996398e3",
+    "semantic_hash": "d8691820d666e5dd9094ccc6996398e3"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/server-cache-lru.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "723195ea460bfbc4d43b4eb0c47b246b",
+    "semantic_hash": "723195ea460bfbc4d43b4eb0c47b246b"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/server-cache-react.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "bc168ee66c4378854c7aa23cb9ca1369",
+    "semantic_hash": "bc168ee66c4378854c7aa23cb9ca1369"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/server-dedup-props.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "86bf6f2d562ca98bca778a5b9d2f0251",
+    "semantic_hash": "86bf6f2d562ca98bca778a5b9d2f0251"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/server-hoist-static-io.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "c01d23aeb6735924eb897bfb2cc9d697",
+    "semantic_hash": "c01d23aeb6735924eb897bfb2cc9d697"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/server-parallel-fetching.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "1a36cf0b49a1a498fc1150afbf7a42c2",
+    "semantic_hash": "1a36cf0b49a1a498fc1150afbf7a42c2"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/server-serialization.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "e6d34426614852685f43609dd9e3b250",
+    "semantic_hash": "e6d34426614852685f43609dd9e3b250"
+  },
+  "Frontend_py_whatsaapweb/AGENTS.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "4e701c6c19f618b6801d6246ee212c09",
+    "semantic_hash": "4e701c6c19f618b6801d6246ee212c09"
+  },
+  "Frontend_py_whatsaapweb/DESIGN.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "e8c618e209a17f6b2c8d29ab0ff0e2b7",
+    "semantic_hash": "e8c618e209a17f6b2c8d29ab0ff0e2b7"
+  },
+  "Frontend_py_whatsaapweb/README.md": {
+    "mtime": 1784672184.3710976,
+    "ast_hash": "0d951994bb96408ca8378e7207cabe16",
+    "semantic_hash": ""
+  },
+  "Frontend_py_whatsaapweb/docs/DESIGN.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "b0237aef4a1d37329e6e5a5daa70e081",
+    "semantic_hash": "b0237aef4a1d37329e6e5a5daa70e081"
+  },
+  "Frontend_py_whatsaapweb/docs/implementacion1/README.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "0ab61d046efc9fb95ea502e152b08101",
+    "semantic_hash": "0ab61d046efc9fb95ea502e152b08101"
+  },
+  "Frontend_py_whatsaapweb/gitlog.txt": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "f33fb8e2bc3fd906b9939bb5fbbd665e",
+    "semantic_hash": "f33fb8e2bc3fd906b9939bb5fbbd665e"
+  },
+  "Frontend_py_whatsaapweb/index.html": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "b20b7892fafb68891719d100be2b8012",
+    "semantic_hash": "b20b7892fafb68891719d100be2b8012"
+  },
+  "Frontend_py_whatsaapweb/src/factures/estaciones/README.md": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "1db26ae37cfe6429e2ddd3b72feec61e",
+    "semantic_hash": "1db26ae37cfe6429e2ddd3b72feec61e"
+  },
+  "Frontend_py_whatsaapweb/src/factures/estadisticos/API_ENDPOINTS.md": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "95f91b2ae46eec72c3d53413d0a3840e",
+    "semantic_hash": "95f91b2ae46eec72c3d53413d0a3840e"
+  },
+  "Frontend_py_whatsaapweb/src/factures/estadisticos/README.md": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "a58109b633fa3efa87c50c0771a33cbb",
+    "semantic_hash": "a58109b633fa3efa87c50c0771a33cbb"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/utils/ARCHITECTURE.md": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "34030e4e618e4bb7d29908ff4dc7802c",
+    "semantic_hash": "34030e4e618e4bb7d29908ff4dc7802c"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/utils/COMPLETE_REVERSION.md": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "400bf5d5315b644b83f47dcb5b30355d",
+    "semantic_hash": "400bf5d5315b644b83f47dcb5b30355d"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/utils/REFACTORING.md": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "5e2a4c3b521075c5fe5fe0befa8dabaa",
+    "semantic_hash": "5e2a4c3b521075c5fe5fe0befa8dabaa"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/utils/ROUTE_NAVIGATION_FIX.md": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "f52c7c43fadf60c9b10b3bf5a9f73f99",
+    "semantic_hash": "f52c7c43fadf60c9b10b3bf5a9f73f99"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/utils/SOCKET_PERSISTENCE_FIX.md": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "8408cf69390f6506660856e2352355e6",
+    "semantic_hash": "8408cf69390f6506660856e2352355e6"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/utils/USAGE_GUIDE.md": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "f893856febc02e40422cdc891a45d9ba",
+    "semantic_hash": "f893856febc02e40422cdc891a45d9ba"
+  },
+  "Frontend_py_whatsaapweb/src/factures/mensajeria/utils/WHATSAPP_RECONNECTION_FIX.md": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "a773a4e7a2bed68c8f84ce7d5f9f6756",
+    "semantic_hash": "a773a4e7a2bed68c8f84ce7d5f9f6756"
+  },
+  "Frontend_py_whatsaapweb/src/factures/setting/ARCHITECTURE.md": {
+    "mtime": 1784662951.624932,
+    "ast_hash": "3b8162d4ca4e221de6f3645f848f8de6",
+    "semantic_hash": "3b8162d4ca4e221de6f3645f848f8de6"
+  },
+  "WhatsaapWeb-JS/.codex/rules/architecture.md": {
+    "mtime": 1784662876.8682692,
+    "ast_hash": "0e1ac2a5ff724d026494a82637acf5cf",
+    "semantic_hash": "0e1ac2a5ff724d026494a82637acf5cf"
+  },
+  "WhatsaapWeb-JS/.codex/rules/clean-code.md": {
+    "mtime": 1784662876.8682692,
+    "ast_hash": "c0cd21f94822862b7beec775f75425fc",
+    "semantic_hash": "c0cd21f94822862b7beec775f75425fc"
+  },
+  "WhatsaapWeb-JS/.codex/rules/development-workflow.md": {
+    "mtime": 1784662876.8682692,
+    "ast_hash": "8a9e8f80df19193ebdfb62a1382c85d5",
+    "semantic_hash": "8a9e8f80df19193ebdfb62a1382c85d5"
+  },
+  "WhatsaapWeb-JS/.codex/rules/postgres.md": {
+    "mtime": 1784662876.8682692,
+    "ast_hash": "caf644105c1187e0ba2c1fd8a262ca5f",
+    "semantic_hash": "caf644105c1187e0ba2c1fd8a262ca5f"
+  },
+  "WhatsaapWeb-JS/.codex/rules/security.md": {
+    "mtime": 1784662876.8682692,
+    "ast_hash": "b72487d3d188cb862a527a212f5eff73",
+    "semantic_hash": "b72487d3d188cb862a527a212f5eff73"
+  },
+  "WhatsaapWeb-JS/.codex/rules/socketio.md": {
+    "mtime": 1784662876.8682692,
+    "ast_hash": "c2388cd59cf786226b6aae5e88bfc8bd",
+    "semantic_hash": "c2388cd59cf786226b6aae5e88bfc8bd"
+  },
+  "WhatsaapWeb-JS/.codex/rules/whatsapp-meta.md": {
+    "mtime": 1784662876.8682692,
+    "ast_hash": "da4d71f0ef268c08951b7ae394cc6b52",
+    "semantic_hash": "da4d71f0ef268c08951b7ae394cc6b52"
+  },
+  "WhatsaapWeb-JS/.codex/skills/clean-code/SKILL.md": {
+    "mtime": 1784662876.8682692,
+    "ast_hash": "2b7d815646506ee91ab2f632c499dcb7",
+    "semantic_hash": "2b7d815646506ee91ab2f632c499dcb7"
+  },
+  "WhatsaapWeb-JS/.codex/skills/postgresql-optimization/SKILL.md": {
+    "mtime": 1784662876.8682692,
+    "ast_hash": "8fedfc59a43db5c5bb9b281ce78114a2",
+    "semantic_hash": "8fedfc59a43db5c5bb9b281ce78114a2"
+  },
+  "WhatsaapWeb-JS/.codex/skills/prisma-postgres/SKILL.md": {
+    "mtime": 1784662876.8682692,
+    "ast_hash": "a82ac7e55bc62796d1a06c438a41528e",
+    "semantic_hash": "a82ac7e55bc62796d1a06c438a41528e"
+  },
+  "WhatsaapWeb-JS/.codex/skills/prisma-postgres/references/console-and-connections.md": {
+    "mtime": 1784662876.8682692,
+    "ast_hash": "fdc76e91ffe952579a3878f22f84265c",
+    "semantic_hash": "fdc76e91ffe952579a3878f22f84265c"
+  },
+  "WhatsaapWeb-JS/.codex/skills/prisma-postgres/references/create-db-cli.md": {
+    "mtime": 1784662876.8682692,
+    "ast_hash": "a8c5993dee7436a8c06a49fec380826a",
+    "semantic_hash": "a8c5993dee7436a8c06a49fec380826a"
+  },
+  "WhatsaapWeb-JS/.codex/skills/prisma-postgres/references/management-api-sdk.md": {
+    "mtime": 1784662876.8682692,
+    "ast_hash": "254a48279141cb0516f69fe6ffb43875",
+    "semantic_hash": "254a48279141cb0516f69fe6ffb43875"
+  },
+  "WhatsaapWeb-JS/.codex/skills/prisma-postgres/references/management-api.md": {
+    "mtime": 1784662876.8682692,
+    "ast_hash": "08fe72f532d363f6f58209e9da62772c",
+    "semantic_hash": "08fe72f532d363f6f58209e9da62772c"
+  },
+  "WhatsaapWeb-JS/.codex/skills/whatsapp-cloud-api/SKILL.md": {
+    "mtime": 1784662876.8682692,
+    "ast_hash": "2fbd7975c2d7d6b4a8b321279f12e628",
+    "semantic_hash": "2fbd7975c2d7d6b4a8b321279f12e628"
+  },
+  "WhatsaapWeb-JS/.codex/skills/whatsapp-cloud-api/references/CONVERSATIONS.md": {
+    "mtime": 1784662876.8682692,
+    "ast_hash": "e9821a4605f44ed2e296323dfcc52744",
+    "semantic_hash": "e9821a4605f44ed2e296323dfcc52744"
+  },
+  "WhatsaapWeb-JS/.codex/skills/whatsapp-cloud-api/references/ERROR-CODES.md": {
+    "mtime": 1784662876.8682692,
+    "ast_hash": "ae6338a9c3e8c8d3f1c0ba7c7c8dff18",
+    "semantic_hash": "ae6338a9c3e8c8d3f1c0ba7c7c8dff18"
+  },
+  "WhatsaapWeb-JS/.codex/skills/whatsapp-cloud-api/references/INTERACTIVE.md": {
+    "mtime": 1784662876.8682692,
+    "ast_hash": "82eaeea218833edb9c19cdb601adb02a",
+    "semantic_hash": "82eaeea218833edb9c19cdb601adb02a"
+  },
+  "WhatsaapWeb-JS/.codex/skills/whatsapp-cloud-api/references/MEDIA.md": {
+    "mtime": 1784662876.8682692,
+    "ast_hash": "bee71b3958ec3294b5fdda8590f7d075",
+    "semantic_hash": "bee71b3958ec3294b5fdda8590f7d075"
+  },
+  "WhatsaapWeb-JS/.codex/skills/whatsapp-cloud-api/references/MESSAGING.md": {
+    "mtime": 1784662876.8682692,
+    "ast_hash": "273dd0f2ca915500277e5ba348d61312",
+    "semantic_hash": "273dd0f2ca915500277e5ba348d61312"
+  },
+  "WhatsaapWeb-JS/.codex/skills/whatsapp-cloud-api/references/PHONE-NUMBERS.md": {
+    "mtime": 1784662876.8682692,
+    "ast_hash": "b893c1c5260a2e27ae5db10c085f9b98",
+    "semantic_hash": "b893c1c5260a2e27ae5db10c085f9b98"
+  },
+  "WhatsaapWeb-JS/.codex/skills/whatsapp-cloud-api/references/TEMPLATES.md": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "a4aa2db58aa421bef9a036456e52453a",
+    "semantic_hash": "a4aa2db58aa421bef9a036456e52453a"
+  },
+  "WhatsaapWeb-JS/.codex/skills/whatsapp-cloud-api/references/WEBHOOKS.md": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "aebb21e6fbf0dad344af3a8a79bc0107",
+    "semantic_hash": "aebb21e6fbf0dad344af3a8a79bc0107"
+  },
+  "WhatsaapWeb-JS/AGENTS.md": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "a14d9d202856b650ebc2ac96b31cb12a",
+    "semantic_hash": "a14d9d202856b650ebc2ac96b31cb12a"
+  },
+  "WhatsaapWeb-JS/DESIGN.md": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "e8c618e209a17f6b2c8d29ab0ff0e2b7",
+    "semantic_hash": "e8c618e209a17f6b2c8d29ab0ff0e2b7"
+  },
+  "WhatsaapWeb-JS/README.md": {
+    "mtime": 1784672603.0036733,
+    "ast_hash": "3a3b78b61dbc8706fec140e059b8d4a1",
+    "semantic_hash": ""
+  },
+  "WhatsaapWeb-JS/docs/README.md": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "124014a65916524d96a2482da408344e",
+    "semantic_hash": "124014a65916524d96a2482da408344e"
+  },
+  "WhatsaapWeb-JS/docs/architecture.md": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "c44b785d9c46e8ecf5d420466f673716",
+    "semantic_hash": "c44b785d9c46e8ecf5d420466f673716"
+  },
+  "WhatsaapWeb-JS/src/db/README.md": {
+    "mtime": 1784662876.8722692,
+    "ast_hash": "a5ea6329e965198d5cc9c96a8175d73b",
+    "semantic_hash": "a5ea6329e965198d5cc9c96a8175d73b"
+  },
+  "WhatsaapWeb-JS/src/modules/README.md": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "dbcc3ae0d5dbe5b7f983c54832391793",
+    "semantic_hash": "dbcc3ae0d5dbe5b7f983c54832391793"
+  },
+  "WhatsaapWeb-JS/src/modules/companies/presentation/README.md": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "484a0dbcba64985bcdaedbba4ad335d4",
+    "semantic_hash": "484a0dbcba64985bcdaedbba4ad335d4"
+  },
+  "WhatsaapWeb-JS/src/modules/conversations/README.md": {
+    "mtime": 1784662876.876269,
+    "ast_hash": "1570174c651304fd6bae0132cfed391c",
+    "semantic_hash": "1570174c651304fd6bae0132cfed391c"
+  },
+  "WhatsaapWeb-JS/src/services/whatsapp/README.md": {
+    "mtime": 1784662876.8802693,
+    "ast_hash": "e8c07cca0bbe3a3dbce46c51506d8ba9",
+    "semantic_hash": "e8c07cca0bbe3a3dbce46c51506d8ba9"
+  },
+  "WhatsaapWeb-JS/src/shared/README.md": {
+    "mtime": 1784662876.8802693,
+    "ast_hash": "17d3366028e5c3657878cd346500656f",
+    "semantic_hash": "17d3366028e5c3657878cd346500656f"
+  },
+  "graphify-out-backup-whatsaapweb-js/GRAPH_REPORT.md": {
+    "mtime": 1784664948.0738897,
+    "ast_hash": "96da0f5ae164f014bdb4dab13c727ccd",
+    "semantic_hash": "96da0f5ae164f014bdb4dab13c727ccd"
+  },
+  "graphify-out-backup-whatsaapweb-js/graph.html": {
+    "mtime": 1784664950.5098772,
+    "ast_hash": "fe1978cfd3174a72a4c17486e36a430a",
+    "semantic_hash": "fe1978cfd3174a72a4c17486e36a430a"
+  },
+  "Frontend_py_whatsaapweb/public/bot-avatar.png": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/rendering-animate-svg-wrapper.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "7301cbe48bf0e1c44934847861384d03",
+    "semantic_hash": "7301cbe48bf0e1c44934847861384d03"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/rendering-conditional-render.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "7aa6112d7544d55147e183b84add9c31",
+    "semantic_hash": "7aa6112d7544d55147e183b84add9c31"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/rendering-content-visibility.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "a4ec0125d3a9d79ac2ab5f7a7b5b4d7d",
+    "semantic_hash": "a4ec0125d3a9d79ac2ab5f7a7b5b4d7d"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/rendering-hoist-jsx.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "00519c11155c5c2a6f493d7980211a71",
+    "semantic_hash": "00519c11155c5c2a6f493d7980211a71"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/rendering-hydration-no-flicker.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "a33ebc96d26525f94c460342d913e47a",
+    "semantic_hash": "a33ebc96d26525f94c460342d913e47a"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/rendering-hydration-suppress-warning.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "23bc895f5697c19a59712bf19474ec12",
+    "semantic_hash": "23bc895f5697c19a59712bf19474ec12"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/rendering-resource-hints.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "a612b2d1d86d1b8205b92ff7dfd81eb8",
+    "semantic_hash": "a612b2d1d86d1b8205b92ff7dfd81eb8"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/rendering-script-defer-async.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "d62596aed565dd3ad7bddd38bc8f7798",
+    "semantic_hash": "d62596aed565dd3ad7bddd38bc8f7798"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/rendering-svg-precision.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "1b880754ee449c52ccc725481f8b2e90",
+    "semantic_hash": "1b880754ee449c52ccc725481f8b2e90"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/rendering-usetransition-loading.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "3cea04ec76a76183cebc6571ac6365a2",
+    "semantic_hash": "3cea04ec76a76183cebc6571ac6365a2"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/rerender-defer-reads.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "2b754062eb7b203632859f6515ed3561",
+    "semantic_hash": "2b754062eb7b203632859f6515ed3561"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/rerender-dependencies.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "ad0e42cd0616237f62f8a5abbc2138bc",
+    "semantic_hash": "ad0e42cd0616237f62f8a5abbc2138bc"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/rerender-derived-state-no-effect.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "c83ba3c8ea58015fd30072790a4959c4",
+    "semantic_hash": "c83ba3c8ea58015fd30072790a4959c4"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/rerender-derived-state.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "fadd31941e355786cb0cc7bba3c672fd",
+    "semantic_hash": "fadd31941e355786cb0cc7bba3c672fd"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/rerender-functional-setstate.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "188c0b949d23c11885914c573f4a770a",
+    "semantic_hash": "188c0b949d23c11885914c573f4a770a"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/rerender-lazy-state-init.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "6f9fc3d826cea2ca484912256149b077",
+    "semantic_hash": "6f9fc3d826cea2ca484912256149b077"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/rerender-memo-with-default-value.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "9bfa45660e0a4d4f180e1d12d9ed44ea",
+    "semantic_hash": "9bfa45660e0a4d4f180e1d12d9ed44ea"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/rerender-memo.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "f0decabf1e4cf032c36f0977c81167b7",
+    "semantic_hash": "f0decabf1e4cf032c36f0977c81167b7"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/rerender-move-effect-to-event.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "599463fe624afd8822ba2bfa7c0138d5",
+    "semantic_hash": "599463fe624afd8822ba2bfa7c0138d5"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/rerender-no-inline-components.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "713855e0060cfe2ce549d08ea77e1af6",
+    "semantic_hash": "713855e0060cfe2ce549d08ea77e1af6"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/rerender-simple-expression-in-memo.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "42c37552160cff86a0fcbd93a27aa74e",
+    "semantic_hash": "42c37552160cff86a0fcbd93a27aa74e"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/rerender-split-combined-hooks.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "b7485878ff82ce8468078a31fc1b7f19",
+    "semantic_hash": "b7485878ff82ce8468078a31fc1b7f19"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/rerender-transitions.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "3f275bbfb966fcb39c554ad959fdf016",
+    "semantic_hash": "3f275bbfb966fcb39c554ad959fdf016"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/rerender-use-deferred-value.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "913dc783397142c25ec997b5dc11245b",
+    "semantic_hash": "913dc783397142c25ec997b5dc11245b"
+  },
+  "Frontend_py_whatsaapweb/.codex/skills/react-best-practices/rules/rerender-use-ref-transient-values.md": {
+    "mtime": 1784662951.612932,
+    "ast_hash": "24d2e82617e2da4207afaf049e1314f3",
+    "semantic_hash": "24d2e82617e2da4207afaf049e1314f3"
+  },
+  "WhatsaapWeb-JS/.codex/rules/nada.md": {
+    "mtime": 1784662876.8682692,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "WhatsaapWeb-JS/.codex/rules/skills/postgres-migrations.md": {
+    "mtime": 1784662876.8682692,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "graphify-out-unificado-backup/GRAPH_REPORT.md": {
+    "mtime": 1784665751.3034062,
+    "ast_hash": "ec7178fa1b35886874b6f8b3d1e1bcad",
+    "semantic_hash": "ec7178fa1b35886874b6f8b3d1e1bcad"
+  },
+  "Frontend_py_whatsaapweb/public/bot.jpg": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "d21e5e6b773da4f672a2562cbae285d8",
+    "semantic_hash": "d21e5e6b773da4f672a2562cbae285d8"
+  },
+  "Frontend_py_whatsaapweb/public/logo.png": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "ea9134b83e37adbfef6a4a19f093cd43",
+    "semantic_hash": "ea9134b83e37adbfef6a4a19f093cd43"
+  },
+  "Frontend_py_whatsaapweb/public/vite.svg": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "8e3a10e157f75ada21ab742c022d5430",
+    "semantic_hash": "8e3a10e157f75ada21ab742c022d5430"
+  },
+  "Frontend_py_whatsaapweb/src/assets/react.svg": {
+    "mtime": 1784662951.6209319,
+    "ast_hash": "f0402b67b6ce880f65666bb49e841696",
+    "semantic_hash": "f0402b67b6ce880f65666bb49e841696"
+  },
+  "WhatsaapWeb-JS/src/modules/ai/infra/provider/OpenAIProvider.ts": {
+    "mtime": 1784670207.2322474,
+    "ast_hash": "65d39aa9a6aad4328b7a8e1e2accc4f0",
+    "semantic_hash": ""
+  },
+  "WhatsaapWeb-JS/src/test/meta-webhook-p0.test.ts": {
+    "mtime": 1784670240.0086894,
+    "ast_hash": "620328055cce5d4e6c45f7a3f98f053d",
+    "semantic_hash": ""
+  },
+  "WhatsaapWeb-JS/src/test/multiagent-routing-p0.test.ts": {
+    "mtime": 1784672294.74052,
+    "ast_hash": "c6b6c5843b49c0edc53b98352b0c7589",
+    "semantic_hash": ""
+  },
+  "WhatsaapWeb-JS/src/test/openai-provider-p0.test.ts": {
+    "mtime": 1784670294.633417,
+    "ast_hash": "44ac3ce48ecba0eaf1ed6b700c4275fc",
+    "semantic_hash": ""
+  },
+  "WhatsaapWeb-JS/src/test/p0-handoff-idempotency.test.ts": {
+    "mtime": 1784669950.5208063,
+    "ast_hash": "817aa7dec40fb3f8d9c6806a9a9f65ac",
+    "semantic_hash": ""
+  },
+  "WhatsaapWeb-JS/src/test/p0-safe-runtime.test.ts": {
+    "mtime": 1784672188.4031496,
+    "ast_hash": "e97137ed58778fa8b60c20de4b2f8013",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/.graphify_chunks.json": {
+    "mtime": 1784665253.0373783,
+    "ast_hash": "19bff1782df5db17d44f914cc1b0cb5c",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/.graphify_labels.json": {
+    "mtime": 1784665751.3074064,
+    "ast_hash": "06150c7fc1b5740c61ec67d6a7400e2b",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/ast/v0.9.23/01257cf6bd0eb460d3e83e23de7af268d11da4cfa0aae70603b20f0cf4cc33e7.json": {
+    "mtime": 1784665253.3333788,
+    "ast_hash": "d02065c5918f68a5ee66479d8c258812",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/ast/v0.9.23/014ee2fc05f228153758d37b427c181915e4da38d47304b07e74897684c62cf1.json": {
+    "mtime": 1784665253.2933786,
+    "ast_hash": "92722241faba15521af75ad605e06cca",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/ast/v0.9.23/0b1ffe0e08c14e3b90bb4ff93abafdd0b41d966f03e91e663c661ebe97caa311.json": {
+    "mtime": 1784665253.3253787,
+    "ast_hash": "8c60fc65881eaa817c216bf88fc56178",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/ast/v0.9.23/1073c01611142a0d74cfa704a8aa2f7e6b833f31b3ecda719c1f0fbde7b09b25.json": {
+    "mtime": 1784665253.3613787,
+    "ast_hash": "f3df42f8acfedcd6cbd5b9baf7f16a9f",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/ast/v0.9.23/1d7867fd81301451f8ff03a6545170cb6c64a9c58b73edc90790d041ab2d05c2.json": {
+    "mtime": 1784665253.3253787,
+    "ast_hash": "c5b03b168bcd11c7547b6f48316d270e",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/ast/v0.9.23/27aa91b05e6c507ba712bb24c3237e4160f3b0a997a3b9d1570e26a20e9857fc.json": {
+    "mtime": 1784665253.3333788,
+    "ast_hash": "bb6f54eefe3f6335adf8ae28c730c41f",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/ast/v0.9.23/2c66d2c8adaf216e681cc9a65bf47fd169f8b79260c0d9f6b2bc66fce5b40439.json": {
+    "mtime": 1784665253.3333788,
+    "ast_hash": "98a7b074368cc0e4740d42c99e30763c",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/ast/v0.9.23/369ec8d4c924e2c718bcdfe06963f7415cfb0ac2c3410c625fbf78227e49fd86.json": {
+    "mtime": 1784665253.3333788,
+    "ast_hash": "9a328bd77eac0d0c0d5f5076d6228c74",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/ast/v0.9.23/3eb30b87883cd336fa4229a865a83996b4a43bdf73e10f27c4c5f4a80747d56f.json": {
+    "mtime": 1784665253.3333788,
+    "ast_hash": "d0ca5e25cf656630e43408d80ee97c53",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/ast/v0.9.23/442e1edb5a7044cebb44896d52931d6837629427276426dec94ee438ba30714b.json": {
+    "mtime": 1784665253.3293786,
+    "ast_hash": "16bd2b7eecf00775204db2df39d3747d",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/ast/v0.9.23/461a33209428e3648a6ffddd0c3db07abfd718fc3e7fd5393d53103fe3b4cfd1.json": {
+    "mtime": 1784665253.1493785,
+    "ast_hash": "7d01453fb15508e312ad10ff839291b0",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/ast/v0.9.23/498fec8e720d5d18492b8af14f4c14f0d387c2bc0b0321c5e73d454d647b004d.json": {
+    "mtime": 1784665253.3293786,
+    "ast_hash": "24416b6d22bc8abf9622348e2dbaef25",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/ast/v0.9.23/559bdba2da99df21c534d9186f0f70c313cb640f0d3b678faf579645f48db7b4.json": {
+    "mtime": 1784665253.3293786,
+    "ast_hash": "01ac1f8d8ce18c3e01cbc0cad0cff1d7",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/ast/v0.9.23/58f781f9db67ef1796d5d15d8de0829688d79e27ec1d848ea402e21267332a41.json": {
+    "mtime": 1784665253.3253787,
+    "ast_hash": "bf09f1772a6a8fb3e489377086e1a201",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/ast/v0.9.23/5fe70cec69141da464cd0f092c6a246e24a4419070b8c9c20558dea9ead99908.json": {
+    "mtime": 1784665253.3293786,
+    "ast_hash": "9e26e03f43b6ebb37378f3429e27b9d8",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/ast/v0.9.23/729624094c29fc301343d5d5f3a1bc957ee10d96b8acfa36b70cf71a2c88601f.json": {
+    "mtime": 1784665253.3013787,
+    "ast_hash": "03b822de126cc8276ac5795208e436d8",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/ast/v0.9.23/7cd2e46ef7a55054436bcf00e6d488606d274d41737b04a82631cba32dc720be.json": {
+    "mtime": 1784665253.3293786,
+    "ast_hash": "150f6ebf6c23265178dc693a6e66d584",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/ast/v0.9.23/7e0b6370a00215b8e971afdb146c1d5d6976593ffc3a569d75fba80309206b40.json": {
+    "mtime": 1784665253.3293786,
+    "ast_hash": "6be21170747b50d84dd6ea8d541bba6f",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/ast/v0.9.23/9709e66dcc4658fc63b0e01122a843e9033a3e96379825316df7a7d847d90c41.json": {
+    "mtime": 1784665253.3293786,
+    "ast_hash": "d4065ab907f940d686f7aa732ae109f5",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/ast/v0.9.23/a43beda041662fcb431d5e0aa294744ceceeb1dedc10ede342ab17c935da8d91.json": {
+    "mtime": 1784665253.449379,
+    "ast_hash": "ac75d0b3c83830c22d360a2ca7837d5f",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/ast/v0.9.23/aaecd287b2413d2bdf0f4267b7a1f1413ee298aeb292dd51c3b55808c9017f4a.json": {
+    "mtime": 1784665253.4293787,
+    "ast_hash": "e10e16fb3df64f8654ea4ea335d9ecbd",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/ast/v0.9.23/ace5144297faea887868b4143740a6af96d9a12722399f15e466ec5462b4cf96.json": {
+    "mtime": 1784665253.3333788,
+    "ast_hash": "63066d839ef7c2b419ad4aea2ef62eb4",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/ast/v0.9.23/cb4c6fc8d10dc47f57b7156fbddd214b95455a4fab727db2300a261a59b34920.json": {
+    "mtime": 1784665253.2973788,
+    "ast_hash": "e10af665c10372a56808d29861b46a0a",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/ast/v0.9.23/d1f196e88777c5af384283c2b150d25a83cbce1d1e29e1636b6029c7e1fb5430.json": {
+    "mtime": 1784665253.3333788,
+    "ast_hash": "7e67d0370e5c0ffd104bd11036084580",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/ast/v0.9.23/d8f74593ee1441d1b5f349c86b6b8632fa316b40194676113f33a644706ec150.json": {
+    "mtime": 1784665253.3293786,
+    "ast_hash": "fb1c33a9b25495659d2f7437bc989565",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/ast/v0.9.23/dd0d581199f1512c14c359bac23b4e9fead2ed055e0afd94a35af972beb734e8.json": {
+    "mtime": 1784665253.3293786,
+    "ast_hash": "50a7589cbcac87049d1276feb1ec72c5",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/ast/v0.9.23/e835e3e8f89eaf94edfd40eaba0e4ce6041a6c14160c9edc0276c51b2e25d92e.json": {
+    "mtime": 1784665253.3253787,
+    "ast_hash": "42be1af4ce6977dde0c68f818f8dae08",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/ast/v0.9.23/ea13d5e0728ba8398f05ed2f0aa4751a50e6f26b640abbd44623bfa4e06e6214.json": {
+    "mtime": 1784665253.2933786,
+    "ast_hash": "44690f0dd227ae5539292398ece7c137",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/ast/v0.9.23/ebabeccc7c030d187e23aa13888cc291fe8aa1b81887193bbfaa43effe5d202e.json": {
+    "mtime": 1784665253.3333788,
+    "ast_hash": "4a9cddca3b5d2d108fd72921fe272d0e",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/ast/v0.9.23/f740278267232520c3c9bb71c105a6f85f0c9c2bdba57b56bf3384f3f4c5e1af.json": {
+    "mtime": 1784665253.3333788,
+    "ast_hash": "5f0e2878e1963f7c772900aeb6f2e81e",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/ast/v0.9.23/fd8a4eab133ba7ceb1897ec0505d9c4272b02856e3d846780ae489dc09a57f87.json": {
+    "mtime": 1784665253.4253788,
+    "ast_hash": "412cde853855b0545d890971cac59fe5",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/00715c934d7b88138faeace8a850a2e6201828eddc0a78157cdb9dd0dca21d46.json": {
+    "mtime": 1784665698.34709,
+    "ast_hash": "27f4ab71d83950ee0ff4848bc57bf0bf",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/01ce5ce1e8d0c04c8881f692cbc2f4e71a1ce73c1d0c46c5022c0ac967ab0917.json": {
+    "mtime": 1784665698.34709,
+    "ast_hash": "71578f99a0c47151e4719c61f5ba81eb",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/047655888d80925ce922adfca87575ba2c7a5c079b15c8394dab0fe0fd401ee7.json": {
+    "mtime": 1784665698.36309,
+    "ast_hash": "57cd36c3146011ff77f68ecd0b43e237",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/0a917595824b1e0b4645da9831e7f347013dd5054d38b42412c41ad6c9a3b21d.json": {
+    "mtime": 1784665698.35109,
+    "ast_hash": "c9096de9de235669fca6743027a65902",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/0ab4862aa1e9afdfbd0b50ded3d957da6e3a3bb084a4dd410d3de191ded1b269.json": {
+    "mtime": 1784665698.36309,
+    "ast_hash": "f879ad5d3f8b59d4dd62cc00a6cf544b",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/0e0d6f0a59475e633c4ecd2baf0c466de45a7429d976a2fe6a2e53ca745e7aad.json": {
+    "mtime": 1784665698.35109,
+    "ast_hash": "68b0171f12ea7b8acc084d997c6f3418",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/10c99aab2933da9fc3bc7918f40d46d3e5a1ac6080308cea21ba0c6b20ae3c14.json": {
+    "mtime": 1784665698.36309,
+    "ast_hash": "d78e77a11e330ed6a1533e0cfcb3e327",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/146fbbc5ea1249101b19c5cf75ec88996d55bf864c7e4747920e22da68e2719d.json": {
+    "mtime": 1784665698.35109,
+    "ast_hash": "b83dec66b7545d80de8dac1b727d4ef3",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/149a7ab3c2787f41f2bcc7f2412d20d845740228c8ef071db4765ff44ab7b129.json": {
+    "mtime": 1784665698.3550901,
+    "ast_hash": "3e8e1b8feceb908ccd611634f6f250af",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/151ee2fe8ca3a1d27dd8d34c9183ef0d6c4b6e2fea7e253007154776af04ee23.json": {
+    "mtime": 1784665698.34309,
+    "ast_hash": "0c7727cd1d3bb38f51df11295338c680",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/1558d2fcd7d65451de3f937603970593f3217f53f2642e4d43ee52c3c1c454c5.json": {
+    "mtime": 1784665698.34709,
+    "ast_hash": "78a53961b4bd7579771857aebe435576",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/167da1de5312851fffab3c6d25f4ed19158ce1c641ada243786149162b5c5559.json": {
+    "mtime": 1784665698.3550901,
+    "ast_hash": "2d41052b1badcfa799cbc7eaa29d9c88",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/1e3c3447f748b8683fddcb793f7d5814b02b05843fed6d2bc132ace132cdaebc.json": {
+    "mtime": 1784665698.35909,
+    "ast_hash": "1f28073232a6bb99b5354b23b14d17be",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/1f1967da35d94e67ca2b9b25f919255d2bd63f4246042b67506f38837498d6c4.json": {
+    "mtime": 1784665698.35909,
+    "ast_hash": "2154b21f1d1e3ac1262e55171a5de0b5",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/203ebc12fd3b9177413028eaa019d8db21b53e1d370676f10bc7f4935642a67a.json": {
+    "mtime": 1784665698.35909,
+    "ast_hash": "38cda56db48440f5c2c5e78dc5cb1e2d",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/20b9381770d41e0d69450b794be5a70e8523ca8dee742deaeb0231eaef9f4e17.json": {
+    "mtime": 1784665698.3550901,
+    "ast_hash": "f8c06d86471b9a9cc9238e9c3d1f653a",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/25c304eacacdfb88b1158e598c517d2038d3ceaeeaf3ee60e269b2ac51467a95.json": {
+    "mtime": 1784665698.35909,
+    "ast_hash": "309d7cd690266e00060369b5dad6ae47",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/2861b1db283c4d17ed32a22146c979f19ce5c6094121a1765dbce94f2ed1be69.json": {
+    "mtime": 1784665698.34309,
+    "ast_hash": "bba6329408b4b41870d652848c0936f3",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/2c457d4a62892a7faf970f5971f1c5f624ec32fd50de1ee76d88ad26bb115ef6.json": {
+    "mtime": 1784665698.35109,
+    "ast_hash": "1d232a525051bf711a1d24be43df8be7",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/2eb30910442238bce337eef804e4279634d323573c9a9643394adb66aa53ed57.json": {
+    "mtime": 1784665698.35109,
+    "ast_hash": "1bb656a3ee577cd807a240cdef1efb1b",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/362bb10289ba36225f92fe08f9b5da5f1e5a9fdf17b246c773c7daf25cc4cdb8.json": {
+    "mtime": 1784665698.35109,
+    "ast_hash": "95e4b0029acbd8dc1f690e2f81f0212a",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/383324b535d9e65a1e36823e5d9574a835f4ecc0bdbbba4fc73fc99d2bec24c0.json": {
+    "mtime": 1784665698.34309,
+    "ast_hash": "c84c989db20bc0552a664f23f48d3129",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/3835c83f418d3518b131d0a9fd72e2140f55b6ac54cbb090bb5d55b3797eda21.json": {
+    "mtime": 1784665698.35109,
+    "ast_hash": "2e3ad77fec0efa75a8f62353758978dd",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/3c295d4059541bb87c2b44d17756af7e0297e38efa919ba722f1e2fe09988a0d.json": {
+    "mtime": 1784665698.36309,
+    "ast_hash": "6126896f4bdb3e9f2549250b869b9682",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/4058b3f368b2939580e2573422437a5408b9205e77005cd045bf159d73940189.json": {
+    "mtime": 1784665698.3550901,
+    "ast_hash": "e96e5eb45006e51df0207b0d8fd34abb",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/40abea3ba289d341514da520bf0c7c14ba44b4be2441bc62994646d3970eb1a8.json": {
+    "mtime": 1784665698.34709,
+    "ast_hash": "4cd78facd9b5afd2d48e03ca8177c27a",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/40ceb88ad37d9bc0a3e9c9818904a94238081f10c36a5069903c75480018dd6c.json": {
+    "mtime": 1784665698.35909,
+    "ast_hash": "a9a9c388f587b73d7b905ea7fc6d5bc2",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/42b97a5030d5dba9635b87f49ab688436aec27773e5f698f83fb6d0f7bcfe6aa.json": {
+    "mtime": 1784665698.3670902,
+    "ast_hash": "d76fa39270c5e55048e99859216463d5",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/45a46e404d58f55a775f4d3adadb2a67368626f193b88c70a3fd7baa77840a63.json": {
+    "mtime": 1784665698.35909,
+    "ast_hash": "7b641841825f73b8b09363d7d8e04c77",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/45ee0aa9c596e8cc4f489b57e6c4625d4ce181a6260745dc9701b42da6436faf.json": {
+    "mtime": 1784665698.3550901,
+    "ast_hash": "a6fb6d99dee7ac8af7b47d8c79569b7c",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/460dba3e1b7f66afc74a6bc95ec6ef16afa4329f41a8875a0c1cebb8416d28b8.json": {
+    "mtime": 1784665698.3670902,
+    "ast_hash": "392d519f17e9b6d37ebf63546f7c3765",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/47295d5e8c08413ad2647868fd6f56d5adf992cedba3a2081aceeb225ad46dae.json": {
+    "mtime": 1784665698.35909,
+    "ast_hash": "d85bf83752acc46affbdf11647dbd991",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/473870619293f9de21a1c4de87b21ad886378f866e125b99453ba0eac53a2708.json": {
+    "mtime": 1784665698.3670902,
+    "ast_hash": "6cc65f9a72210b61d54bb1123f51bdba",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/49adfb0975b2513df4ae77da9b2e7909105ba404632e50f55f96fd221e100443.json": {
+    "mtime": 1784665698.35109,
+    "ast_hash": "f0f41e05e4c08735c9b91d1352902a5d",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/59aba7886d1a38192e7a5640550c1fcf1f3b634599826c86fe352e54a7c746ec.json": {
+    "mtime": 1784665698.34709,
+    "ast_hash": "8ddb6fa2fd72a26db25dfdf3fdd4bf8b",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/5ac8e59582fde50ae0c134dc98bb38000f4bb8743a39b51cbdceb6ee8ee4ad19.json": {
+    "mtime": 1784665698.36309,
+    "ast_hash": "0513b18561d13bf69c4d717ff33ddf48",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/5dfba204deaaf534e73790a9f6fcf329baa6b2623cced9e2bd68dccc01ee5cf6.json": {
+    "mtime": 1784665698.35109,
+    "ast_hash": "0d2fe3fd53ef42c8a3ba85c910be17ea",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/5f30fa33f0bf79971b26680c033cef1dd445d311d8973bb31c2186af011d3ce1.json": {
+    "mtime": 1784665698.36309,
+    "ast_hash": "f2928c05d318ac1bc61fcabd7c1b7fcd",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/628f23ef45e6adc798dde4c065f0bd42ef6af3fb7af1c02a72dc95291394357e.json": {
+    "mtime": 1784665698.3550901,
+    "ast_hash": "51c0aabd93a1b884d979eac540bac652",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/653b1262ba665d0c9ab814944c1bf5653182bff7d8156c6b5c3fe7c24ed3751f.json": {
+    "mtime": 1784665698.35109,
+    "ast_hash": "02795483c58801081a514fb82139a2d2",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/67f6c25b0488a19cc4c4812f728acaa568eda49b6f37899829439ad3500312f1.json": {
+    "mtime": 1784665698.34309,
+    "ast_hash": "41a93a0e46a661230e9294aab03bb9b8",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/69045411eacb2718114c7be8dbfd822af551b102b04bf7b8f2d5c299c835b544.json": {
+    "mtime": 1784665698.35909,
+    "ast_hash": "1ad516eeee73369dc4c574b1792ca5f5",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/696d8e67c89a473644615d72d35e12cc9ed3322f632741c1f7d3be4dcc8e936e.json": {
+    "mtime": 1784665698.35109,
+    "ast_hash": "f41eb77e4e147956a561ae8733ea6d06",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/6c3ea8b0cfffef4389ed32293f0d986fa8873f92eeedd350228d1ee5e8b2010d.json": {
+    "mtime": 1784665698.35109,
+    "ast_hash": "98c4eac81fe69f46b5ee8cc31993fa86",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/6ca2fd34e02e68573bc066c9fb973cb0ff0d67f56a4e1dccd5c57a33e21b15c3.json": {
+    "mtime": 1784665698.34309,
+    "ast_hash": "d80b03b5dfdbcf8874fb68cf44669bc3",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/724cc098569aa7ae46949d7a8795607e5257090446eab83afc8f2c43c3c51f02.json": {
+    "mtime": 1784665698.3670902,
+    "ast_hash": "b3282296d593d93c73b68f38227f0f27",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/730d475d5601b2297f13fb799d7cfb1fcc1067d70a0ea551f764abee928230ab.json": {
+    "mtime": 1784665698.3550901,
+    "ast_hash": "032262026fa2c81badf8c27daf4931a0",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/740c4d98a53b181c0e6360e366443122225f36a948d634a937316dc7df4dfa12.json": {
+    "mtime": 1784665698.35909,
+    "ast_hash": "fe9016b5b2226a19647e955adac28b33",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/76ab67d658832dd80c15538ed0f756dc55027a89ab5d8edd2e4911f66c654bfb.json": {
+    "mtime": 1784665698.3550901,
+    "ast_hash": "ab0f99883ad5fa7da0580c073bf4379d",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/777a574082e720045297dc7c41666dbbd4637ce44a867885b8768d2310a80928.json": {
+    "mtime": 1784665698.3550901,
+    "ast_hash": "75c6805557eeab1a82e464335e004121",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/779d1393bcffc53ba988b9ea28e9d20320b958291ce23fc789fb679becd7f4ed.json": {
+    "mtime": 1784665698.3550901,
+    "ast_hash": "c0eadac0c83e4e8005ab5425840f9d87",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/7a611fee47b010b855bedb965487090f64822d5f10f29db8af4fb2ed3c0a8bbb.json": {
+    "mtime": 1784665698.36309,
+    "ast_hash": "1000c5c8adbe56bccd341644e60f2959",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/7d944c1ab5e6463bf1124779bd01adb543419987c823a501ebc33ebbbe4d45b9.json": {
+    "mtime": 1784665698.34709,
+    "ast_hash": "5ae02c25385afd14036509895daa5bc7",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/7f4fce1453875c455edfbb4fcc36c0a9d929741df67a5b429e1265368cae360a.json": {
+    "mtime": 1784665698.3670902,
+    "ast_hash": "399417910a05cde67e69a174bf7ed7d2",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/801542f52b6a92c4a5a6e2aa266e14eba89f16611e4974cf5d950e808ac2dac5.json": {
+    "mtime": 1784665698.3550901,
+    "ast_hash": "5c3f8b585d9ff19a4e52d057322bdcf8",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/8064189a1241f200285de42197ed8acc8208d3d46727293dfabda1efa942f7b5.json": {
+    "mtime": 1784665698.35109,
+    "ast_hash": "83f49b926d1fbe7d75db6d7fdcf2876c",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/807baf7566c1bd01ecd8e4a8d56953c72584c8db7b1d1607e222038616b21bec.json": {
+    "mtime": 1784665698.34309,
+    "ast_hash": "8eb5f29bc29c2ee2647c2e6d29dc10cc",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/849216ebe82ea93f0fa0830d23efd4335eef3ec8b37defe95c72db0f6a2b764e.json": {
+    "mtime": 1784665698.36309,
+    "ast_hash": "22cc0674d0d4fb7ab7071f596589888e",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/84bce15e0addb36381ee4621fed34ef03c41d6f0d30c5f357bc6e1e2cde68d27.json": {
+    "mtime": 1784665698.36309,
+    "ast_hash": "486f9f56489ab5353d3aa6e9da437b69",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/85471b4ff3826ce62e24af8599a1ed10bad8af43945d99203e4274ab1cd4fc9f.json": {
+    "mtime": 1784665698.3670902,
+    "ast_hash": "90af71ea2a08d24a603200232114023a",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/89aa36d3c61004a84fa2e55e56e3a365645ef899778d0dd5934371fa507e4554.json": {
+    "mtime": 1784665698.35109,
+    "ast_hash": "ded042c3b216b748b10fcb526e5731d3",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/8c6771b2eb62275ece720aadbf660274860bd5d83af7f9f123bb585f72e3bac4.json": {
+    "mtime": 1784665698.34709,
+    "ast_hash": "26d849757a5fa7b41dbf46fb24edb117",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/8d6cf4b957ddb1bfb2fc4ca156f907039311bcad82423e95544b1cbf64cd5fb1.json": {
+    "mtime": 1784665698.36309,
+    "ast_hash": "58c99eb3196a1f24703c6722fdb5cc32",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/8ef51e6965441b10dffd84535adda858a9e327c0bd7891a78570abcc74373dee.json": {
+    "mtime": 1784665698.34709,
+    "ast_hash": "60fc2ac834ef54ea1a5186245ead7d15",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/8f532fec675a08c2f053e473f650a10abf4f6fac58653db635d9f875da92d160.json": {
+    "mtime": 1784665698.3550901,
+    "ast_hash": "75d5b5c22ff1bd896f74e8777b81403e",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/90e35099bf9a2b2d48ff06ef4352540bc376d80dce5ca6bdec35d5db04bcd9df.json": {
+    "mtime": 1784665698.34309,
+    "ast_hash": "04076f92c941c80c4428b3b91cb46dde",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/98d3c9c2a00d5a70692df98119dfb1cedba9669f872f5350e61d7b96d250440d.json": {
+    "mtime": 1784665698.36309,
+    "ast_hash": "b3004e5b77b7eb1c773c8d898af615e6",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/9c2805b014ca5831e294e755ef18eff85f392357891874387844b1e18e926af4.json": {
+    "mtime": 1784665698.34709,
+    "ast_hash": "1aafd801cc6252f1ebc4a8f236facd63",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/9c611e76bfb8319d817f9427309fd25180f7dfefe0311ff3bb1264037cbd0133.json": {
+    "mtime": 1784665698.36309,
+    "ast_hash": "4115263c7dd3eee726193010a7514e4c",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/9d85e2f991986fb1ea4ff52eefb2ea3acd21fac6eb558a6b8175a6efef3973f9.json": {
+    "mtime": 1784665698.3670902,
+    "ast_hash": "c37b3c5d2ffbb8e535ec6945258cd20a",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/9e0888f4a9feb8673aca5b213ba2bd62d2ea6614f16cb9c1e8a6533152574803.json": {
+    "mtime": 1784665698.34309,
+    "ast_hash": "a19ab5528c6c53da86a6dfac4a2261b5",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/a24c38dae9280d4e274110e206f9ef6ebbcd12e091f9b2f3054e570db259add0.json": {
+    "mtime": 1784665698.34309,
+    "ast_hash": "3015296b7c6b9727e9fb64ad3c415873",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/a60f84cf7ddf602ee0bd7f16ce042e9de6b491df0e12342ac3da7a7eec420c61.json": {
+    "mtime": 1784665698.34709,
+    "ast_hash": "8de1436e3874b225c44555aae9424c3e",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/a724f0a4a107ed6c5eb9bff7aa97f5babff7719591f8cb4892008c48ef2d99c0.json": {
+    "mtime": 1784665698.35909,
+    "ast_hash": "2f387948abec5647038bdb0d9f9d4b18",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/a72e0d18bddd45116dde7760239f85456e9168129f8b9990c6800abab2f70684.json": {
+    "mtime": 1784665698.3670902,
+    "ast_hash": "decc27d49dca507c6a6a46b5c21d5225",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/a75a9a6100d2659600570f065725921ba93e6dc75b40ba9876646f00b2acc773.json": {
+    "mtime": 1784665698.3550901,
+    "ast_hash": "03a7b8c5bb05df39a4f94d9588d9ab2b",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/ac6f3a3a11db09c7ccdc8affa18b87ed2be6035494bf94d8f69282f05d9746a6.json": {
+    "mtime": 1784665698.36309,
+    "ast_hash": "39332c598575c5531ee3d12246dd14ee",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/aca47ca4b9459149ec43491d0082f176c5d331ce8792c6e00db632fafa65c507.json": {
+    "mtime": 1784665698.34709,
+    "ast_hash": "e896b810965f2f2f5c47e593f0b404f6",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/afae00dbb6698fb7a683235d8b68fc4f73577c9918e0f036241619600f8ee436.json": {
+    "mtime": 1784665698.3670902,
+    "ast_hash": "7555828a69569b28a03cf2eacc98ac7c",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/b0b8bc90357d00e63c41c4ed34c778635994b3d92cf147d1da7a689e29676b60.json": {
+    "mtime": 1784665698.35909,
+    "ast_hash": "b328408af220b315e00c3196cfacc684",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/b0c0a925b6d6b8b842c05a5476d2a6f1aecac52285d66801fada7cc42b66352f.json": {
+    "mtime": 1784665698.36309,
+    "ast_hash": "30828a716adb5e4acdef1ef68e3adf2b",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/b5fc4a6c1cb14f1f92f4e3c0407153dcf00751cc971a5373004c151fd867e30c.json": {
+    "mtime": 1784665698.3550901,
+    "ast_hash": "371f8290391436321083a17d449ec0b9",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/bb2578f9576d698fb548f9b85fb0b5c932ce66072a253583fccdbe837c8043e8.json": {
+    "mtime": 1784665698.36309,
+    "ast_hash": "a664fd18181a464ba9c9a3c3eaa0b8b2",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/bec67fdaac959b3f99f61c1ea06cc73b2c912707eb4e926f79b5c83264d40ce3.json": {
+    "mtime": 1784665698.35909,
+    "ast_hash": "8bac386f4f1b29cb1ac68b8bc755f7c5",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/c172f526054f84bcc540ecb1fcad5f9ec9532b0b53cba8da90ee4e87ea1bd2d4.json": {
+    "mtime": 1784665698.35909,
+    "ast_hash": "2a8c3d91fc077e1208224b796f3bdd69",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/c40747d7f9b43a27753d2b827800ce5c40b09cc655a446fce8ac930b64208017.json": {
+    "mtime": 1784665698.3670902,
+    "ast_hash": "28420e5c04d00a69e182c9deb23a8d5e",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/c523f8a9790221bdf429b79b46e1a4f43f0c5fc06145af42125e0b79a22da53a.json": {
+    "mtime": 1784665698.35109,
+    "ast_hash": "81b57e7636385c3b24624c02c83431e6",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/c6b95939f264c6748a774c9d46931150ded3d80c0ca907d70513e5cec5cc7488.json": {
+    "mtime": 1784665698.36309,
+    "ast_hash": "4d50166771d58d0ba54cca6a80e505f6",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/c89bd6fded539175fe2c8d5c8e0260175097bec3081421011cce6ab64d63d1f9.json": {
+    "mtime": 1784665698.34709,
+    "ast_hash": "aa62efc1d4b557a5545bdd5486f90619",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/c95d7d3ee57d9a95bb5ec57d95ec8dfac8a0256e93817c0d7b2e18ec14241934.json": {
+    "mtime": 1784665698.3550901,
+    "ast_hash": "a675185ce18e7b8526fd7742e07c074e",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/cb241ad0aa309a4faf063691b5bc2449ba6b59ba280d8a93e0afde59cd5f6c21.json": {
+    "mtime": 1784665698.34709,
+    "ast_hash": "2f5b83e0feb580f1595a4c82c2ef1415",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/cb699afbf6a8641763f66e9d3b26f0e9d94a54114599a2410487016619007a7b.json": {
+    "mtime": 1784665698.3670902,
+    "ast_hash": "2f8e77c39e39bd6ee813ad91df1d0487",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/d36e5b763927b77839049bb7d06f46880c102deae98a0fd703c3f87f70b400a0.json": {
+    "mtime": 1784665698.35109,
+    "ast_hash": "4025a9e411592f510cf48b0696b7673c",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/d43a7afbf871f0e9d53f2d980ccace1341695d998f7a66c70e394cd3c176966f.json": {
+    "mtime": 1784665698.3550901,
+    "ast_hash": "1ac8a8f723b3a498f82698cb41d7b90f",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/d589af22712d6ca5e658383ef7a6f89e4e9c7747ffaa71f5e9d2dc4d9d39cdc9.json": {
+    "mtime": 1784665698.3550901,
+    "ast_hash": "b22fa785b06900757e16b03414204150",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/d848188dc318f2e0d85a6dde7f325f6915f4650f4112acdf94b7cd9ad123d9cf.json": {
+    "mtime": 1784665698.34709,
+    "ast_hash": "d6a019ba3cc09fd51b8dfc01344d9551",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/dd01176430897f86f823fba300e1b82c11be0e46d651f84f68950ff3f91b162a.json": {
+    "mtime": 1784665698.34309,
+    "ast_hash": "440ef2b21e2cb889c404e04bcd1e971d",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/dff23ca5a70a8bb4b540ae743603f0a1e8f5802c1a6424200bf7b1cc3865ece6.json": {
+    "mtime": 1784665698.34709,
+    "ast_hash": "c3b13a034e9c37d3cbc1250a1e9b25c4",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/e40622a9f597d3159e182afdda7494589ea86a228c14c27d12840e94eb0f8e26.json": {
+    "mtime": 1784665698.36309,
+    "ast_hash": "01d5e6f31b2e8ebd8afb0c2504067565",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/e45fbcd24bed227a3c237532f134327bc85eeb6da832293297f633a48846dd21.json": {
+    "mtime": 1784665698.35909,
+    "ast_hash": "7fdf21779cedf7e623f31f9c90cf364b",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/e82463d6ae90c0b85c972a6162f3c90bcd341e7683c31e6ac0c8041e2e382619.json": {
+    "mtime": 1784665698.36309,
+    "ast_hash": "2af9c57cc765a9f0cc2acf335068a7ca",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/ebe2c98c51112791863ca51a4324a13653795db6420ad090e7180e6438348c5f.json": {
+    "mtime": 1784665698.35109,
+    "ast_hash": "8d4328b43a440c288e089ef52c14b122",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/edab73978bb5fdbb41853f26e034f69e7dc77eefceca8852448fbba687c0ef28.json": {
+    "mtime": 1784665698.34309,
+    "ast_hash": "8d5213b9d6dcaa50170823bf107a906e",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/f194430e6031ddf17cbc9f0f24f7987c8fcdce0344cc80447d9de1be41853cdb.json": {
+    "mtime": 1784665698.3550901,
+    "ast_hash": "ccfd3c1089690c5e9d2b393e9e3c17c7",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/f2177ffd21b11b8d88467743c104aa30fe9e27eeaa9f2e5b67444597fa473df4.json": {
+    "mtime": 1784665698.3670902,
+    "ast_hash": "8901c50f9297a8626fb41827da85d831",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/f8e746f12c5036ec85a9f121ef528aee0c4394940d678d824f3e530a45a480de.json": {
+    "mtime": 1784665698.34709,
+    "ast_hash": "de20f950686b3c430a2b483c46833e3b",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/f9ed36a20eb64526a88d30623f58c0b51b54a8709f3e713e0cfa0de3a72355d9.json": {
+    "mtime": 1784665698.3550901,
+    "ast_hash": "192cf4187233ac7722614586deb641f6",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/fa57e27aa2f544f585831cb50206f16f64e63adddbc3bf9a21452ace9033a350.json": {
+    "mtime": 1784665698.35909,
+    "ast_hash": "4ade79bbae57e16427035f120727211e",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/fb3f032a42f7fea740875ec3b734dd8b8a6bf985d4b8b4cc3580be4631b2e7e5.json": {
+    "mtime": 1784665698.35909,
+    "ast_hash": "657dfeaddaa0956f1aa995cdcb999811",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/semantic/pa567fc138e3a/fcbaf7e6f06a21335284a8d51339aeef0ba8c5948973b71f73f52be31ade5ab4.json": {
+    "mtime": 1784665698.35909,
+    "ast_hash": "7a73ccfb9cc5d03917bcdebcfc7a2be2",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cache/stat-index.json": {
+    "mtime": 1784665257.1573834,
+    "ast_hash": "84e0f81e422899fd83fb36df5c81ea45",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/cost.json": {
+    "mtime": 1784665751.6554086,
+    "ast_hash": "b96929f0865816e7f27d633fffb61a79",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/graph.json": {
+    "mtime": 1784665710.3111598,
+    "ast_hash": "e5444a3550911c7e9c55e8d530c82aba",
+    "semantic_hash": ""
+  },
+  "graphify-out-unificado-backup/manifest.json": {
+    "mtime": 1784665751.6554086,
+    "ast_hash": "e17c2631b9d31aad21ab39e563b9863b",
+    "semantic_hash": ""
+  },
+  "AGENTS.md": {
+    "mtime": 1784666762.3827407,
+    "ast_hash": "f5bfca1ffc48ee393ef180c4501489ea",
+    "semantic_hash": ""
+  },
+  "graphify-out/memory/query_20260721_212719_contin\u00faa_desde_el_estado_actual_del_repositorio__i.md": {
+    "mtime": 1784669239.895713,
+    "ast_hash": "18594034fcc54e0b967075553d377138",
+    "semantic_hash": ""
+  }
+}
