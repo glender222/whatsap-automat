@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - 'integration/**'
       - 'feat/**'
       - 'fix/**'
       - 'docs/**'
@@ -13,6 +14,7 @@ on:
   pull_request:
     branches:
       - main
+      - 'integration/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -53,8 +55,72 @@ jobs:
         working-directory: WhatsaapWeb-JS
         run: npm run build
 
-      - name: Ejecución de suite de pruebas P0 / Unitarias
+      - name: Ejecución de suite de pruebas P0 y mitigaciones de seguridad (bloqueante)
         working-directory: WhatsaapWeb-JS
+        run: npm test
+
+  contracts-ci:
+    name: Shared Contracts CI (Node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [20.x, 22.x]
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+          cache-dependency-path: packages/contracts/package-lock.json
+
+      - name: Instalar dependencias
+        working-directory: packages/contracts
+        run: npm ci
+
+      - name: Validación de tipos estáticos (typecheck)
+        working-directory: packages/contracts
+        run: npm run typecheck
+
+      - name: Pruebas unitarias de contratos, canales y mappers (bloqueante)
+        working-directory: packages/contracts
+        run: npm test
+
+      - name: Compilación de contratos (build)
+        working-directory: packages/contracts
+        run: npm run build
+
+  temporal-spike-ci:
+    name: Temporal Spike CI (Node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [20.x, 22.x]
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+          cache-dependency-path: spikes/temporal/package-lock.json
+
+      - name: Instalar dependencias
+        working-directory: spikes/temporal
+        run: npm ci
+
+      - name: Validación de tipos estáticos (typecheck)
+        working-directory: spikes/temporal
+        run: npm run typecheck
+
+      - name: Pruebas de durabilidad, temporizadores y reintentos (bloqueante)
+        working-directory: spikes/temporal
         run: npm test
 
   frontend-ci:
