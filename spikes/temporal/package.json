@@ -1,0 +1,32 @@
+{
+  "name": "whatsap-automat-temporal-spike",
+  "version": "0.4.0",
+  "description": "PR-07: Isolated spike for Temporal OSS, TypeScript workers, durability, timers, retries and replay",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "start:worker": "tsx src/worker.ts",
+    "start:client": "tsx src/client.ts",
+    "test": "node --import tsx --test src/tests/timer.test.ts src/tests/retry-backoff.test.ts src/tests/replay.test.ts src/tests/durability.test.ts",
+    "test:durability": "node --import tsx --test src/tests/durability.test.ts",
+    "test:retries": "node --import tsx --test src/tests/retry-backoff.test.ts",
+    "test:timer": "node --import tsx --test src/tests/timer.test.ts",
+    "test:replay": "node --import tsx --test src/tests/replay.test.ts",
+    "test:runner": "tsx src/tests/run-all-tests.ts"
+  },
+  "dependencies": {
+    "@temporalio/activity": "^1.25.0",
+    "@temporalio/client": "^1.25.0",
+    "@temporalio/worker": "^1.25.0",
+    "@temporalio/workflow": "^1.25.0",
+    "dotenv": "^17.2.3"
+  },
+  "devDependencies": {
+    "@temporalio/testing": "^1.25.0",
+    "@types/node": "^25.6.0",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.3"
+  }
+}
