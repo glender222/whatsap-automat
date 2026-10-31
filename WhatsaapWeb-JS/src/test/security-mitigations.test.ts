@@ -148,6 +148,24 @@ describe('Security Mitigations Regression Suite (P0 Hardening & Verification)', 
       assert.equal(res.body.error, 'Empresa no asociada al token');
     });
 
+    test('SEC-03: token con claim booleano { companyId: true } es rechazado con 403 y no coerciona a tenant 1', () => {
+      const boolToken = createInvalidCompanyClaimToken(true);
+      const req = createMockRequest({
+        headers: { authorization: `Bearer ${boolToken}` },
+      });
+      const res = createMockResponse();
+      let nextCalled = false;
+
+      requireJwt(req, res as unknown as Response, () => {
+        nextCalled = true;
+      });
+
+      assert.equal(nextCalled, false);
+      assert.equal(res.statusCode, 403);
+      assert.equal(res.body.error, 'Empresa no asociada al token');
+      assert.equal(req.whatsappCompanyId, undefined);
+    });
+
     test('resolveWhatsappCompanyId rechaza invocación si req carece de empresa', () => {
       const req = createMockRequest();
       assert.throws(
@@ -333,6 +351,37 @@ describe('Security Mitigations Regression Suite (P0 Hardening & Verification)', 
 
       assert.equal(nextCalled, true);
     });
+
+    test('POST outbound a JID externo no dispara 403 cuando otra empresa ya tiene conversacion con el mismo contacto', async () => {
+      const mockDb = {
+        query: async (sql: string, params: unknown[] = []) => {
+          if (sql.includes('company_id = $2') && params[1] === 1) {
+            return { rows: [] }; // No existe para Tenant 1
+          }
+          if (sql.includes('SELECT id, company_id FROM conversations') && sql.includes('external_conversation_id = ANY')) {
+            return { rows: [{ id: 99, company_id: 2, external_conversation_id: '5491155554444@c.us' }] }; // Existe para Tenant 2
+          }
+          return { rows: [] };
+        },
+      };
+
+      const resourceAuth = createResourceAuth(mockDb);
+      const req = createMockRequest({
+        whatsappCompanyId: 1,
+        params: { chatId: '5491155554444@c.us' },
+        method: 'POST',
+        body: { message: 'Iniciando conversacion desde Tenant 1' },
+      });
+      const res = createMockResponse();
+      let nextCalled = false;
+
+      await resourceAuth.requireChatTenantAccess(req, res as unknown as Response, () => {
+        nextCalled = true;
+      });
+
+      assert.equal(nextCalled, true);
+      assert.equal(res.statusCode, 200);
+    });
   });
 
   describe('SEC-06: Hardened Direct-SQL Cross-Tenant Isolation (Media & Vouchers)', () => {
@@ -473,6 +522,39 @@ describe('Security Mitigations Regression Suite (P0 Hardening & Verification)', 
       assert.equal(res.statusCode, 403);
       assert.equal(res.body.error, 'FORBIDDEN');
     });
+
+    test('SEC-06: consulta de comprobante con comodines SQL LIKE ("%" o "_") retorna 400 y no filtra existencia cross-tenant', async () => {
+      let queryExecuted = false;
+      const mockDb = {
+        query: async () => {
+          queryExecuted = true;
+          return { rows: [{ id: 90, company_id: 2, file_url: '/vouchers/secret-tenant2.pdf' }] };
+        },
+      };
+
+      const resourceAuth = createResourceAuth(mockDb);
+
+      for (const wildcard of ['%', '_', '___', '%test', 'test%', 'receipt%.pdf']) {
+        const req = createMockRequest({
+          whatsappCompanyId: 1,
+          params: { filename: wildcard },
+          method: 'GET',
+        });
+        const res = createMockResponse();
+        let nextCalled = false;
+
+        await resourceAuth.requireVoucherTenantAccess(req, res as unknown as Response, () => {
+          nextCalled = true;
+        });
+
+        assert.equal(nextCalled, false, `Wildcard "${wildcard}" no debe llamar next()`);
+        assert.equal(res.statusCode, 400, `Wildcard "${wildcard}" debe retornar 400`);
+        assert.equal(res.body.error, 'BAD_REQUEST');
+        assert.equal(res.body.message, 'Identificador de comprobante invalido');
+      }
+
+      assert.equal(queryExecuted, false, 'No debe ejecutar consultas SQL ante comodines ilegales');
+    });
   });
 
   describe('Multipart Routes Protection & Fail-Closed Body Parsing', () => {
@@ -523,6 +605,79 @@ describe('Security Mitigations Regression Suite (P0 Hardening & Verification)', 
       assert.equal(nextCalled, false);
       assert.equal(res.statusCode, 400);
       assert.equal(res.body.error, 'BAD_REQUEST');
+    });
+
+    test('ruta /api/whatsapp/send-message con upload.single("file") antes de requireChatTenantAccess procesa correctamente multipart/form-data con chatId', async () => {
+      const express = require('express');
+      const http = require('http');
+      const pool = require('../config/database');
+      const { createWhatsAppRoutes } = require('../routes/whatsappRoutes');
+
+      const originalQuery = pool.query;
+      pool.query = async () => ({ rows: [] });
+
+      const mockService = {
+        getCompanyStatus: async () => ({}),
+        getQR: () => null,
+        getMyInfo: () => ({}),
+        sendMessage: async (chatId: string, message: string) => ({
+          id: { _serialized: 'msg-123' },
+          timestamp: 1234567890,
+        }),
+      };
+
+      const app = express();
+      app.use((req: any, res: any, next: any) => {
+        req.whatsappCompanyId = 1;
+        next();
+      });
+      app.use('/api/whatsapp', createWhatsAppRoutes(mockService));
+
+      const server = app.listen(0);
+      try {
+        const port = (server.address() as any).port;
+        const boundary = '----WebKitFormBoundary7MA4YWxkTrZu0gW';
+        const body =
+          `--${boundary}\r\n` +
+          `Content-Disposition: form-data; name="chatId"\r\n\r\n` +
+          `123456789@c.us\r\n` +
+          `--${boundary}\r\n` +
+          `Content-Disposition: form-data; name="message"\r\n\r\n` +
+          `Hello world\r\n` +
+          `--${boundary}--\r\n`;
+
+        const response: { statusCode: number; body: any } = await new Promise((resolve, reject) => {
+          const clientReq = http.request(
+            {
+              hostname: '127.0.0.1',
+              port,
+              path: '/api/whatsapp/send-message',
+              method: 'POST',
+              headers: {
+                'Content-Type': `multipart/form-data; boundary=${boundary}`,
+                'Content-Length': Buffer.byteLength(body),
+              },
+            },
+            (clientRes: any) => {
+              let data = '';
+              clientRes.on('data', (chunk: any) => (data += chunk));
+              clientRes.on('end', () => {
+                resolve({ statusCode: clientRes.statusCode, body: JSON.parse(data) });
+              });
+            }
+          );
+          clientReq.on('error', reject);
+          clientReq.write(body);
+          clientReq.end();
+        });
+
+        assert.equal(response.statusCode, 200);
+        assert.equal(response.body.success, true);
+        assert.equal(response.body.data.messageId, 'msg-123');
+      } finally {
+        pool.query = originalQuery;
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
     });
   });
 });

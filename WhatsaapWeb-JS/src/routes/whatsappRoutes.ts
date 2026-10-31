@@ -99,7 +99,7 @@ export function createWhatsAppRoutes(whatsappService: WhatsAppService): Router {
     }
   });
 
-  router.post('/send-message', requireChatTenantAccess, upload.single('file'), async (req: Request, res: Response, next: NextFunction) => {
+  router.post('/send-message', upload.single('file'), requireChatTenantAccess, async (req: Request, res: Response, next: NextFunction) => {
     try {
       const companyId = resolveWhatsappCompanyId(req as JwtRequest);
       const body = req.body as Record<string, string>;

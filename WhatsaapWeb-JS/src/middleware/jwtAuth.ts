@@ -19,8 +19,17 @@ export function extractBearerToken(authHeader: unknown): string | null {
 }
 
 export function toPositiveInt(value: unknown): number | null {
-  const numberValue = Number(value);
-  return Number.isInteger(numberValue) && numberValue > 0 ? numberValue : null;
+  if (typeof value === 'boolean') {
+    return null;
+  }
+  if (typeof value === 'number') {
+    return Number.isInteger(value) && value > 0 ? value : null;
+  }
+  if (typeof value === 'string' && /^\d+$/.test(value.trim())) {
+    const num = Number(value.trim());
+    return Number.isInteger(num) && num > 0 ? num : null;
+  }
+  return null;
 }
 
 export function hasCompanyClaim(user: Record<string, unknown> | undefined): boolean {

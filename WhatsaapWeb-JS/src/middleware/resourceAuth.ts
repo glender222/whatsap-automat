@@ -24,6 +24,7 @@ import path from 'path';
 
 const CHAT_ID_REGEX = /^[a-zA-Z0-9_\-+.:@]+$/;
 const MESSAGE_ID_REGEX = /^[a-zA-Z0-9_\-+.:@=]+$/;
+const VOUCHER_ID_REGEX = /^[a-zA-Z0-9_\-.]+$/;
 
 export function createResourceAuth(db: DbQueryable = pool) {
   return {
@@ -122,6 +123,17 @@ export function createResourceAuth(db: DbQueryable = pool) {
           return next();
         }
 
+        // Outbound creation/messaging via POST allows initiating conversation for this tenant
+        // even if another tenant has communicated with the same external contact.
+        const isActionOnExisting = Boolean(
+          typeof req.path === 'string' &&
+          (req.path.endsWith('/read') || req.path.endsWith('/sessions/complete'))
+        );
+
+        if (req.method === 'POST' && !isActionOnExisting) {
+          return next();
+        }
+
         // Not found for this tenant: check if registered for ANY other tenant
         const existence = await db.query(
           `SELECT id, company_id FROM conversations
@@ -138,21 +150,11 @@ export function createResourceAuth(db: DbQueryable = pool) {
           });
         }
 
-        // Chat no registrado en BD para ningún tenant
-        if (
-          req.method === 'GET' ||
-          req.method === 'PUT' ||
-          req.path.endsWith('/read') ||
-          req.path.endsWith('/sessions/complete')
-        ) {
-          return res.status(404).json({
-            success: false,
-            error: 'CHAT_NOT_FOUND',
-            message: 'Conversacion no encontrada',
-          });
-        }
-        // Si es POST para nuevo mensaje outbound, permitir creación para su propio tenant
-        return next();
+        return res.status(404).json({
+          success: false,
+          error: 'CHAT_NOT_FOUND',
+          message: 'Conversacion no encontrada',
+        });
       } catch (error) {
         return next(error);
       }
@@ -269,7 +271,21 @@ export function createResourceAuth(db: DbQueryable = pool) {
           });
         }
 
-        const searchPattern = `%${paramStr}`;
+        if (
+          !VOUCHER_ID_REGEX.test(paramStr) ||
+          paramStr.includes('%') ||
+          paramStr === '_' ||
+          /^_+$/.test(paramStr)
+        ) {
+          return res.status(400).json({
+            success: false,
+            error: 'BAD_REQUEST',
+            message: 'Identificador de comprobante invalido',
+          });
+        }
+
+        const escapedParam = paramStr.replace(/([%_\\])/g, '\\$1');
+        const searchPattern = `%${escapedParam}`;
         // Direct SQL tenant isolation: filter by company_id in SQL
         const result = await db.query(
           `SELECT id, company_id, file_url FROM payment_vouchers
