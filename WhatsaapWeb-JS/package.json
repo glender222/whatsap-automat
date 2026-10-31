@@ -18,10 +18,16 @@
     "test:p0": "node --import tsx --test src/test/meta-webhook-p0.test.ts src/test/multiagent-routing-p0.test.ts src/test/openai-provider-p0.test.ts src/test/p0-handoff-idempotency.test.ts src/test/p0-safe-runtime.test.ts",
     "test:tools": "node --import tsx --test src/test/tools-reales-ia.test.ts"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
+  "keywords": [
+    "whatsapp",
+    "automation",
+    "multi-tenant",
+    "orchestration",
+    "ai-agents"
+  ],
+  "author": "Glender Vargas",
+  "license": "MIT",
+  "description": "Whatsap-Automat backend: multi-tenant, durable messaging & AI orchestration engine",
   "dependencies": {
     "bcrypt": "^6.0.0",
     "cors": "^2.8.5",

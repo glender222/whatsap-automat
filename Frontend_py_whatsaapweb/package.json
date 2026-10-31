@@ -2,6 +2,9 @@
   "name": "silvaprojets",
   "private": true,
   "version": "0.0.0",
+  "description": "Whatsap-Automat frontend: React + Vite + Tailwind web workspace",
+  "author": "Glender Vargas",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "vite",
