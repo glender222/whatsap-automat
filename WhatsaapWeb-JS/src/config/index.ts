@@ -130,8 +130,16 @@ const config = {
   },
 
   security: {
-    whatsappApiRequireJwt: process.env.WHATSAPP_API_REQUIRE_JWT === 'true',
-    whatsappApiRequireCompanyClaim: process.env.WHATSAPP_API_REQUIRE_COMPANY_CLAIM === 'true',
+    // Fail-closed por defecto: en producción siempre true.
+    // Solo puede desactivarse en modo sandbox aislado no productivo.
+    whatsappApiRequireJwt: nodeEnvironment === 'production'
+      ? true
+      : (process.env.ALLOW_INSECURE_SANDBOX === 'true' && process.env.WHATSAPP_API_REQUIRE_JWT === 'false' ? false : true),
+    whatsappApiRequireCompanyClaim: nodeEnvironment === 'production'
+      ? true
+      : (process.env.ALLOW_INSECURE_SANDBOX === 'true' && process.env.WHATSAPP_API_REQUIRE_COMPANY_CLAIM === 'false' ? false : true),
+    allowInsecureSandbox: nodeEnvironment !== 'production' && process.env.ALLOW_INSECURE_SANDBOX === 'true',
+    sandboxCompanyId: parseInteger('SANDBOX_COMPANY_ID', 9999),
     tokenEncryptionKey: metaTokenEncryptionKey,
   },
 
@@ -148,6 +156,8 @@ const config = {
     persistWrites: process.env.CONVERSATIONS_PERSIST_WRITES === 'true',
   },
 
+  // defaultCompanyId es EXCLUSIVAMENTE para inicialización de esquema y seed de base de datos.
+  // Queda estrictamente PROHIBIDO su uso como fallback en autenticación o autorización operativa.
   defaultCompanyId: parseInteger('DEFAULT_COMPANY_ID', 1) || 1,
 };
 

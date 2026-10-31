@@ -54,6 +54,17 @@ module.exports = {
     password: databasePassword
   },
 
+  security: {
+    whatsappApiRequireJwt: (process.env.NODE_ENV || 'development') === 'production'
+      ? true
+      : (process.env.ALLOW_INSECURE_SANDBOX === 'true' && process.env.WHATSAPP_API_REQUIRE_JWT === 'false' ? false : true),
+    whatsappApiRequireCompanyClaim: (process.env.NODE_ENV || 'development') === 'production'
+      ? true
+      : (process.env.ALLOW_INSECURE_SANDBOX === 'true' && process.env.WHATSAPP_API_REQUIRE_COMPANY_CLAIM === 'false' ? false : true),
+    allowInsecureSandbox: (process.env.NODE_ENV || 'development') !== 'production' && process.env.ALLOW_INSECURE_SANDBOX === 'true',
+    sandboxCompanyId: parseInt(process.env.SANDBOX_COMPANY_ID || '9999', 10),
+  },
+
   // Feature flags para rollout gradual de persistencia conversacional.
   // Default: false (comportamiento 100% legacy).
   // Activar solo tras verificar tablas creadas y smoke test exitoso.
@@ -62,8 +73,7 @@ module.exports = {
     persistWrites: process.env.CONVERSATIONS_PERSIST_WRITES === 'true',
   },
 
-  // Tenant default para aislamiento multi-empresa hasta auth/roles formal.
-  // Usar DEFAULT_COMPANY_ID env var; si no está definido, fallback a 1.
-  // Nota: company_id=1 se inserta idempotentemente en coreModel.createTablesIfNotExists().
+  // defaultCompanyId es EXCLUSIVAMENTE para inicialización de esquema y seed de base de datos.
+  // Queda estrictamente PROHIBIDO su uso como fallback en autenticación o autorización operativa.
   defaultCompanyId: parseInt(process.env.DEFAULT_COMPANY_ID || '1', 10) || 1,
 };

@@ -1,4 +1,5 @@
 import express, { Express, NextFunction, Request, Response } from 'express';
+import fs from 'fs';
 import path from 'path';
 import cors from 'cors';
 import http from 'http';
@@ -22,6 +23,7 @@ import createIaPauseRoutes from './routes/iaPauseRoutes';
 import createPaymentWebhookRoutes from './routes/paymentWebhookRoutes';
 import createConversationRoutes from './routes/conversationRoutes';
 import { optionalWhatsappJwt, requireJwt } from './middleware/jwtAuth';
+import { requireChatTenantAccess, requireMediaTenantAccess, requireVoucherTenantAccess } from './middleware/resourceAuth';
 import { coreModel } from './core/coreModel';
 import config from './config/index';
 import swaggerSpec from './config/swagger';
@@ -77,12 +79,23 @@ export class App {
         maxAge: process.env.NODE_ENV === 'production' ? '7d' : 0,
       })
     );
-    this.app.use(
-      '/uploads/payment-vouchers',
-      express.static(path.join(config.whatsapp.uploadDir, 'payment-vouchers'), {
-        fallthrough: false,
-        maxAge: process.env.NODE_ENV === 'production' ? '7d' : 0,
-      })
+    // SEC-06: Storage scoped y autenticado para comprobantes de pago sensibles
+    this.app.get(
+      '/uploads/payment-vouchers/:filename',
+      requireJwt as any,
+      requireVoucherTenantAccess as any,
+      (req: Request, res: Response) => {
+        const filename = path.basename(String(req.params.filename || ''));
+        const filePath = path.join(config.whatsapp.uploadDir, 'payment-vouchers', filename);
+        if (!fs.existsSync(filePath)) {
+          return res.status(404).json({
+            success: false,
+            error: 'VOUCHER_NOT_FOUND',
+            message: 'Comprobante de pago no encontrado',
+          });
+        }
+        return res.sendFile(path.resolve(filePath));
+      }
     );
     this.app.use(express.json({
       verify: (req: RawBodyRequest, _res, buf) => {
@@ -197,11 +210,22 @@ export class App {
     this.app.use('/api/customer-history', requireJwt, createCustomerHistoryRoutes());
     this.app.use('/api/conversations', requireJwt, createConversationRoutes());
     this.app.use('/api/reports', requireJwt, createReportRoutes());
-    this.app.use('/api/whatsapp', optionalWhatsappJwt, createWhatsAppRoutes(this.whatsappService));
+    this.app.use('/api/whatsapp', requireJwt, createWhatsAppRoutes(this.whatsappService));
     this.app.use('/api/webhooks/meta/whatsapp', createMetaWebhookRoutes(this.whatsappService));
-    this.app.use('/api/chats', optionalWhatsappJwt, createChatCompatRoutes(this.whatsappService));
-    this.app.use('/api/chats', optionalWhatsappJwt, createChatRoutes(this.whatsappService, core));
-    this.app.use('/api/media', optionalWhatsappJwt, createMediaRoutes(this.whatsappService));
+    this.app.use('/api/chats', requireJwt, createChatCompatRoutes(this.whatsappService));
+    this.app.use('/api/chats', requireJwt, createChatRoutes(this.whatsappService, core));
+    this.app.use('/api/media', requireJwt, createMediaRoutes(this.whatsappService));
+
+    // Sandbox aislado para testing no productivo (demo fuera del endpoint productivo)
+    if (config.security.allowInsecureSandbox && process.env.NODE_ENV !== 'production') {
+      const sandboxRouter = express.Router();
+      sandboxRouter.use('/whatsapp', optionalWhatsappJwt, createWhatsAppRoutes(this.whatsappService));
+      sandboxRouter.use('/chats', optionalWhatsappJwt, createChatCompatRoutes(this.whatsappService));
+      sandboxRouter.use('/chats', optionalWhatsappJwt, createChatRoutes(this.whatsappService, core));
+      sandboxRouter.use('/media', optionalWhatsappJwt, createMediaRoutes(this.whatsappService));
+      this.app.use('/api/sandbox', sandboxRouter);
+    }
+
     this.setupLegacyRoutes(core);
 
     this.app.get('/health', (_req: Request, res: Response) => {
@@ -226,18 +250,19 @@ export class App {
     const chatController = new ChatController(this.whatsappService, conversationCore);
     const mediaController = new MediaController(this.whatsappService);
 
-    this.app.get('/qr', authController.getQRLegacy);
-    this.app.get('/status', authController.getStatusLegacy);
-    this.app.get('/me', authController.getMeLegacy);
-    this.app.post('/logout', authController.logoutLegacy);
-    this.app.get('/chats', chatController.getChatsLegacy);
-    this.app.get('/messages/:chatId', chatController.getMessagesLegacy);
-    this.app.post('/send-message', upload.single('file'), chatController.sendMessageLegacy);
-    this.app.get('/api/media/:messageId', optionalWhatsappJwt, mediaController.downloadMedia);
-    this.app.get('/api/media/:messageId/info', optionalWhatsappJwt, mediaController.getMediaInfo);
-    this.app.get('/api/media/:messageId/thumbnail', optionalWhatsappJwt, mediaController.getMediaThumbnail);
-    this.app.get('/download-media/:messageId', optionalWhatsappJwt, mediaController.downloadMedia);
-    this.app.get('/profile-photo/:chatId', optionalWhatsappJwt, mediaController.getProfilePhoto);
+    // Rutas legacy bajo autenticación estricta (P0)
+    this.app.get('/qr', requireJwt as any, authController.getQRLegacy);
+    this.app.get('/status', requireJwt as any, authController.getStatusLegacy);
+    this.app.get('/me', requireJwt as any, authController.getMeLegacy);
+    this.app.post('/logout', requireJwt as any, authController.logoutLegacy);
+    this.app.get('/chats', requireJwt as any, chatController.getChatsLegacy);
+    this.app.get('/messages/:chatId', requireJwt as any, requireChatTenantAccess as any, chatController.getMessagesLegacy);
+    this.app.post('/send-message', requireJwt as any, requireChatTenantAccess as any, upload.single('file'), chatController.sendMessageLegacy);
+    this.app.get('/api/media/:messageId', requireJwt as any, requireMediaTenantAccess as any, mediaController.downloadMedia);
+    this.app.get('/api/media/:messageId/info', requireJwt as any, requireMediaTenantAccess as any, mediaController.getMediaInfo);
+    this.app.get('/api/media/:messageId/thumbnail', requireJwt as any, requireMediaTenantAccess as any, mediaController.getMediaThumbnail);
+    this.app.get('/download-media/:messageId', requireJwt as any, requireMediaTenantAccess as any, mediaController.downloadMedia);
+    this.app.get('/profile-photo/:chatId', requireJwt as any, requireChatTenantAccess as any, mediaController.getProfilePhoto);
   }
 
   private setupSocketIO(): void {

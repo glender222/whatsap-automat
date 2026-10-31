@@ -508,7 +508,7 @@ export class WhatsAppService {
 
       const metaClient = await this.getCompanyMetaClient(companyId);
       const downloaded = await metaClient.downloadMedia(String(attachment.provider_media_id));
-      const uploadDir = path.join(config.whatsapp.uploadDir, 'meta-cloud');
+      const uploadDir = path.join(config.whatsapp.uploadDir, 'tenants', String(companyId), 'meta-cloud');
       await fs.mkdir(uploadDir, { recursive: true });
       const filename = `${String(attachment.provider_media_id).replace(/[^\w.-]/g, '_')}${extensionFromMime(downloaded.mimeType, attachment.filename ? String(attachment.filename) : null)}`;
       const localPath = path.join(uploadDir, filename);

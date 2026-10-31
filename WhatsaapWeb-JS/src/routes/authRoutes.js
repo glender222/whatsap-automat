@@ -219,11 +219,11 @@ function createAuthRoutes(whatsappService) {
   router.delete('/employees/:id', validateJWT, requireAdmin, authController.deleteEmployee);
 
   // ========================
-  // WhatsApp Routes (Legacy)
+  // WhatsApp Routes (Legacy protegidas)
   // ========================
 
-  router.get('/qr', authController.getQR);
-  router.get('/status', authController.getStatus);
+  router.get('/qr', validateJWT, authController.getQR);
+  router.get('/status', validateJWT, authController.getStatus);
   router.post('/logout-whatsapp', validateJWT, authController.logoutWhatsapp);
 
   return router;

@@ -1,16 +1,31 @@
 const { asyncHandler } = require('../middleware/errorHandler');
 const config = require('../config');
 
+function getTenantCompanyId(req) {
+  const user = req?.user || {};
+  const companyId = Number(
+    req?.whatsappCompanyId ||
+    user.companyId ||
+    user.company_id ||
+    user.tenantId
+  );
+  if (Number.isInteger(companyId) && companyId > 0) {
+    return companyId;
+  }
+  throw new Error('TENANT_CLAIM_REQUIRED: Se requiere un token con claim de empresa valido');
+}
+
 class ChatController {
   constructor(whatsappService, conversationCore = null) {
     this.whatsappService = whatsappService;
     this.conversationCore = conversationCore;
   }
 
-  async _logFallback(action, entityType, entityId, error, endpoint) {
+  async _logFallback(action, entityType, entityId, error, endpoint, req = null) {
     if (!this.conversationCore) return;
     try {
-      const companyId = config.defaultCompanyId || 1;
+      const companyId = req ? getTenantCompanyId(req) : null;
+      if (!companyId) return;
       await this.conversationCore.repositories.auditLogRepository.log({
         companyId,
         actor: 'system',
@@ -26,9 +41,9 @@ class ChatController {
 
   // GET /chats (compatibilidad legacy)
   getChatsLegacy = asyncHandler(async (req, res) => {
+    const companyId = getTenantCompanyId(req);
     if (config.features?.persistReads && this.conversationCore) {
       try {
-        const companyId = config.defaultCompanyId || 1;
         const conversations = await this.conversationCore.repositories.conversationRepository.findByCompany(companyId, 50, 0);
         if (conversations && conversations.length > 0) {
           const chats = conversations.map(c => ({
@@ -44,15 +59,18 @@ class ChatController {
         }
       } catch (err) {
         console.error('❌ DB read fallback for getChatsLegacy:', err.message);
-        await this._logFallback('fallback_legacy_read', 'chats', 'list', err, 'getChatsLegacy');
+        await this._logFallback('fallback_legacy_read', 'chats', 'list', err, 'getChatsLegacy', req);
       }
     }
-    const chats = this.whatsappService.getChats();
+    const chats = typeof this.whatsappService.getChatsList === 'function'
+      ? await this.whatsappService.getChatsList(companyId)
+      : this.whatsappService.getChats();
     res.json(chats);
   });
 
   // GET /messages/:chatId (compatibilidad legacy)
   getMessagesLegacy = asyncHandler(async (req, res) => {
+    const companyId = getTenantCompanyId(req);
     const { chatId } = req.params;
     const limit = parseInt(req.query.limit || "50", 10);
     const before = parseInt(req.query.before || "0", 10);
@@ -63,7 +81,6 @@ class ChatController {
 
     if (config.features?.persistReads && this.conversationCore) {
       try {
-        const companyId = config.defaultCompanyId || 1;
         const conversation = await this.conversationCore.repositories.conversationRepository.findByExternal(companyId, 'whatsapp', chatId);
         if (conversation) {
           const messages = await this.conversationCore.repositories.messageRepository.findByConversation(conversation.id, limit, before);
@@ -86,12 +103,12 @@ class ChatController {
         }
       } catch (err) {
         console.error('❌ DB read fallback for getMessagesLegacy:', err.message);
-        await this._logFallback('fallback_legacy_read', 'messages', chatId, err, 'getMessagesLegacy');
+        await this._logFallback('fallback_legacy_read', 'messages', chatId, err, 'getMessagesLegacy', req);
       }
     }
 
     try {
-      const messages = await this.whatsappService.getChatMessages(chatId, limit, before);
+      const messages = await this.whatsappService.getChatMessages(chatId, limit, before, companyId);
       res.json(messages);
     } catch (error) {
       res.status(500).json({ error: "No se pudo obtener los mensajes" });
@@ -100,9 +117,9 @@ class ChatController {
 
   // GET /api/chats
   getChats = asyncHandler(async (req, res) => {
+    const companyId = getTenantCompanyId(req);
     if (config.features?.persistReads && this.conversationCore) {
       try {
-        const companyId = config.defaultCompanyId || 1;
         const conversations = await this.conversationCore.repositories.conversationRepository.findByCompany(companyId, 50, 0);
         if (conversations && conversations.length > 0) {
           const chats = conversations.map(c => ({
@@ -118,15 +135,18 @@ class ChatController {
         }
       } catch (err) {
         console.error('❌ DB read fallback for getChats:', err.message);
-        await this._logFallback('fallback_legacy_read', 'chats', 'list', err, 'getChats');
+        await this._logFallback('fallback_legacy_read', 'chats', 'list', err, 'getChats', req);
       }
     }
-    const chats = this.whatsappService.getChats();
+    const chats = typeof this.whatsappService.getChatsList === 'function'
+      ? await this.whatsappService.getChatsList(companyId)
+      : this.whatsappService.getChats();
     res.json({ success: true, data: chats });
   });
 
   // GET /api/chats/:chatId/messages
   getMessages = asyncHandler(async (req, res) => {
+    const companyId = getTenantCompanyId(req);
     const { chatId } = req.params;
     const limit = parseInt(req.query.limit || "50", 10);
     const before = parseInt(req.query.before || "0", 10);
@@ -140,7 +160,6 @@ class ChatController {
 
     if (config.features?.persistReads && this.conversationCore) {
       try {
-        const companyId = config.defaultCompanyId || 1;
         const conversation = await this.conversationCore.repositories.conversationRepository.findByExternal(companyId, 'whatsapp', chatId);
         if (conversation) {
           const messages = await this.conversationCore.repositories.messageRepository.findByConversation(conversation.id, limit, before);
@@ -163,16 +182,17 @@ class ChatController {
         }
       } catch (err) {
         console.error('❌ DB read fallback for getMessages:', err.message);
-        await this._logFallback('fallback_legacy_read', 'messages', chatId, err, 'getMessages');
+        await this._logFallback('fallback_legacy_read', 'messages', chatId, err, 'getMessages', req);
       }
     }
 
-    const messages = await this.whatsappService.getChatMessages(chatId, limit, before);
+    const messages = await this.whatsappService.getChatMessages(chatId, limit, before, companyId);
     res.json({ success: true, data: messages });
   });
 
   // POST /send-message (compatibilidad legacy)
   sendMessageLegacy = asyncHandler(async (req, res) => {
+    const companyId = getTenantCompanyId(req);
     const { chatId, message } = req.body;
     const file = req.file;
 
@@ -192,7 +212,6 @@ class ChatController {
 
     if (config.features?.persistWrites && this.conversationCore && !file) {
       try {
-        const companyId = config.defaultCompanyId || 1;
         const dto = {
           companyId,
           channel: 'whatsapp',
@@ -211,11 +230,11 @@ class ChatController {
         return;
       } catch (err) {
         console.error('❌ Core outbound failed, falling back to legacy:', err.message);
-        await this._logFallback('fallback_legacy_write', 'message', chatId, err, 'sendMessageLegacy');
+        await this._logFallback('fallback_legacy_write', 'message', chatId, err, 'sendMessageLegacy', req);
       }
     }
 
-    const sentMessage = await this.whatsappService.sendMessage(chatId, message, file);
+    const sentMessage = await this.whatsappService.sendMessage(chatId, message, file, { companyId });
 
     if (file && file.path) {
       const fs = require('fs');
@@ -235,6 +254,7 @@ class ChatController {
 
   // POST /api/chats/:chatId/messages
   sendMessage = asyncHandler(async (req, res) => {
+    const companyId = getTenantCompanyId(req);
     const { chatId } = req.params;
     const { message, templateName, template, templateLanguage, language } = req.body;
     const file = req.file;
@@ -255,7 +275,6 @@ class ChatController {
 
     if (config.features?.persistWrites && this.conversationCore && !file) {
       try {
-        const companyId = config.defaultCompanyId || 1;
         const dto = {
           companyId,
           channel: 'whatsapp',
@@ -276,13 +295,14 @@ class ChatController {
         return;
       } catch (err) {
         console.error('❌ Core outbound failed, falling back to legacy:', err.message);
-        await this._logFallback('fallback_legacy_write', 'message', chatId, err, 'sendMessage');
+        await this._logFallback('fallback_legacy_write', 'message', chatId, err, 'sendMessage', req);
       }
     }
 
     const sentMessage = await this.whatsappService.sendMessage(chatId, message, file, {
       templateName: templateName || template,
       templateLanguage: templateLanguage || language,
+      companyId,
     });
 
     if (file && file.path) {
