@@ -7,6 +7,24 @@ dist-ssr/
 */dist-ssr/
 .tools/
 */.tools/
+*.tsbuildinfo
+*/tsconfig.tsbuildinfo
+*/tsconfig.*.tsbuildinfo
+.vite/
+*/.vite/
+
+# Reportes y cobertura de pruebas
+coverage/
+*/coverage/
+.nyc_output/
+
+# Temporal y persistencia local
+.temporal/
+*/.temporal/
+temporal_data/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
 
 # Variables de entorno y secretos (solo los .env.example se versionan)
 .env

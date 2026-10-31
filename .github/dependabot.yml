@@ -1,0 +1,27 @@
+version: 2
+updates:
+  # Monitoreo de dependencias de Backend
+  - package-ecosystem: "npm"
+    directory: "/WhatsaapWeb-JS"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "chore(deps-backend)"
+
+  # Monitoreo de dependencias de Frontend
+  - package-ecosystem: "npm"
+    directory: "/Frontend_py_whatsaapweb"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "chore(deps-frontend)"
+
+  # Monitoreo de GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "chore(ci)"

@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Reporte de Vulnerabilidad de Seguridad
+    url: https://github.com/glender222/whatsap-automat/security/advisories/new
+    about: Si detectas un problema o vulnerabilidad de seguridad, repórtalo en privado.

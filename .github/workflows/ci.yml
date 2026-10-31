@@ -1,0 +1,112 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - 'feat/**'
+      - 'fix/**'
+      - 'docs/**'
+      - 'test/**'
+      - 'infra/**'
+      - 'audit/**'
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-ci:
+    name: Backend CI (Node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [20.x, 22.x]
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+          cache-dependency-path: WhatsaapWeb-JS/package-lock.json
+
+      - name: Instalar dependencias
+        working-directory: WhatsaapWeb-JS
+        run: npm ci
+
+      - name: Validación de tipos estáticos (typecheck)
+        working-directory: WhatsaapWeb-JS
+        run: npm run typecheck
+
+      - name: Validación de tipos de scripts
+        working-directory: WhatsaapWeb-JS
+        run: npm run typecheck:scripts
+
+      - name: Compilación TypeScript (build)
+        working-directory: WhatsaapWeb-JS
+        run: npm run build
+
+      - name: Ejecución de suite de pruebas P0 / Unitarias
+        working-directory: WhatsaapWeb-JS
+        run: npm test
+
+  frontend-ci:
+    name: Frontend CI (Node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [20.x, 22.x]
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+          cache-dependency-path: Frontend_py_whatsaapweb/package-lock.json
+
+      - name: Instalar dependencias
+        working-directory: Frontend_py_whatsaapweb
+        run: npm ci
+
+      - name: Compilación y empaquetado Vite (build)
+        working-directory: Frontend_py_whatsaapweb
+        run: npm run build
+
+      - name: Análisis estático ESLint (Reporte de baseline)
+        working-directory: Frontend_py_whatsaapweb
+        run: npm run lint
+        continue-on-error: true # Deuda técnica documentada en PR-00: 255 problemas de tipado legacy
+
+  repo-hygiene:
+    name: Higiene del Repositorio y Licencia
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Verificar presencia de LICENSE MIT
+        run: |
+          test -f LICENSE || (echo "ERROR: Archivo LICENSE ausente" && exit 1)
+          grep -q "MIT License" LICENSE || (echo "ERROR: LICENSE no es MIT" && exit 1)
+
+      - name: Verificar que no existan archivos de secretos versionados
+        run: |
+          # Asegurar que ningun archivo .env que no sea .env.example este en git
+          FOUND_ENV=$(git ls-files | grep -E "(^|/)\.env(\..+)?$" | grep -v "\.env\.example$" || true)
+          if [ -n "$FOUND_ENV" ]; then
+            echo "ERROR: Se encontraron archivos de entorno potencialmente sensibles versionados:"
+            echo "$FOUND_ENV"
+            exit 1
+          fi
+          echo "OK: No hay archivos .env sensibles versionados."
