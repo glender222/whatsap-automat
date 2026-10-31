@@ -4,7 +4,17 @@ const ffmpeg = require('fluent-ffmpeg');
 const path = require('path');
 
 function getWhatsappCompanyId(req) {
-  return req.whatsappCompanyId || req.user?.companyId || req.user?.company_id || req.user?.tenantId;
+  const user = req?.user || {};
+  const companyId = Number(
+    req?.whatsappCompanyId ||
+    user.companyId ||
+    user.company_id ||
+    user.tenantId
+  );
+  if (Number.isInteger(companyId) && companyId > 0) {
+    return companyId;
+  }
+  throw new Error('TENANT_CLAIM_REQUIRED: Se requiere un token con claim de empresa valido');
 }
 
 function sendMediaError(res, err) {

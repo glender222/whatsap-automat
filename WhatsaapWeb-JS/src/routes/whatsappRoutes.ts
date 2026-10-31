@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import WhatsAppService from '../services/whatsappService';
 import config from '../config/index';
 import { JwtRequest, resolveWhatsappCompanyId } from '../middleware/jwtAuth';
+import { requireChatTenantAccess } from '../middleware/resourceAuth';
 
 const multer = require('multer') as any;
 
@@ -72,7 +73,7 @@ export function createWhatsAppRoutes(whatsappService: WhatsAppService): Router {
     }
   });
 
-  router.get('/messages/:chatId', async (req: Request, res: Response, next: NextFunction) => {
+  router.get('/messages/:chatId', requireChatTenantAccess, async (req: Request, res: Response, next: NextFunction) => {
     try {
       const companyId = resolveWhatsappCompanyId(req as JwtRequest);
       const limit = parseInt(String(req.query.limit || '50'), 10);
@@ -98,7 +99,7 @@ export function createWhatsAppRoutes(whatsappService: WhatsAppService): Router {
     }
   });
 
-  router.post('/send-message', upload.single('file'), async (req: Request, res: Response, next: NextFunction) => {
+  router.post('/send-message', requireChatTenantAccess, upload.single('file'), async (req: Request, res: Response, next: NextFunction) => {
     try {
       const companyId = resolveWhatsappCompanyId(req as JwtRequest);
       const body = req.body as Record<string, string>;

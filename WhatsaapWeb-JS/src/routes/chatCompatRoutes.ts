@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import WhatsAppService from '../services/whatsappService';
 import config from '../config/index';
 import { JwtRequest, resolveWhatsappCompanyId } from '../middleware/jwtAuth';
+import { requireChatTenantAccess } from '../middleware/resourceAuth';
 import pool from '../config/database';
 import { OperationalRecordRepositoryPg, OperationalRecordService } from '../modules/operations';
 import AgentService from '../services/ai/AgentService';
@@ -31,7 +32,7 @@ export function createChatCompatRoutes(whatsappService: WhatsAppService): Router
     }
   });
 
-  router.get('/:chatId/messages', async (req: Request, res: Response, next: NextFunction) => {
+  router.get('/:chatId/messages', requireChatTenantAccess, async (req: Request, res: Response, next: NextFunction) => {
     try {
       const companyId = resolveWhatsappCompanyId(req as JwtRequest);
       const limit = parseInt(String(req.query.limit || '50'), 10);
@@ -43,7 +44,7 @@ export function createChatCompatRoutes(whatsappService: WhatsAppService): Router
     }
   });
 
-  router.get('/:chatId/session/status', async (req: Request, res: Response, next: NextFunction) => {
+  router.get('/:chatId/session/status', requireChatTenantAccess, async (req: Request, res: Response, next: NextFunction) => {
     try {
       const companyId = resolveWhatsappCompanyId(req as JwtRequest);
       const chatId = String(req.params.chatId);
@@ -58,7 +59,7 @@ export function createChatCompatRoutes(whatsappService: WhatsAppService): Router
     }
   });
 
-  router.get('/:chatId/ai-session', async (req: Request, res: Response, next: NextFunction) => {
+  router.get('/:chatId/ai-session', requireChatTenantAccess, async (req: Request, res: Response, next: NextFunction) => {
     try {
       const companyId = resolveWhatsappCompanyId(req as JwtRequest);
       const chatId = String(req.params.chatId);
@@ -69,7 +70,7 @@ export function createChatCompatRoutes(whatsappService: WhatsAppService): Router
     }
   });
 
-  router.get('/:chatId/agent-activity', async (req: Request, res: Response, next: NextFunction) => {
+  router.get('/:chatId/agent-activity', requireChatTenantAccess, async (req: Request, res: Response, next: NextFunction) => {
     try {
       const companyId = resolveWhatsappCompanyId(req as JwtRequest);
       const chatId = String(req.params.chatId);
@@ -81,7 +82,7 @@ export function createChatCompatRoutes(whatsappService: WhatsAppService): Router
     }
   });
 
-  router.post('/:chatId/sessions/complete', async (req: Request, res: Response, next: NextFunction) => {
+  router.post('/:chatId/sessions/complete', requireChatTenantAccess, async (req: Request, res: Response, next: NextFunction) => {
     try {
       const companyId = resolveWhatsappCompanyId(req as JwtRequest);
       const chatId = String(req.params.chatId);
@@ -103,7 +104,7 @@ export function createChatCompatRoutes(whatsappService: WhatsAppService): Router
     }
   });
 
-  router.post('/:chatId/messages', upload.single('file'), async (req: Request, res: Response, next: NextFunction) => {
+  router.post('/:chatId/messages', requireChatTenantAccess, upload.single('file'), async (req: Request, res: Response, next: NextFunction) => {
     try {
       const companyId = resolveWhatsappCompanyId(req as JwtRequest);
       const body = req.body as Record<string, string>;
@@ -162,8 +163,8 @@ export function createChatCompatRoutes(whatsappService: WhatsAppService): Router
     }
   };
 
-  router.post('/:chatId/read', markAsRead);
-  router.put('/:chatId/read', markAsRead);
+  router.post('/:chatId/read', requireChatTenantAccess, markAsRead);
+  router.put('/:chatId/read', requireChatTenantAccess, markAsRead);
 
   return router;
 }

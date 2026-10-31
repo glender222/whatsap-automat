@@ -2,6 +2,7 @@ const express = require('express');
 const multer = require('multer');
 const ChatController = require('../controllers/chatController');
 const config = require('../config');
+const { requireChatTenantAccess } = require('../middleware/resourceAuth');
 
 function createChatRoutes(whatsappService, conversationCore = null) {
   const router = express.Router();
@@ -24,9 +25,9 @@ function createChatRoutes(whatsappService, conversationCore = null) {
   });
 
   router.get('/', chatController.getChats);
-  router.get('/:chatId/messages', chatController.getMessages);
-  router.post('/:chatId/messages', upload.single("file"), chatController.sendMessage);
-  router.put('/:chatId/read', chatController.markAsRead);
+  router.get('/:chatId/messages', requireChatTenantAccess, chatController.getMessages);
+  router.post('/:chatId/messages', requireChatTenantAccess, upload.single("file"), chatController.sendMessage);
+  router.put('/:chatId/read', requireChatTenantAccess, chatController.markAsRead);
 
   return router;
 }

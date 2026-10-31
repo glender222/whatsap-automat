@@ -26,8 +26,12 @@ const validateJWT = asyncHandler(async (req, res, next) => {
     });
   }
 
-  // Agregar payload al request
+  // Agregar payload al request y propagar companyId
   req.user = payload;
+  const companyId = Number(payload.companyId || payload.company_id || payload.tenantId);
+  if (Number.isInteger(companyId) && companyId > 0) {
+    req.whatsappCompanyId = companyId;
+  }
   next();
 });
 
