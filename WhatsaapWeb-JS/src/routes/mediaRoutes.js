@@ -15,11 +15,11 @@ module.exports = (whatsappService) => {
   router.post('/mark-read/:chatId', requireChatTenantAccess, controller.markChatAsRead);
 
   // envío (texto / media / sticker / nota de voz / doc)
-  router.post('/send', requireChatTenantAccess, upload.single('file'), controller.sendMessage);
+  router.post('/send', upload.single('file'), requireChatTenantAccess, controller.sendMessage);
 
   // NUEVAS rutas separadas para media y documentos
-  router.post('/send-media', requireChatTenantAccess, upload.single('file'), controller.sendMedia);
-  router.post('/send-document', requireChatTenantAccess, upload.single('file'), controller.sendDocument);
+  router.post('/send-media', upload.single('file'), requireChatTenantAccess, controller.sendMedia);
+  router.post('/send-document', upload.single('file'), requireChatTenantAccess, controller.sendDocument);
 
   // media download / info / thumbnail
   router.get('/media/:messageId', requireMediaTenantAccess, controller.downloadMedia);

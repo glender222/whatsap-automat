@@ -341,7 +341,8 @@ class ChatController {
       });
     }
 
-    await this.whatsappService.markAsRead(chatId);
+    const companyId = getTenantCompanyId(req);
+    await this.whatsappService.markAsRead(chatId, companyId);
 
     res.json({
       success: true,

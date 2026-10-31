@@ -20,82 +20,139 @@ export function normalizeChatIdCandidates(raw: string): string[] {
   return Array.from(set);
 }
 
+import path from 'path';
+
+const CHAT_ID_REGEX = /^[a-zA-Z0-9_\-+.:@]+$/;
+const MESSAGE_ID_REGEX = /^[a-zA-Z0-9_\-+.:@=]+$/;
+
 export function createResourceAuth(db: DbQueryable = pool) {
   return {
     requireChatTenantAccess: async (req: JwtRequest, res: Response, next: NextFunction): Promise<void | Response> => {
       try {
         const companyId = resolveWhatsappCompanyId(req);
-        const rawChatId = req.params.chatId || req.params.id || req.body?.chatId || req.body?.to;
-        if (!rawChatId) {
-          return next();
+        const rawChatId = req.params?.chatId || req.params?.id || req.body?.chatId || req.body?.to;
+        if (!rawChatId || (typeof rawChatId !== 'string' && typeof rawChatId !== 'number')) {
+          return res.status(400).json({
+            success: false,
+            error: 'BAD_REQUEST',
+            message: 'Identificador de chat requerido',
+          });
         }
 
         const chatIdStr = String(rawChatId).trim();
+        if (!chatIdStr) {
+          return res.status(400).json({
+            success: false,
+            error: 'BAD_REQUEST',
+            message: 'Identificador de chat no puede estar vacio',
+          });
+        }
+
+        if (!CHAT_ID_REGEX.test(chatIdStr) || chatIdStr.length > 128) {
+          return res.status(400).json({
+            success: false,
+            error: 'INVALID_CHAT_ID',
+            message: 'Formato de identificador de chat invalido',
+          });
+        }
+
         const numericId = Number(chatIdStr);
         const isNumericId = Number.isInteger(numericId) && numericId > 0 && !chatIdStr.includes('@');
 
         if (isNumericId) {
+          // Direct SQL tenant isolation: filter by company_id in SQL
           const result = await db.query(
-            `SELECT id, company_id, external_conversation_id FROM conversations WHERE id = $1 LIMIT 1`,
+            `SELECT id, company_id, external_conversation_id FROM conversations WHERE id = $1 AND company_id = $2 LIMIT 1`,
+            [numericId, companyId]
+          );
+
+          if (result.rows.length > 0) {
+            const row = result.rows[0];
+            if (Number(row.company_id) !== companyId) {
+              return res.status(403).json({
+                success: false,
+                error: 'FORBIDDEN',
+                message: 'Acceso denegado a conversacion de otra empresa',
+              });
+            }
+            req.conversation = row;
+            return next();
+          }
+
+          // Not found for this tenant: verify whether it exists for another tenant
+          const existence = await db.query(
+            `SELECT id, company_id FROM conversations WHERE id = $1 LIMIT 1`,
             [numericId]
           );
-          if (result.rows.length === 0) {
-            return res.status(404).json({
-              success: false,
-              error: 'CHAT_NOT_FOUND',
-              message: 'Conversacion no encontrada',
-            });
-          }
-          const row = result.rows[0];
-          if (Number(row.company_id) !== companyId) {
+          if (existence.rows.length > 0) {
             return res.status(403).json({
               success: false,
               error: 'FORBIDDEN',
               message: 'Acceso denegado a conversacion de otra empresa',
             });
           }
+
+          return res.status(404).json({
+            success: false,
+            error: 'CHAT_NOT_FOUND',
+            message: 'Conversacion no encontrada',
+          });
+        }
+
+        const candidates = normalizeChatIdCandidates(chatIdStr);
+        // Direct SQL tenant isolation: filter by company_id in SQL
+        const result = await db.query(
+          `SELECT id, company_id, external_conversation_id FROM conversations
+           WHERE external_conversation_id = ANY($1::varchar[]) AND company_id = $2
+           ORDER BY last_message_at DESC NULLS LAST, id DESC
+           LIMIT 1`,
+          [candidates, companyId]
+        );
+
+        if (result.rows.length > 0) {
+          const row = result.rows[0];
+          if (Number(row.company_id) !== companyId) {
+            return res.status(403).json({
+              success: false,
+              error: 'FORBIDDEN',
+              message: 'Acceso denegado al chat de otra empresa',
+            });
+          }
           req.conversation = row;
           return next();
         }
 
-        const candidates = normalizeChatIdCandidates(chatIdStr);
-        const result = await db.query(
-          `SELECT id, company_id, external_conversation_id FROM conversations
+        // Not found for this tenant: check if registered for ANY other tenant
+        const existence = await db.query(
+          `SELECT id, company_id FROM conversations
            WHERE external_conversation_id = ANY($1::varchar[])
-           ORDER BY last_message_at DESC NULLS LAST, id DESC`,
+           LIMIT 1`,
           [candidates]
         );
 
-        if (result.rows.length === 0) {
-          // Chat no registrado en BD para ningún tenant
-          if (
-            req.method === 'GET' ||
-            req.method === 'PUT' ||
-            req.path.endsWith('/read') ||
-            req.path.endsWith('/sessions/complete')
-          ) {
-            return res.status(404).json({
-              success: false,
-              error: 'CHAT_NOT_FOUND',
-              message: 'Conversacion no encontrada',
-            });
-          }
-          // Si es POST para nuevo mensaje outbound, permitir creación para su propio tenant
-          return next();
+        if (existence.rows.length > 0) {
+          return res.status(403).json({
+            success: false,
+            error: 'FORBIDDEN',
+            message: 'Acceso denegado al chat de otra empresa',
+          });
         }
 
-        const matchingTenant = result.rows.find((r) => Number(r.company_id) === companyId);
-        if (matchingTenant) {
-          req.conversation = matchingTenant;
-          return next();
+        // Chat no registrado en BD para ningún tenant
+        if (
+          req.method === 'GET' ||
+          req.method === 'PUT' ||
+          req.path.endsWith('/read') ||
+          req.path.endsWith('/sessions/complete')
+        ) {
+          return res.status(404).json({
+            success: false,
+            error: 'CHAT_NOT_FOUND',
+            message: 'Conversacion no encontrada',
+          });
         }
-
-        // Existe en el sistema pero pertenece a OTRA empresa (SEC-01)
-        return res.status(403).json({
-          success: false,
-          error: 'FORBIDDEN',
-          message: 'Acceso denegado al chat de otra empresa',
-        });
+        // Si es POST para nuevo mensaje outbound, permitir creación para su propio tenant
+        return next();
       } catch (error) {
         return next(error);
       }
@@ -104,12 +161,33 @@ export function createResourceAuth(db: DbQueryable = pool) {
     requireMediaTenantAccess: async (req: JwtRequest, res: Response, next: NextFunction): Promise<void | Response> => {
       try {
         const companyId = resolveWhatsappCompanyId(req);
-        const rawMessageId = req.params.messageId || req.params.id;
-        if (!rawMessageId) {
-          return next();
+        const rawMessageId = req.params?.messageId || req.params?.id;
+        if (!rawMessageId || (typeof rawMessageId !== 'string' && typeof rawMessageId !== 'number')) {
+          return res.status(400).json({
+            success: false,
+            error: 'BAD_REQUEST',
+            message: 'Identificador de archivo multimedia requerido',
+          });
         }
 
         const messageIdStr = String(rawMessageId).trim();
+        if (!messageIdStr) {
+          return res.status(400).json({
+            success: false,
+            error: 'BAD_REQUEST',
+            message: 'Identificador de archivo multimedia no puede estar vacio',
+          });
+        }
+
+        if (!MESSAGE_ID_REGEX.test(messageIdStr) || messageIdStr.length > 256) {
+          return res.status(400).json({
+            success: false,
+            error: 'INVALID_MESSAGE_ID',
+            message: 'Formato de identificador de mensaje invalido',
+          });
+        }
+
+        // Direct SQL tenant isolation: filter by m.company_id in SQL
         const result = await db.query(
           `SELECT m.id AS message_id, m.company_id, a.id AS attachment_id, a.internal_path, a.provider_media_id
            FROM messages m
@@ -118,22 +196,40 @@ export function createResourceAuth(db: DbQueryable = pool) {
              m.provider_message_id = $1
              OR m.id::text = $1
              OR a.provider_media_id = $1
-           )
+           ) AND m.company_id = $2
            ORDER BY a.id DESC NULLS LAST
+           LIMIT 1`,
+          [messageIdStr, companyId]
+        );
+
+        if (result.rows.length > 0) {
+          const row = result.rows[0];
+          if (Number(row.company_id) !== companyId) {
+            return res.status(403).json({
+              success: false,
+              error: 'FORBIDDEN',
+              message: 'Acceso denegado a archivo multimedia de otra empresa',
+            });
+          }
+          req.mediaAttachment = row;
+          return next();
+        }
+
+        // Not found for this tenant: check if exists for ANY other tenant
+        const existence = await db.query(
+          `SELECT m.id AS message_id, m.company_id
+           FROM messages m
+           LEFT JOIN message_attachments a ON a.message_id = m.id
+           WHERE (
+             m.provider_message_id = $1
+             OR m.id::text = $1
+             OR a.provider_media_id = $1
+           )
            LIMIT 1`,
           [messageIdStr]
         );
 
-        if (result.rows.length === 0) {
-          return res.status(404).json({
-            success: false,
-            error: 'MEDIA_NOT_FOUND',
-            message: 'Archivo multimedia no encontrado',
-          });
-        }
-
-        const row = result.rows[0];
-        if (Number(row.company_id) !== companyId) {
+        if (existence.rows.length > 0) {
           return res.status(403).json({
             success: false,
             error: 'FORBIDDEN',
@@ -141,8 +237,11 @@ export function createResourceAuth(db: DbQueryable = pool) {
           });
         }
 
-        req.mediaAttachment = row;
-        return next();
+        return res.status(404).json({
+          success: false,
+          error: 'MEDIA_NOT_FOUND',
+          message: 'Archivo multimedia no encontrado',
+        });
       } catch (error) {
         return next(error);
       }
@@ -151,30 +250,55 @@ export function createResourceAuth(db: DbQueryable = pool) {
     requireVoucherTenantAccess: async (req: JwtRequest, res: Response, next: NextFunction): Promise<void | Response> => {
       try {
         const companyId = resolveWhatsappCompanyId(req);
-        const rawParam = req.params.filename || req.params.id;
-        if (!rawParam) {
+        const rawParam = req.params?.filename || req.params?.id;
+        if (!rawParam || (typeof rawParam !== 'string' && typeof rawParam !== 'number')) {
+          return res.status(400).json({
+            success: false,
+            error: 'BAD_REQUEST',
+            message: 'Identificador de comprobante requerido',
+          });
+        }
+
+        const rawParamStr = String(rawParam).trim();
+        const paramStr = path.basename(rawParamStr);
+        if (!paramStr || paramStr === '.' || paramStr === '..' || paramStr.includes('/') || paramStr.includes('\\')) {
+          return res.status(400).json({
+            success: false,
+            error: 'BAD_REQUEST',
+            message: 'Identificador de comprobante invalido',
+          });
+        }
+
+        const searchPattern = `%${paramStr}`;
+        // Direct SQL tenant isolation: filter by company_id in SQL
+        const result = await db.query(
+          `SELECT id, company_id, file_url FROM payment_vouchers
+           WHERE (file_url LIKE $1 OR id::text = $2) AND company_id = $3
+           LIMIT 1`,
+          [searchPattern, paramStr, companyId]
+        );
+
+        if (result.rows.length > 0) {
+          const row = result.rows[0];
+          if (Number(row.company_id) !== companyId) {
+            return res.status(403).json({
+              success: false,
+              error: 'FORBIDDEN',
+              message: 'Acceso denegado a comprobante de otra empresa',
+            });
+          }
           return next();
         }
 
-        const paramStr = String(rawParam).trim();
-        const searchPattern = `%${paramStr}`;
-        const result = await db.query(
-          `SELECT id, company_id, file_url FROM payment_vouchers
+        // Not found for this tenant: check if exists for ANY other tenant
+        const existence = await db.query(
+          `SELECT id, company_id FROM payment_vouchers
            WHERE file_url LIKE $1 OR id::text = $2
            LIMIT 1`,
           [searchPattern, paramStr]
         );
 
-        if (result.rows.length === 0) {
-          return res.status(404).json({
-            success: false,
-            error: 'VOUCHER_NOT_FOUND',
-            message: 'Comprobante de pago no encontrado',
-          });
-        }
-
-        const row = result.rows[0];
-        if (Number(row.company_id) !== companyId) {
+        if (existence.rows.length > 0) {
           return res.status(403).json({
             success: false,
             error: 'FORBIDDEN',
@@ -182,7 +306,11 @@ export function createResourceAuth(db: DbQueryable = pool) {
           });
         }
 
-        return next();
+        return res.status(404).json({
+          success: false,
+          error: 'VOUCHER_NOT_FOUND',
+          message: 'Comprobante de pago no encontrado',
+        });
       } catch (error) {
         return next(error);
       }

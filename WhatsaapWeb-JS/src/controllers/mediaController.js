@@ -449,7 +449,8 @@ class MediaController {
       return res.status(400).json({ success: false, error: 'chatId requerido' });
     }
 
-    await this.whatsappService.markAsRead(chatId);
+    const companyId = getWhatsappCompanyId(req);
+    await this.whatsappService.markAsRead(chatId, companyId);
 
     return res.json({
       success: true,
@@ -465,8 +466,9 @@ class MediaController {
    * Esto te sirve para la vista "sidebar de conversaciones".
    * ============================================================
    */
-  getChatsList = asyncHandler(async (_req, res) => {
-    const chats = await this.whatsappService.getChatsList();
+  getChatsList = asyncHandler(async (req, res) => {
+    const companyId = getWhatsappCompanyId(req);
+    const chats = await this.whatsappService.getChatsList(companyId);
     // Debe venir ya curado: id, name, unreadCount, lastMessageTimestamp,
     // lastMessagePreview, isGroup, etc.
     return res.json({
