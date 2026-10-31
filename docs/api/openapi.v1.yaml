@@ -1,0 +1,1299 @@
+openapi: 3.1.0
+info:
+  title: Whatsap-Automat API v1
+  version: 0.4.0
+  description: >-
+    Canonical versioned REST API for Whatsap-Automat v0.4.
+    Adheres to Hexagonal Architecture, strict multi-tenant isolation, CAS optimistic concurrency,
+    and RFC 7807/RFC 9457 Problem Details error semantics.
+servers:
+  - url: /api/v1
+    description: Current cluster / local runtime
+
+paths:
+  /workspaces/current:
+    get:
+      summary: Obtener espacio de trabajo y permisos actuales
+      description: Devuelve información del tenant autenticado, permisos y capacidades activas.
+      operationId: getCurrentWorkspace
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Espacio de trabajo resuelto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceCurrentResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /conversations:
+    get:
+      summary: Listar conversaciones
+      description: Lista conversaciones del tenant con filtros y paginación por cursor.
+      operationId: listConversations
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+        - name: channel
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/ChannelKind'
+        - name: stage
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/CommercialStage'
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/ConversationStatus'
+      responses:
+        '200':
+          description: Lista paginada de conversaciones
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedConversationsResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /conversations/{id}/messages:
+    get:
+      summary: Obtener mensajes de una conversación
+      description: Devuelve mensajes y estados de entrega con paginación cursor.
+      operationId: getConversationMessages
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: Mensajes de la conversación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedMessagesResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    post:
+      summary: Enviar mensaje humano en conversación
+      description: Envia un mensaje desde la interfaz humana usando control de idempotencia y CAS version.
+      operationId: sendConversationMessage
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendConversationMessageRequest'
+      responses:
+        '202':
+          description: Mensaje aceptado para despacho
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SendMessageResult'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /conversations/{id}/takeover:
+    post:
+      summary: Toma de control humano (Handoff CAS)
+      description: Asigna la conversación a un operador humano e invalida la versión concurrente si ha cambiado.
+      operationId: takeoverConversation
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TakeoverRequest'
+      responses:
+        '200':
+          description: Control asignado exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Conversation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /conversations/{id}/pause-ai:
+    post:
+      summary: Pausar agente IA en conversación
+      description: Pausa temporal o indefinidamente la intervención automática de la IA en la conversación con CAS.
+      operationId: pauseConversationAi
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PauseAiRequest'
+      responses:
+        '200':
+          description: IA pausada exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Conversation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /channel-connections:
+    get:
+      summary: Listar conexiones de canales y salud
+      description: Lista las conexiones configuradas para el tenant sin exponer tokens ni secretos.
+      operationId: listChannelConnections
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Conexiones del tenant
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ChannelConnection'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /channel-connections/{id}/validate:
+    post:
+      summary: Diagnosticar y validar conexión de canal
+      description: Ejecuta verificación de credenciales y permisos en el proveedor sin registrar mensajes de prueba.
+      operationId: validateChannelConnection
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Resultado del diagnóstico
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelConnectionHealth'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /agent-graphs:
+    post:
+      summary: Crear borrador de grafo de agentes
+      description: Registra una nueva definición en estado draft para el tenant.
+      operationId: createAgentGraphDraft
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAgentGraphRequest'
+      responses:
+        '201':
+          description: Borrador creado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentGraphVersion'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /agent-graphs/{id}/validate:
+    post:
+      summary: Validar grafo de agentes (Lint & Políticas)
+      description: Compila y valida loops, dependencias de nodos, presupuestos y límites sin efectos externos.
+      operationId: validateAgentGraph
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Grafo válido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GraphValidationResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /agent-graphs/{id}/publish:
+    post:
+      summary: Publicar versión inmutable de grafo
+      description: Congela la definición con specHash y publica la versión activa para ejecución.
+      operationId: publishAgentGraph
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: If-Match
+          in: header
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Versión inmutable publicada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentGraphVersion'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /agent-runs/simulate:
+    post:
+      summary: Simular ejecución de grafo en sandbox
+      description: Ejecuta un dry-run determinista sin efectos colaterales de escritura ni envíos a canales externos.
+      operationId: simulateAgentRun
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentSimulationRequest'
+      responses:
+        '200':
+          description: Resultado de la simulación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentSimulationResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /agent-runs/{id}/trace:
+    get:
+      summary: Obtener traza y timeline de ejecución de agente
+      description: Devuelve el historial paso a paso auditado, omitiendo datos sensibles y secretos.
+      operationId: getAgentRunTrace
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Traza de ejecución
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentRunTrace'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /automation-definitions/{id}/publish:
+    post:
+      summary: Publicar regla o automatización
+      description: Versiona y activa una definición de automatización vinculada a un grafo.
+      operationId: publishAutomationDefinition
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Automatización publicada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AutomationDefinition'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /approvals:
+    get:
+      summary: Consultar cola de aprobaciones pendientes
+      description: Lista las solicitudes de aprobación que requieren revisión humana según el rol.
+      operationId: listApprovals
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/ApprovalStatus'
+        - name: risk
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/RiskLevel'
+      responses:
+        '200':
+          description: Lista de aprobaciones
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ApprovalRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /approvals/{id}/decision:
+    post:
+      summary: Aprobar o rechazar solicitud
+      description: Registra la decisión humana sobre una acción sensible garantizando idempotencia.
+      operationId: decideApproval
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApprovalDecisionRequest'
+      responses:
+        '200':
+          description: Decisión procesada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalDecisionResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /operations/executions:
+    get:
+      summary: Consultar ejecuciones operacionales y reintentos
+      description: Lista ejecuciones de workflows y actividades duraderas para auditoría de soporte.
+      operationId: listOperationExecutions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: workflowId
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/ExecutionStatus'
+      responses:
+        '200':
+          description: Registros operacionales
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ExecutionRecord'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT token containing tenantId and user roles claims.
+
+  responses:
+    Unauthorized:
+      description: Autenticación requerida o token inválido
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+    Forbidden:
+      description: Permiso denegado por políticas de seguridad o roles
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+    NotFound:
+      description: Recurso no encontrado en el tenant
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+    Conflict:
+      description: Conflicto de versión concurrente (CAS) o duplicidad
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+    ValidationError:
+      description: Error de validación en los parámetros de la petición
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+
+  schemas:
+    ChannelKind:
+      type: string
+      enum: [whatsapp-cloud, instagram, messenger, telegram]
+
+    ChannelCapability:
+      type: string
+      enum: [text, image, audio, video, document, template, interactive, read-receipt, typing]
+
+    CommercialStage:
+      type: string
+      enum: [new, ai_assisting, catalog, preorder, handoff, payment, closed]
+
+    ConversationStatus:
+      type: string
+      enum: [open, closed, archived]
+
+    DeliveryState:
+      type: string
+      enum: [pending, dispatched, provider_accepted, delivered, read, failed, unknown_delivery, cancelled]
+
+    AgentRunState:
+      type: string
+      enum: [queued, running, awaiting_approval, waiting, handed_off, completed, failed, cancelled, budget_exhausted]
+
+    RiskLevel:
+      type: string
+      enum: [low, medium, high]
+
+    ApprovalStatus:
+      type: string
+      enum: [pending, approved, rejected, expired, revoked]
+
+    ExecutionStatus:
+      type: string
+      enum: [queued, running, completed, failed, cancelled]
+
+    StandardErrorCode:
+      type: string
+      enum:
+        - UNAUTHORIZED
+        - POLICY_DENIED
+        - APPROVAL_REQUIRED
+        - NOT_FOUND
+        - CONFLICT
+        - VALIDATION_ERROR
+        - RATE_LIMITED
+        - UNKNOWN_DELIVERY
+        - RETRYABLE
+        - INTERNAL_ERROR
+
+    InvalidParamDetail:
+      type: object
+      required: [name, reason]
+      properties:
+        name:
+          type: string
+        reason:
+          type: string
+
+    ProblemDetails:
+      type: object
+      required: [type, title, status, detail, instance, code, correlationId]
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+        code:
+          $ref: '#/components/schemas/StandardErrorCode'
+        correlationId:
+          type: string
+        invalidParams:
+          type: array
+          items:
+            $ref: '#/components/schemas/InvalidParamDetail'
+        metadata:
+          type: object
+
+    WorkspaceCurrentResponse:
+      type: object
+      required: [tenantId, tenantName, roles, capabilities]
+      properties:
+        tenantId:
+          type: string
+        tenantName:
+          type: string
+        roles:
+          type: array
+          items:
+            type: string
+        capabilities:
+          type: array
+          items:
+            type: string
+
+    Conversation:
+      type: object
+      required:
+        - id
+        - tenantId
+        - connectionId
+        - channel
+        - externalConversationId
+        - status
+        - stage
+        - stateVersion
+        - aiPaused
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+        tenantId:
+          type: string
+        connectionId:
+          type: string
+        channel:
+          $ref: '#/components/schemas/ChannelKind'
+        externalConversationId:
+          type: string
+        contactIdentityId:
+          type: string
+          nullable: true
+        title:
+          type: string
+          nullable: true
+        status:
+          $ref: '#/components/schemas/ConversationStatus'
+        stage:
+          $ref: '#/components/schemas/CommercialStage'
+        stateVersion:
+          type: integer
+        aiPaused:
+          type: boolean
+        aiPausedUntil:
+          type: string
+          format: date-time
+          nullable: true
+        assignedUserId:
+          type: string
+          nullable: true
+        assignedAgentId:
+          type: string
+          nullable: true
+        lastMessageAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    PaginatedConversationsResponse:
+      type: object
+      required: [items, nextCursor, prevCursor, hasMore]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Conversation'
+        nextCursor:
+          type: string
+          nullable: true
+        prevCursor:
+          type: string
+          nullable: true
+        totalCount:
+          type: integer
+        hasMore:
+          type: boolean
+
+    ConversationMessage:
+      type: object
+      required:
+        - id
+        - conversationId
+        - tenantId
+        - connectionId
+        - channel
+        - direction
+        - deliveryState
+        - attachments
+        - causedBy
+        - createdAt
+      properties:
+        id:
+          type: string
+        conversationId:
+          type: string
+        tenantId:
+          type: string
+        connectionId:
+          type: string
+        channel:
+          $ref: '#/components/schemas/ChannelKind'
+        direction:
+          type: string
+          enum: [inbound, outbound]
+        deliveryState:
+          $ref: '#/components/schemas/DeliveryState'
+        body:
+          type: string
+          nullable: true
+        attachments:
+          type: array
+          items:
+            type: object
+            required: [mimeType]
+            properties:
+              id:
+                type: string
+              filename:
+                type: string
+              mimeType:
+                type: string
+              sizeBytes:
+                type: integer
+              url:
+                type: string
+        causedBy:
+          type: object
+          required: [type, id]
+          properties:
+            type:
+              type: string
+              enum: [human, workflow, agent, customer, system]
+            id:
+              type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    PaginatedMessagesResponse:
+      type: object
+      required: [items, nextCursor, prevCursor, hasMore]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConversationMessage'
+        nextCursor:
+          type: string
+          nullable: true
+        prevCursor:
+          type: string
+          nullable: true
+        hasMore:
+          type: boolean
+
+    SendConversationMessageRequest:
+      type: object
+      required: [message, expectedConversationVersion]
+      properties:
+        message:
+          type: object
+          required: [kind]
+          properties:
+            kind:
+              type: string
+              enum: [text, media, template, interactive]
+            text:
+              type: string
+            mediaRef:
+              type: string
+            templateId:
+              type: string
+            parameters:
+              type: object
+        expectedConversationVersion:
+          type: integer
+
+    SendMessageResult:
+      type: object
+      required: [providerMessageId, accepted, rawStatus, deliveryState]
+      properties:
+        providerMessageId:
+          type: string
+          nullable: true
+        accepted:
+          type: boolean
+        rawStatus:
+          type: string
+        deliveryState:
+          $ref: '#/components/schemas/DeliveryState'
+
+    TakeoverRequest:
+      type: object
+      required: [expectedVersion, userId]
+      properties:
+        expectedVersion:
+          type: integer
+        userId:
+          type: string
+        reason:
+          type: string
+
+    PauseAiRequest:
+      type: object
+      required: [expectedVersion]
+      properties:
+        expectedVersion:
+          type: integer
+        durationSeconds:
+          type: integer
+        reason:
+          type: string
+
+    ChannelConnectionHealth:
+      type: object
+      required: [configured, authorized, lastErrorCode, lastCheckedAt]
+      properties:
+        configured:
+          type: boolean
+        authorized:
+          type: boolean
+        lastErrorCode:
+          type: string
+          nullable: true
+        lastCheckedAt:
+          type: string
+          format: date-time
+
+    ChannelConnection:
+      type: object
+      required: [id, tenantId, channel, name, externalAccountId, status, capabilities, health, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+        tenantId:
+          type: string
+        channel:
+          $ref: '#/components/schemas/ChannelKind'
+        name:
+          type: string
+        externalAccountId:
+          type: string
+        status:
+          type: string
+          enum: [active, inactive, needs_reauthorization, error]
+        capabilities:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChannelCapability'
+        health:
+          $ref: '#/components/schemas/ChannelConnectionHealth'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    AgentGraphVersion:
+      type: object
+      required:
+        - schemaVersion
+        - graphId
+        - version
+        - tenantId
+        - entryNodeId
+        - nodes
+        - edges
+        - policyRef
+        - limits
+        - status
+        - specHash
+      properties:
+        schemaVersion:
+          type: integer
+          enum: [1]
+        graphId:
+          type: string
+        version:
+          type: integer
+        tenantId:
+          type: string
+        entryNodeId:
+          type: string
+        nodes:
+          type: array
+          items:
+            type: object
+            required: [id, kind, config]
+            properties:
+              id:
+                type: string
+              kind:
+                type: string
+              config:
+                type: object
+        edges:
+          type: array
+          items:
+            type: object
+            required: [id, from, to]
+            properties:
+              id:
+                type: string
+              from:
+                type: string
+              to:
+                type: string
+              condition:
+                type: string
+              priority:
+                type: integer
+        policyRef:
+          type: string
+        limits:
+          type: object
+          required: [maxSteps, maxDelegations, maxParallelNodes, maxDurationSeconds, maxModelTokens, maxCostMicroUsd]
+          properties:
+            maxSteps:
+              type: integer
+            maxDelegations:
+              type: integer
+            maxParallelNodes:
+              type: integer
+            maxDurationSeconds:
+              type: integer
+            maxModelTokens:
+              type: integer
+            maxCostMicroUsd:
+              type: integer
+        status:
+          type: string
+          enum: [draft, published, retired]
+        specHash:
+          type: string
+
+    CreateAgentGraphRequest:
+      type: object
+      required: [graphId, entryNodeId, nodes, edges, policyRef, limits]
+      properties:
+        graphId:
+          type: string
+        entryNodeId:
+          type: string
+        nodes:
+          type: array
+          items:
+            type: object
+            required: [id, kind, config]
+            properties:
+              id:
+                type: string
+              kind:
+                type: string
+              config:
+                type: object
+        edges:
+          type: array
+          items:
+            type: object
+            required: [id, from, to]
+            properties:
+              id:
+                type: string
+              from:
+                type: string
+              to:
+                type: string
+        policyRef:
+          type: string
+        limits:
+          type: object
+
+    GraphValidationResult:
+      type: object
+      required: [valid, issues]
+      properties:
+        valid:
+          type: boolean
+        issues:
+          type: array
+          items:
+            type: object
+            required: [severity, message]
+            properties:
+              severity:
+                type: string
+                enum: [error, warning]
+              message:
+                type: string
+              nodeId:
+                type: string
+
+    AgentSimulationRequest:
+      type: object
+      required: [graphId, mockInput]
+      properties:
+        graphId:
+          type: string
+        graphVersion:
+          type: integer
+        mockInput:
+          type: string
+        mockConversationState:
+          type: object
+
+    AgentSimulationResult:
+      type: object
+      required: [executedNodes, simulatedMessages, approvalsTriggered, finalState, totalSteps]
+      properties:
+        executedNodes:
+          type: array
+          items:
+            type: object
+            required: [nodeId, kind, output, durationMs]
+            properties:
+              nodeId:
+                type: string
+              kind:
+                type: string
+              output:
+                type: object
+              durationMs:
+                type: number
+        simulatedMessages:
+          type: array
+          items:
+            type: object
+            required: [kind]
+            properties:
+              kind:
+                type: string
+              text:
+                type: string
+        approvalsTriggered:
+          type: array
+          items:
+            type: object
+            required: [nodeId, risk, action]
+            properties:
+              nodeId:
+                type: string
+              risk:
+                type: string
+              action:
+                type: string
+        finalState:
+          $ref: '#/components/schemas/AgentRunState'
+        totalSteps:
+          type: integer
+
+    AgentRunTrace:
+      type: object
+      required: [runId, tenantId, graphId, graphVersion, state, timeline, totalSteps]
+      properties:
+        runId:
+          type: string
+        tenantId:
+          type: string
+        graphId:
+          type: string
+        graphVersion:
+          type: integer
+        state:
+          $ref: '#/components/schemas/AgentRunState'
+        timeline:
+          type: array
+          items:
+            type: object
+            required: [timestamp, step, nodeId, event]
+            properties:
+              timestamp:
+                type: string
+                format: date-time
+              step:
+                type: integer
+              nodeId:
+                type: string
+              event:
+                type: string
+              detailsRedacted:
+                type: object
+        totalSteps:
+          type: integer
+
+    AutomationDefinition:
+      type: object
+      required: [id, tenantId, name, trigger, graphId, graphVersion, status, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+        tenantId:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        trigger:
+          type: object
+          required: [type, config]
+          properties:
+            type:
+              type: string
+            config:
+              type: object
+        graphId:
+          type: string
+        graphVersion:
+          type: integer
+        status:
+          type: string
+          enum: [active, inactive, draft]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    ApprovalRequest:
+      type: object
+      required:
+        - id
+        - tenantId
+        - runId
+        - nodeId
+        - effectKey
+        - proposedActionHash
+        - policyVersion
+        - risk
+        - status
+        - expiresAt
+        - createdAt
+      properties:
+        id:
+          type: string
+        tenantId:
+          type: string
+        runId:
+          type: string
+        nodeId:
+          type: string
+        effectKey:
+          type: string
+        proposedActionHash:
+          type: string
+        policyVersion:
+          type: integer
+        risk:
+          $ref: '#/components/schemas/RiskLevel'
+        status:
+          $ref: '#/components/schemas/ApprovalStatus'
+        expiresAt:
+          type: string
+          format: date-time
+        details:
+          type: object
+          properties:
+            toolName:
+              type: string
+            summary:
+              type: string
+            parametersRedacted:
+              type: object
+            requiredRole:
+              type: string
+        createdAt:
+          type: string
+          format: date-time
+        decidedAt:
+          type: string
+          format: date-time
+        decidedBy:
+          type: string
+
+    ApprovalDecisionRequest:
+      type: object
+      required: [decision, expectedVersion]
+      properties:
+        decision:
+          type: string
+          enum: [approved, rejected]
+        reason:
+          type: string
+        expectedVersion:
+          type: integer
+
+    ApprovalDecisionResult:
+      type: object
+      required: [approvalId, status, decidedAt, decidedBy]
+      properties:
+        approvalId:
+          type: string
+        status:
+          $ref: '#/components/schemas/ApprovalStatus'
+        decidedAt:
+          type: string
+          format: date-time
+        decidedBy:
+          type: string
+
+    ExecutionRecord:
+      type: object
+      required: [id, tenantId, workflowId, workflowRunId, correlationId, status, startedAt, retryCount]
+      properties:
+        id:
+          type: string
+        tenantId:
+          type: string
+        workflowId:
+          type: string
+        workflowRunId:
+          type: string
+        correlationId:
+          type: string
+        status:
+          $ref: '#/components/schemas/ExecutionStatus'
+        startedAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+        retryCount:
+          type: integer
+        lastErrorCode:
+          type: string
+        lastErrorMessage:
+          type: string
