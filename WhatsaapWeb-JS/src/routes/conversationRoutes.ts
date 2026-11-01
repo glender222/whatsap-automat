@@ -1,6 +1,19 @@
 import { NextFunction, Response, Router } from 'express';
 import pool from '../config/database';
-import { JwtRequest, resolveWhatsappCompanyId } from '../middleware/jwtAuth';
+import { JwtRequest, resolveWhatsappCompanyId, toPositiveInt } from '../middleware/jwtAuth';
+import {
+  createProblemDetails,
+  StandardErrorCode,
+  takeoverCommandV1Schema,
+  pauseAiCommandV1Schema,
+  resumeAiCommandV1Schema,
+} from '@whatsap-automat/contracts';
+import {
+  ConversationCasService,
+  conversationCasService,
+  CasConflictError,
+  ConversationNotFoundError,
+} from '../services/conversations/ConversationCasService';
 
 const STAGES = ['new', 'ai_assisting', 'catalog', 'preorder', 'handoff', 'payment', 'closed'];
 const SUBSTATUSES = [
@@ -28,7 +41,7 @@ function parsePositiveInt(value: unknown): number | null {
 }
 
 function userId(req: JwtRequest): number | null {
-  const value = Number(req.user?.userId || req.user?.id);
+  const value = Number(req.user?.userId || req.user?.id || req.user?.sub);
   return Number.isInteger(value) && value > 0 ? value : null;
 }
 
@@ -36,7 +49,9 @@ function json(value: unknown): string {
   return JSON.stringify(value || {});
 }
 
-export default function createConversationRoutes(): Router {
+export default function createConversationRoutes(
+  casService: ConversationCasService = conversationCasService
+): Router {
   const router = Router();
 
   router.get('/:id/timeline', async (req: JwtRequest, res: Response, next: NextFunction) => {
@@ -242,6 +257,376 @@ export default function createConversationRoutes(): Router {
 
       return res.json({ success: true, data: result.rows[0] });
     } catch (error) {
+      return next(error);
+    }
+  });
+
+  // Helper to resolve correlationId from request headers
+  function getCorrelationId(req: JwtRequest): string {
+    return (
+      (req.headers['x-correlation-id'] as string) ||
+      (req.headers['x-request-id'] as string) ||
+      `corr-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`
+    );
+  }
+
+  // CAS Route 1: POST /:id/takeover
+  router.post('/:id/takeover', async (req: JwtRequest, res: Response, next: NextFunction) => {
+    try {
+      const companyId = resolveWhatsappCompanyId(req);
+      const conversationId = parsePositiveInt(req.params.id);
+      const correlationId = getCorrelationId(req);
+      const instance = req.originalUrl || `/api/conversations/${req.params.id}/takeover`;
+
+      if (!conversationId) {
+        res.setHeader('Content-Type', 'application/problem+json');
+        return res.status(400).json(
+          createProblemDetails({
+            code: StandardErrorCode.VALIDATION_ERROR,
+            detail: 'Invalid conversation id',
+            instance,
+            correlationId,
+          })
+        );
+      }
+
+      // Check tenant matching if provided in body
+      if (req.body?.tenantId && toPositiveInt(req.body.tenantId) !== companyId) {
+        res.setHeader('Content-Type', 'application/problem+json');
+        return res.status(403).json(
+          createProblemDetails({
+            code: StandardErrorCode.POLICY_DENIED,
+            detail: 'Cross-tenant takeover denied by policy',
+            instance,
+            correlationId,
+          })
+        );
+      }
+
+      const activeUserId = userId(req) || toPositiveInt(req.body?.userId);
+      if (!activeUserId) {
+        res.setHeader('Content-Type', 'application/problem+json');
+        return res.status(400).json(
+          createProblemDetails({
+            code: StandardErrorCode.VALIDATION_ERROR,
+            detail: 'Missing authenticated user ID for takeover',
+            instance,
+            correlationId,
+          })
+        );
+      }
+
+      const candidate = {
+        schemaVersion: req.body?.schemaVersion ?? 1,
+        tenantId: String(companyId),
+        conversationId: String(conversationId),
+        expectedVersion: req.body?.expectedVersion,
+        userId: String(activeUserId),
+        reason: req.body?.reason,
+      };
+
+      const parseResult = takeoverCommandV1Schema.safeParse(candidate);
+      if (!parseResult.success) {
+        res.setHeader('Content-Type', 'application/problem+json');
+        return res.status(400).json(
+          createProblemDetails({
+            code: StandardErrorCode.VALIDATION_ERROR,
+            detail: parseResult.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join(', '),
+            instance,
+            correlationId,
+            invalidParams: parseResult.error.issues.map((i) => ({
+              name: i.path.join('.'),
+              reason: i.message,
+            })),
+          })
+        );
+      }
+
+      const result = await casService.takeoverConversation({
+        tenantId: companyId,
+        conversationId,
+        expectedVersion: parseResult.data.expectedVersion,
+        userId: activeUserId,
+        reason: parseResult.data.reason,
+      });
+
+      return res.status(200).json({ success: true, data: result });
+    } catch (error) {
+      const correlationId = getCorrelationId(req);
+      const instance = req.originalUrl || `/api/conversations/${req.params.id}/takeover`;
+
+      if (error instanceof CasConflictError) {
+        res.setHeader('Content-Type', 'application/problem+json');
+        return res.status(409).json(
+          createProblemDetails({
+            code: StandardErrorCode.CONFLICT,
+            detail: error.message,
+            instance,
+            correlationId,
+            metadata: {
+              conversationId: String(error.conversationId),
+              expectedVersion: error.expectedVersion,
+              currentVersion: error.currentVersion,
+              currentEpoch: error.currentEpoch,
+              ownerType: error.ownerType,
+              ownerId: error.ownerId,
+            },
+          })
+        );
+      }
+
+      if (error instanceof ConversationNotFoundError) {
+        res.setHeader('Content-Type', 'application/problem+json');
+        return res.status(404).json(
+          createProblemDetails({
+            code: StandardErrorCode.NOT_FOUND,
+            detail: error.message,
+            instance,
+            correlationId,
+            metadata: {
+              conversationId: String(error.conversationId),
+              tenantId: error.tenantId,
+            },
+          })
+        );
+      }
+
+      return next(error);
+    }
+  });
+
+  // CAS Route 2: POST /:id/pause-ai
+  router.post('/:id/pause-ai', async (req: JwtRequest, res: Response, next: NextFunction) => {
+    try {
+      const companyId = resolveWhatsappCompanyId(req);
+      const conversationId = parsePositiveInt(req.params.id);
+      const correlationId = getCorrelationId(req);
+      const instance = req.originalUrl || `/api/conversations/${req.params.id}/pause-ai`;
+
+      if (!conversationId) {
+        res.setHeader('Content-Type', 'application/problem+json');
+        return res.status(400).json(
+          createProblemDetails({
+            code: StandardErrorCode.VALIDATION_ERROR,
+            detail: 'Invalid conversation id',
+            instance,
+            correlationId,
+          })
+        );
+      }
+
+      if (req.body?.tenantId && toPositiveInt(req.body.tenantId) !== companyId) {
+        res.setHeader('Content-Type', 'application/problem+json');
+        return res.status(403).json(
+          createProblemDetails({
+            code: StandardErrorCode.POLICY_DENIED,
+            detail: 'Cross-tenant pause-ai denied by policy',
+            instance,
+            correlationId,
+          })
+        );
+      }
+
+      const activeUserId = userId(req) || toPositiveInt(req.body?.userId);
+      if (!activeUserId) {
+        res.setHeader('Content-Type', 'application/problem+json');
+        return res.status(400).json(
+          createProblemDetails({
+            code: StandardErrorCode.VALIDATION_ERROR,
+            detail: 'Missing authenticated user ID for pause-ai',
+            instance,
+            correlationId,
+          })
+        );
+      }
+
+      const candidate = {
+        schemaVersion: req.body?.schemaVersion ?? 1,
+        tenantId: String(companyId),
+        conversationId: String(conversationId),
+        expectedVersion: req.body?.expectedVersion,
+        durationSeconds: req.body?.durationSeconds,
+        reason: req.body?.reason,
+      };
+
+      const parseResult = pauseAiCommandV1Schema.safeParse(candidate);
+      if (!parseResult.success) {
+        res.setHeader('Content-Type', 'application/problem+json');
+        return res.status(400).json(
+          createProblemDetails({
+            code: StandardErrorCode.VALIDATION_ERROR,
+            detail: parseResult.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join(', '),
+            instance,
+            correlationId,
+            invalidParams: parseResult.error.issues.map((i) => ({
+              name: i.path.join('.'),
+              reason: i.message,
+            })),
+          })
+        );
+      }
+
+      const result = await casService.pauseAi({
+        tenantId: companyId,
+        conversationId,
+        expectedVersion: parseResult.data.expectedVersion,
+        userId: activeUserId,
+        durationSeconds: parseResult.data.durationSeconds,
+        reason: parseResult.data.reason,
+      });
+
+      return res.status(200).json({ success: true, data: result });
+    } catch (error) {
+      const correlationId = getCorrelationId(req);
+      const instance = req.originalUrl || `/api/conversations/${req.params.id}/pause-ai`;
+
+      if (error instanceof CasConflictError) {
+        res.setHeader('Content-Type', 'application/problem+json');
+        return res.status(409).json(
+          createProblemDetails({
+            code: StandardErrorCode.CONFLICT,
+            detail: error.message,
+            instance,
+            correlationId,
+            metadata: {
+              conversationId: String(error.conversationId),
+              expectedVersion: error.expectedVersion,
+              currentVersion: error.currentVersion,
+              currentEpoch: error.currentEpoch,
+            },
+          })
+        );
+      }
+
+      if (error instanceof ConversationNotFoundError) {
+        res.setHeader('Content-Type', 'application/problem+json');
+        return res.status(404).json(
+          createProblemDetails({
+            code: StandardErrorCode.NOT_FOUND,
+            detail: error.message,
+            instance,
+            correlationId,
+          })
+        );
+      }
+
+      return next(error);
+    }
+  });
+
+  // CAS Route 3: POST /:id/resume-ai
+  router.post('/:id/resume-ai', async (req: JwtRequest, res: Response, next: NextFunction) => {
+    try {
+      const companyId = resolveWhatsappCompanyId(req);
+      const conversationId = parsePositiveInt(req.params.id);
+      const correlationId = getCorrelationId(req);
+      const instance = req.originalUrl || `/api/conversations/${req.params.id}/resume-ai`;
+
+      if (!conversationId) {
+        res.setHeader('Content-Type', 'application/problem+json');
+        return res.status(400).json(
+          createProblemDetails({
+            code: StandardErrorCode.VALIDATION_ERROR,
+            detail: 'Invalid conversation id',
+            instance,
+            correlationId,
+          })
+        );
+      }
+
+      if (req.body?.tenantId && toPositiveInt(req.body.tenantId) !== companyId) {
+        res.setHeader('Content-Type', 'application/problem+json');
+        return res.status(403).json(
+          createProblemDetails({
+            code: StandardErrorCode.POLICY_DENIED,
+            detail: 'Cross-tenant resume-ai denied by policy',
+            instance,
+            correlationId,
+          })
+        );
+      }
+
+      const activeUserId = userId(req) || toPositiveInt(req.body?.userId);
+      if (!activeUserId) {
+        res.setHeader('Content-Type', 'application/problem+json');
+        return res.status(400).json(
+          createProblemDetails({
+            code: StandardErrorCode.VALIDATION_ERROR,
+            detail: 'Missing authenticated user ID for resume-ai',
+            instance,
+            correlationId,
+          })
+        );
+      }
+
+      const candidate = {
+        schemaVersion: req.body?.schemaVersion ?? 1,
+        tenantId: String(companyId),
+        conversationId: String(conversationId),
+        expectedVersion: req.body?.expectedVersion,
+        reason: req.body?.reason,
+      };
+
+      const parseResult = resumeAiCommandV1Schema.safeParse(candidate);
+      if (!parseResult.success) {
+        res.setHeader('Content-Type', 'application/problem+json');
+        return res.status(400).json(
+          createProblemDetails({
+            code: StandardErrorCode.VALIDATION_ERROR,
+            detail: parseResult.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join(', '),
+            instance,
+            correlationId,
+            invalidParams: parseResult.error.issues.map((i) => ({
+              name: i.path.join('.'),
+              reason: i.message,
+            })),
+          })
+        );
+      }
+
+      const result = await casService.resumeAi({
+        tenantId: companyId,
+        conversationId,
+        expectedVersion: parseResult.data.expectedVersion,
+        userId: activeUserId,
+        reason: parseResult.data.reason,
+      });
+
+      return res.status(200).json({ success: true, data: result });
+    } catch (error) {
+      const correlationId = getCorrelationId(req);
+      const instance = req.originalUrl || `/api/conversations/${req.params.id}/resume-ai`;
+
+      if (error instanceof CasConflictError) {
+        res.setHeader('Content-Type', 'application/problem+json');
+        return res.status(409).json(
+          createProblemDetails({
+            code: StandardErrorCode.CONFLICT,
+            detail: error.message,
+            instance,
+            correlationId,
+            metadata: {
+              conversationId: String(error.conversationId),
+              expectedVersion: error.expectedVersion,
+              currentVersion: error.currentVersion,
+              currentEpoch: error.currentEpoch,
+            },
+          })
+        );
+      }
+
+      if (error instanceof ConversationNotFoundError) {
+        res.setHeader('Content-Type', 'application/problem+json');
+        return res.status(404).json(
+          createProblemDetails({
+            code: StandardErrorCode.NOT_FOUND,
+            detail: error.message,
+            instance,
+            correlationId,
+          })
+        );
+      }
+
       return next(error);
     }
   });
