@@ -14,8 +14,9 @@
     "typecheck:scripts": "tsc --noEmit -p tsconfig.scripts.json",
     "db:migrate": "tsx scripts/db-migrate.ts",
     "db:status": "tsx scripts/db-migrate.ts status",
-    "test": "node --import tsx --test src/test/tools-reales-ia.test.ts src/test/meta-webhook-p0.test.ts src/test/multiagent-routing-p0.test.ts src/test/openai-provider-p0.test.ts src/test/p0-handoff-idempotency.test.ts src/test/p0-safe-runtime.test.ts src/test/p0-jwt-auth.test.ts src/test/security-mitigations.test.ts",
-    "test:p0": "node --import tsx --test src/test/meta-webhook-p0.test.ts src/test/multiagent-routing-p0.test.ts src/test/openai-provider-p0.test.ts src/test/p0-handoff-idempotency.test.ts src/test/p0-safe-runtime.test.ts src/test/p0-jwt-auth.test.ts src/test/security-mitigations.test.ts",
+    "test": "node --import tsx --test src/test/tools-reales-ia.test.ts src/test/meta-webhook-p0.test.ts src/test/multiagent-routing-p0.test.ts src/test/openai-provider-p0.test.ts src/test/p0-handoff-idempotency.test.ts src/test/p0-safe-runtime.test.ts src/test/p0-jwt-auth.test.ts src/test/security-mitigations.test.ts src/test/socket-security.test.ts",
+    "test:p0": "node --import tsx --test src/test/meta-webhook-p0.test.ts src/test/multiagent-routing-p0.test.ts src/test/openai-provider-p0.test.ts src/test/p0-handoff-idempotency.test.ts src/test/p0-safe-runtime.test.ts src/test/p0-jwt-auth.test.ts src/test/security-mitigations.test.ts src/test/socket-security.test.ts",
+    "test:sockets": "node --import tsx --test src/test/socket-security.test.ts",
     "test:tools": "node --import tsx --test src/test/tools-reales-ia.test.ts"
   },
   "keywords": [
@@ -50,6 +51,7 @@
     "@types/node": "^25.6.0",
     "@types/pg": "^8.20.0",
     "nodemon": "^3.1.10",
+    "socket.io-client": "^4.8.4",
     "tsx": "^4.21.0",
     "typescript": "^6.0.3"
   }

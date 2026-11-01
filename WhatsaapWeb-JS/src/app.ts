@@ -29,8 +29,9 @@ import config from './config/index';
 import swaggerSpec from './config/swagger';
 import { setSocketIo } from './sockets/socketEmitter';
 
+import { SocketHandler } from './sockets/socketHandler';
+
 const swaggerUi = require('swagger-ui-express');
-const SocketHandler = require('./sockets/socketHandler');
 const { errorHandler, notFound } = require('./middleware/errorHandler');
 const User = require('./models/User');
 const createAuthRoutes = require('./routes/authRoutes');
@@ -45,7 +46,7 @@ export class App {
   private readonly server: http.Server;
   private readonly io: Server;
   private readonly whatsappService: WhatsAppService;
-  private readonly socketHandler: any;
+  private readonly socketHandler: SocketHandler;
   private conversationCore: any;
 
   constructor() {
