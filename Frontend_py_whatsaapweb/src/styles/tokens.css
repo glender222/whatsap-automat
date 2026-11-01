@@ -1,0 +1,210 @@
+/**
+ * Automat UI — Design Tokens Semánticos (WCAG 2.2 AA)
+ * Reference: docs/ux/04_SISTEMA_DISENO_Y_TOKENS.md & docs/architecture/ROADMAP_V1.0.md (WAA-019, ADR-016)
+ */
+
+:root {
+  /* ==========================================================================
+     Color Tokens — Light Theme (Default)
+     ========================================================================== */
+  --color-bg-canvas: #F8FAFC;          /* Slate 50: Window background (12:1+ against text-primary) */
+  --color-bg-surface: #FFFFFF;         /* Pure White: Panels, cards, modals (17:1+ against text-primary) */
+  --color-bg-surface-elevated: #FFFFFF;/* Elevated panels, dropdowns, floating menus */
+
+  --color-border-subtle: #E2E8F0;      /* Slate 200: Dividers, list separators */
+  --color-border-strong: #CBD5E1;      /* Slate 300: Static component borders */
+  --color-border-interactive: #64748B; /* Slate 500: Active inputs (4.7:1 contrast against surface, WCAG 1.4.11) */
+
+  --color-text-primary: #0F172A;       /* Slate 900: Headings, body text, critical data (17.5:1 ratio) */
+  --color-text-secondary: #475569;     /* Slate 600: Secondary labels, timestamps (7.4:1 ratio) */
+  --color-text-muted: #64748B;         /* Slate 500: Placeholders, helper text (4.7:1 ratio) */
+
+  /* Brand Action Colors */
+  --color-primary: #0D9488;            /* Teal 600: Primary actions, CTA buttons */
+  --color-primary-hover: #0F766E;      /* Teal 700: Hover state for primary actions */
+  --color-primary-contrast: #FFFFFF;   /* Text on primary actions (3.74:1 ratio for large text / button controls) */
+
+  /* Semantic Alerts */
+  --color-success: #059669;            /* Emerald 600: Active connection, delivered, valid (4.6:1 ratio) */
+  --color-warning: #D97706;            /* Amber 600: Medium risk, SLA warning, waiting */
+  --color-danger: #DC2626;             /* Red 600: Errors, rejection, disconnected, P0 (5.1:1 ratio) */
+  --color-info: #2563EB;               /* Blue 600: System messages, AI suggestions (4.9:1 ratio) */
+
+  /* Channel Provider Identification */
+  --color-channel-whatsapp: #25D366;   /* WhatsApp Cloud official brand */
+  --color-channel-telegram: #229ED9;   /* Telegram Bot official brand */
+  --color-channel-instagram: #E1306C;  /* Instagram Messaging official brand */
+
+  /* ==========================================================================
+     Typography Stacks
+     ========================================================================== */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+
+  /* ==========================================================================
+     Modular Spacing Scale (4px / 8px Base)
+     ========================================================================== */
+  --space-1: 0.25rem;   /* 4px  - icon/text separation */
+  --space-2: 0.5rem;    /* 8px  - compact button & badge padding */
+  --space-3: 0.75rem;   /* 12px - table cells, chat cards */
+  --space-4: 1rem;      /* 16px - panel and form padding */
+  --space-6: 1.5rem;    /* 24px - block separation, section headers */
+  --space-8: 2rem;      /* 32px - outer perimeter margins */
+
+  /* ==========================================================================
+     Operational Layout Densities
+     ========================================================================== */
+  --height-chat-row: 4rem;             /* 64px - Chat list row height */
+  --height-table-row: 2.75rem;         /* 44px - Compact table row height */
+  --height-topbar: 3.5rem;             /* 56px - Standard header/topbar height */
+  --width-sidebar-collapsed: 4rem;     /* 64px - Collapsed icon-only sidebar */
+  --width-sidebar-expanded: 15rem;     /* 240px - Expanded full sidebar */
+  --width-inbox-queue: 20rem;          /* 320px - Chat queue list panel */
+  --width-inbox-context: 18.75rem;     /* 300px - Customer/order context panel */
+  --max-w-message-bubble: 56.25rem;    /* 900px - Maximum chat bubble width */
+
+  /* ==========================================================================
+     Border Radius Scale
+     ========================================================================== */
+  --radius-sm: 0.25rem;   /* 4px  - badges, compact chips */
+  --radius-md: 0.375rem;  /* 6px  - compact inputs */
+  --radius-lg: 0.5rem;    /* 8px  - default buttons, cards */
+  --radius-xl: 0.75rem;   /* 12px - modals, popovers */
+  --radius-2xl: 1rem;     /* 16px - admin panels, bento containers */
+  --radius-full: 9999px;  /* Pills, avatars, circular indicators */
+
+  /* ==========================================================================
+     Strict Z-Index Hierarchy (0..90)
+     ========================================================================== */
+  --z-base: 0;           /* Canvas, main layout content */
+  --z-elevated: 10;      /* Draggable cards, floating items */
+  --z-sticky: 20;        /* Sticky headers, sticky toolbars */
+  --z-dropdown: 30;      /* Context menus, select dropdowns */
+  --z-drawer: 40;        /* Slide-over panels, side drawers */
+  --z-backdrop: 50;      /* Modal scrims, backdrop dimmers */
+  --z-modal: 60;         /* Dialogs, configuration wizards */
+  --z-popover: 70;       /* Tooltips, datepickers */
+  --z-toast: 80;         /* Notification toasts, snackbars */
+  --z-critical-alert: 90;/* Network disconnect banner, emergency alert */
+
+  /* ==========================================================================
+     Elevations & Drop Shadows
+     ========================================================================== */
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
+  --shadow-elevated: 0 20px 25px -5px rgba(0, 0, 0, 0.12), 0 8px 10px -6px rgba(0, 0, 0, 0.08);
+
+  /* ==========================================================================
+     WCAG 2.2 AA Focus Indicators
+     ========================================================================== */
+  --ring-focus-color: #0D9488;         /* Teal 600: 3.74:1 contrast against surface (WCAG 2.4.7 AA) */
+  --ring-focus-width: 2px;
+  --ring-focus-offset: 2px;
+}
+
+/* ==========================================================================
+   Color Tokens — Dark Theme
+   ========================================================================== */
+.dark, [data-theme="dark"] {
+  --color-bg-canvas: #0B0F19;          /* Navy 950: Main window background */
+  --color-bg-surface: #131B2E;         /* Navy 900: Panels, cards, modals */
+  --color-bg-surface-elevated: #1C2640;/* Navy 800: Floating menus, popovers */
+
+  --color-border-subtle: #23304E;      /* Navy 700: Dividers, list separators */
+  --color-border-strong: #334366;      /* Navy 600: Interactive component borders */
+  --color-border-interactive: #94A3B8; /* Slate 400: Active focus/input borders (6.56:1 contrast against surface) */
+
+  --color-text-primary: #F8FAFC;       /* Slate 50: Titles, primary text (16.0:1 ratio) */
+  --color-text-secondary: #94A3B8;     /* Slate 400: Secondary labels (6.56:1 ratio) */
+  --color-text-muted: #64748B;         /* Slate 500: Helper text, placeholders */
+
+  --color-primary: #14B8A6;            /* Teal 500: Primary actions (7.3:1 ratio against navy) */
+  --color-primary-hover: #0D9488;      /* Teal 600: Hover state */
+  --color-primary-contrast: #0B0F19;   /* Dark text on teal button in dark mode (7.96:1 ratio) */
+
+  --color-success: #10B981;            /* Emerald 500: (7.5:1 ratio) */
+  --color-warning: #F59E0B;            /* Amber 500: (7.7:1 ratio) */
+  --color-danger: #EF4444;             /* Red 500: (5.8:1 ratio for alerts) */
+  --color-info: #3B82F6;               /* Blue 500: (6.5:1 ratio) */
+
+  --color-channel-whatsapp: #25D366;
+  --color-channel-telegram: #229ED9;
+  --color-channel-instagram: #E1306C;
+
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.5), 0 2px 4px -2px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.6), 0 4px 6px -4px rgba(0, 0, 0, 0.5);
+  --shadow-elevated: 0 20px 25px -5px rgba(0, 0, 0, 0.7), 0 8px 10px -6px rgba(0, 0, 0, 0.6);
+
+  --ring-focus-color: #14B8A6;         /* Teal 500: 6.99:1 contrast against surface (WCAG 2.4.7 AA) */
+  --ring-focus-width: 2px;
+  --ring-focus-offset: 2px;
+}
+
+/* ==========================================================================
+   Color Tokens — High Contrast Theme (WCAG 2.2 AAA & Forced Colors)
+   ========================================================================== */
+.high-contrast, [data-theme="high-contrast"] {
+  --color-bg-canvas: #000000;          /* Pure black canvas */
+  --color-bg-surface: #000000;         /* Pure black surface */
+  --color-bg-surface-elevated: #0A0A0A;/* High-contrast elevated surface */
+
+  --color-border-subtle: #FFFFFF;      /* Solid 100% white border (21:1 contrast) */
+  --color-border-strong: #FFFFFF;      /* Solid 100% white 2px border (21:1 contrast) */
+  --color-border-interactive: #FFFFFF; /* High visibility border (21:1 contrast) */
+
+  --color-text-primary: #FFFFFF;       /* Pure white (21:1 maximum contrast, AAA) */
+  --color-text-secondary: #FFFFFF;     /* Pure white secondary text (21:1 contrast, AAA) */
+  --color-text-muted: #CBD5E1;         /* Slate 300 (14.1:1 ratio against black, AAA) */
+
+  --color-primary: #5EEAD4;            /* Teal 300: High visibility primary (14.6:1 ratio) */
+  --color-primary-hover: #2DD4BF;      /* Teal 400 */
+  --color-primary-contrast: #000000;   /* Black on teal (14.6:1 ratio, AAA) */
+
+  --color-success: #6EE7B7;            /* Emerald 300: (14.2:1 ratio, AAA) */
+  --color-warning: #FDE047;            /* Yellow 300: (16.8:1 ratio, AAA) */
+  --color-danger: #FCA5A5;             /* Red 300: (11.2:1 ratio, AAA) */
+  --color-info: #93C5FD;               /* Blue 300: (12.0:1 ratio, AAA) */
+
+  --color-channel-whatsapp: #25D366;
+  --color-channel-telegram: #38BDF8;
+  --color-channel-instagram: #F472B6;
+
+  --shadow-sm: none;
+  --shadow-md: none;
+  --shadow-lg: none;
+  --shadow-elevated: none;
+
+  --ring-focus-color: #FACC15;         /* High-visibility yellow focus ring (13.6:1 ratio, AAA) */
+  --ring-focus-width: 3px;
+  --ring-focus-offset: 3px;
+}
+
+@media (forced-colors: active) {
+  :root {
+    --color-bg-canvas: #000000;
+    --color-bg-surface: #000000;
+    --color-bg-surface-elevated: #0A0A0A;
+    --color-border-subtle: #FFFFFF;
+    --color-border-strong: #FFFFFF;
+    --color-border-interactive: #FFFFFF;
+    --color-text-primary: #FFFFFF;
+    --color-text-secondary: #FFFFFF;
+    --color-text-muted: #CBD5E1;
+    --color-primary: #5EEAD4;
+    --color-primary-hover: #2DD4BF;
+    --color-primary-contrast: #000000;
+    --color-success: #6EE7B7;
+    --color-warning: #FDE047;
+    --color-danger: #FCA5A5;
+    --color-info: #93C5FD;
+    --shadow-sm: none;
+    --shadow-md: none;
+    --shadow-lg: none;
+    --shadow-elevated: none;
+    --ring-focus-color: #FACC15;
+    --ring-focus-width: 3px;
+    --ring-focus-offset: 3px;
+  }
+}
