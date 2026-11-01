@@ -5,6 +5,7 @@
  */
 
 export * from './common';
+export * from './events';
 export * from './channels';
 export * from './conversations';
 export * from './agents';
