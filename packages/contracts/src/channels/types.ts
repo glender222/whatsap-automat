@@ -8,6 +8,7 @@ export const CHANNEL_KINDS = [
   'instagram',
   'messenger',
   'telegram',
+  'webchat',
 ] as const;
 
 export type ChannelKind = (typeof CHANNEL_KINDS)[number];

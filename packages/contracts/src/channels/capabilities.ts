@@ -272,6 +272,26 @@ export function evaluatePublishGate(
       }
 
       const lastInteraction = new Date(intent.lastCustomerInteractionAt).getTime();
+
+      // Fail-closed defense: If date string cannot be parsed into a finite timestamp, reject immediately
+      if (!Number.isFinite(lastInteraction)) {
+        return {
+          permitted: false,
+          reasonCode: 'CH_WA_WINDOW_CLOSED',
+          problemDetails: createProblemDetails({
+            code: StandardErrorCode.POLICY_DENIED,
+            title: 'Customer Service Window Closed',
+            detail: `The ${matrix.policies.sessionWindowHours}h customer service window cannot be verified because lastCustomerInteractionAt is invalid ('${String(intent.lastCustomerInteractionAt)}'). Only approved HSM templates are permitted.`,
+            instance,
+            correlationId,
+            metadata: {
+              windowHours: matrix.policies.sessionWindowHours,
+              lastCustomerInteractionAt: String(intent.lastCustomerInteractionAt),
+            },
+          }),
+        };
+      }
+
       const elapsedHours = (Date.now() - lastInteraction) / (1000 * 60 * 60);
 
       if (elapsedHours > matrix.policies.sessionWindowHours) {
