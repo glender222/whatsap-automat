@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import { APPROVAL_STATUSES, RISK_LEVELS } from './types';
+import { toolRiskLevelSchema } from '../agents/tools';
 
-export const riskLevelSchema = z.enum(RISK_LEVELS);
+export const riskLevelSchema = z.union([z.enum(RISK_LEVELS), toolRiskLevelSchema]);
 export const approvalStatusSchema = z.enum(APPROVAL_STATUSES);
 
 export const approvalActionDetailsSchema = z.object({
@@ -35,13 +36,21 @@ export const tenantActorSchema = z.object({
   requestId: z.string().min(1),
 });
 
-export const approvalDecisionCommandV1Schema = z.object({
-  schemaVersion: z.literal(1),
-  decision: z.enum(['approved', 'rejected']),
-  reason: z.string().optional(),
-  expectedVersion: z.number().int().nonnegative(),
-  actor: tenantActorSchema,
-});
+export const approvalDecisionCommandV1Schema = z
+  .object({
+    schemaVersion: z.literal(1).default(1),
+    decision: z.enum(['approved', 'rejected']),
+    reason: z.string().optional(),
+    expectedVersion: z.number().int().nonnegative(),
+    actor: tenantActorSchema.optional(),
+    approvalId: z.string().optional(),
+    actorId: z.string().optional(),
+    actorRole: z.string().optional(),
+  })
+  .refine(
+    (data) => Boolean(data.actor || (data.actorId && data.actorRole)),
+    { message: 'Either actor object or actorId + actorRole must be provided' }
+  );
 
 export const approvalDecisionResultV1Schema = z.object({
   approvalId: z.string().min(1),

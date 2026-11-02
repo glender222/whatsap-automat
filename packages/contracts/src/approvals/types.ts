@@ -1,7 +1,14 @@
 import { TenantActor } from '../common';
+import { TOOL_RISK_LEVELS, ToolRiskLevel } from '../agents/tools';
 
 export const RISK_LEVELS = ['low', 'medium', 'high'] as const;
 export type RiskLevel = (typeof RISK_LEVELS)[number];
+
+export const UNIFIED_RISK_LEVELS = [
+  ...RISK_LEVELS,
+  ...TOOL_RISK_LEVELS,
+] as const;
+export type UnifiedRiskLevel = RiskLevel | ToolRiskLevel;
 
 export const APPROVAL_STATUSES = [
   'pending',
@@ -21,7 +28,7 @@ export interface ApprovalActionDetailsV1 {
 
 /**
  * Approval Request V1 contract
- * Blueprint Section 5.3
+ * Blueprint Section 5.3 & PR-F5-02
  */
 export interface ApprovalRequestV1 {
   readonly id: string;
@@ -31,7 +38,7 @@ export interface ApprovalRequestV1 {
   readonly effectKey: string;
   readonly proposedActionHash: string;
   readonly policyVersion: number;
-  readonly risk: RiskLevel;
+  readonly risk: UnifiedRiskLevel;
   readonly status: ApprovalStatus;
   readonly expiresAt: string; // ISO 8601
   readonly details?: ApprovalActionDetailsV1;
@@ -45,7 +52,10 @@ export interface ApprovalDecisionCommandV1 {
   readonly decision: 'approved' | 'rejected';
   readonly reason?: string;
   readonly expectedVersion: number;
-  readonly actor: TenantActor;
+  readonly actor?: TenantActor;
+  readonly approvalId?: string;
+  readonly actorId?: string;
+  readonly actorRole?: string;
 }
 
 export interface ApprovalDecisionResultV1 {
