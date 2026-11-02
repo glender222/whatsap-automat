@@ -67,7 +67,8 @@ export function verifyWebhookHmac(
  */
 export function verifyAntiReplayTimestamp(
   timestampHeader?: string | number | null,
-  toleranceSeconds: number = 300
+  toleranceSeconds: number = 300,
+  currentTimestamp?: number
 ): AntiReplayVerificationResult {
   if (timestampHeader === undefined || timestampHeader === null || timestampHeader === '') {
     return { valid: false, reason: 'Missing timestamp header' };
@@ -90,7 +91,7 @@ export function verifyAntiReplayTimestamp(
     return { valid: false, reason: 'Invalid timestamp format' };
   }
 
-  const now = Date.now();
+  const now = typeof currentTimestamp === 'number' ? currentTimestamp : Date.now();
   const diffMs = Math.abs(now - requestEpochMs);
   const skewSeconds = diffMs / 1000;
 

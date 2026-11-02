@@ -22,6 +22,7 @@ import createPaymentRoutes from './routes/paymentRoutes';
 import createIaPauseRoutes from './routes/iaPauseRoutes';
 import createPaymentWebhookRoutes from './routes/paymentWebhookRoutes';
 import createConversationRoutes from './routes/conversationRoutes';
+import createWorkflowRoutes from './routes/workflowRoutes';
 import { optionalWhatsappJwt, requireJwt } from './middleware/jwtAuth';
 import { requireChatTenantAccess, requireMediaTenantAccess, requireVoucherTenantAccess } from './middleware/resourceAuth';
 import { coreModel } from './core/coreModel';
@@ -216,6 +217,7 @@ export class App {
     this.app.use('/api/chats', requireJwt, createChatCompatRoutes(this.whatsappService));
     this.app.use('/api/chats', requireJwt, createChatRoutes(this.whatsappService, core));
     this.app.use('/api/media', requireJwt, createMediaRoutes(this.whatsappService));
+    this.app.use('/api/v1/workflows', createWorkflowRoutes());
 
     // Sandbox aislado para testing no productivo (demo fuera del endpoint productivo)
     if (config.security.allowInsecureSandbox && process.env.NODE_ENV !== 'production') {

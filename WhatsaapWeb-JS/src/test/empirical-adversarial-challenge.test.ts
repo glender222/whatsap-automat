@@ -376,7 +376,7 @@ describe('Adversarial Verification: CapabilityRegistry, HMAC Security & Anti-Rep
     test('2.1 Exact boundary: delta = 299s (past) MUST pass', () => {
       const now = Date.now();
       const timestamp299 = now - 299 * 1000;
-      const res = verifyAntiReplayTimestamp(timestamp299, tolerance);
+      const res = verifyAntiReplayTimestamp(timestamp299, tolerance, now);
       assert.strictEqual(res.valid, true, 'exact delta = 299s failed');
       assert.ok(res.skewSeconds !== undefined && Math.round(res.skewSeconds) === 299);
     });
@@ -384,7 +384,7 @@ describe('Adversarial Verification: CapabilityRegistry, HMAC Security & Anti-Rep
     test('2.2 Exact boundary: delta = 300s (past) MUST pass', () => {
       const now = Date.now();
       const timestamp300 = now - 300 * 1000;
-      const res = verifyAntiReplayTimestamp(timestamp300, tolerance);
+      const res = verifyAntiReplayTimestamp(timestamp300, tolerance, now);
       assert.strictEqual(res.valid, true, 'exact delta = 300s failed');
       assert.ok(res.skewSeconds !== undefined && Math.round(res.skewSeconds) === 300);
     });
@@ -392,7 +392,7 @@ describe('Adversarial Verification: CapabilityRegistry, HMAC Security & Anti-Rep
     test('2.3 Exact boundary: delta = 301s (past) MUST fail', () => {
       const now = Date.now();
       const timestamp301 = now - 301 * 1000;
-      const res = verifyAntiReplayTimestamp(timestamp301, tolerance);
+      const res = verifyAntiReplayTimestamp(timestamp301, tolerance, now);
       assert.strictEqual(res.valid, false, 'exact delta = 301s unexpectedly passed');
       assert.ok(res.skewSeconds !== undefined && Math.round(res.skewSeconds) === 301);
       assert.ok(res.reason?.includes('outside allowable anti-replay window'));
@@ -401,7 +401,7 @@ describe('Adversarial Verification: CapabilityRegistry, HMAC Security & Anti-Rep
     test('2.4 Exact boundary: delta = -299s (future) MUST pass', () => {
       const now = Date.now();
       const timestampFuture299 = now + 299 * 1000;
-      const res = verifyAntiReplayTimestamp(timestampFuture299, tolerance);
+      const res = verifyAntiReplayTimestamp(timestampFuture299, tolerance, now);
       assert.strictEqual(res.valid, true, 'exact future delta = -299s failed');
       assert.ok(res.skewSeconds !== undefined && Math.round(res.skewSeconds) === 299);
     });
@@ -409,7 +409,7 @@ describe('Adversarial Verification: CapabilityRegistry, HMAC Security & Anti-Rep
     test('2.5 Exact boundary: delta = -300s (future) MUST pass', () => {
       const now = Date.now();
       const timestampFuture300 = now + 300 * 1000;
-      const res = verifyAntiReplayTimestamp(timestampFuture300, tolerance);
+      const res = verifyAntiReplayTimestamp(timestampFuture300, tolerance, now);
       assert.strictEqual(res.valid, true, 'exact future delta = -300s failed');
       assert.ok(res.skewSeconds !== undefined && Math.round(res.skewSeconds) === 300);
     });
@@ -417,7 +417,7 @@ describe('Adversarial Verification: CapabilityRegistry, HMAC Security & Anti-Rep
     test('2.6 Exact boundary: delta = -301s (future) MUST fail', () => {
       const now = Date.now();
       const timestampFuture301 = now + 301 * 1000;
-      const res = verifyAntiReplayTimestamp(timestampFuture301, tolerance);
+      const res = verifyAntiReplayTimestamp(timestampFuture301, tolerance, now);
       assert.strictEqual(res.valid, false, 'exact future delta = -301s unexpectedly passed');
       assert.ok(res.skewSeconds !== undefined && Math.round(res.skewSeconds) === 301);
       assert.ok(res.reason?.includes('outside allowable anti-replay window'));
@@ -427,11 +427,11 @@ describe('Adversarial Verification: CapabilityRegistry, HMAC Security & Anti-Rep
       const now = Date.now();
       // Exactly 300,000ms skew (<= 300s)
       const exact300000ms = now - 300000;
-      assert.strictEqual(verifyAntiReplayTimestamp(exact300000ms, tolerance).valid, true);
+      assert.strictEqual(verifyAntiReplayTimestamp(exact300000ms, tolerance, now).valid, true);
 
       // 300,001ms skew (300.001s > 300s)
       const exact300001ms = now - 300001;
-      assert.strictEqual(verifyAntiReplayTimestamp(exact300001ms, tolerance).valid, false);
+      assert.strictEqual(verifyAntiReplayTimestamp(exact300001ms, tolerance, now).valid, false);
     });
 
     test('2.8 Epoch seconds integer truncation behavior (boundary analysis)', () => {
@@ -717,15 +717,18 @@ describe('Adversarial Verification: CapabilityRegistry, HMAC Security & Anti-Rep
 
       // Scenario F: Adversarial check — Malformed date string behavior
       // In evaluatePublishGate, new Date('malformed-date').getTime() results in NaN.
-      // NaN > 24 evaluates to false, which allows the check to fall through to permitted: true!
+      // Hardened fail-closed defense rejects non-finite timestamps with CH_WA_WINDOW_CLOSED.
       const malformedDateRes = await registry.evaluatePublish(10, matrix.connectionId, {
         messageKind: 'text',
         isTemplate: false,
         lastCustomerInteractionAt: 'invalid-non-iso-timestamp',
         correlationId: 'corr-win-06',
       });
-      // We empirically verify this behavior is observed:
-      assert.strictEqual(malformedDateRes.permitted, true, 'Empirical confirmation: NaN > 24 evaluates to false and allows unvalidated date through');
+      // We empirically verify fail-closed defense is enforced:
+      assert.strictEqual(malformedDateRes.permitted, false, 'Fail-closed verification: malformed date string is rejected');
+      if (!malformedDateRes.permitted) {
+        assert.strictEqual(malformedDateRes.reasonCode, 'CH_WA_WINDOW_CLOSED');
+      }
     });
 
     test('3.6 Dimension 6 (Dynamic Connection Snapshot & Registry Lifecycle)', async () => {
