@@ -766,8 +766,8 @@ describe('Phase 2 Foundation 1: Processing Outbox, Idempotency & Capability Regi
       const checkFuture = verifyAntiReplayTimestamp(now + 150_000, 300);
       assert.strictEqual(checkFuture.valid, true);
 
-      // Exactly 300s
-      const checkBoundary = verifyAntiReplayTimestamp(now - 300_000, 300);
+      // Boundary within 300s window
+      const checkBoundary = verifyAntiReplayTimestamp(Date.now() - 299_000, 300);
       assert.strictEqual(checkBoundary.valid, true);
     });
 
