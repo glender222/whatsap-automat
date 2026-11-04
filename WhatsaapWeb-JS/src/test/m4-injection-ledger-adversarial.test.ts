@@ -233,7 +233,16 @@ function createAdversarialMockUoW() {
             if (trimmed.startsWith('SELECT')) {
               const tid = Number(params[0]);
               let results = store.ledger.filter((l) => l.tenant_id === tid);
+              if (sql.includes('id <')) {
+                const cursorVal = Number(params[1]);
+                results = results.filter((l) => l.id < cursorVal);
+              }
               results.sort((a, b) => b.id - a.id);
+              const limitMatch = sql.match(/LIMIT\s+(\d+)/i);
+              if (limitMatch) {
+                const limitNum = parseInt(limitMatch[1], 10);
+                results = results.slice(0, limitNum);
+              }
               return { rows: results, rowCount: results.length };
             }
           }
@@ -1372,7 +1381,21 @@ describe('PR-F5 Adversarial Stress & Hardening Suite (Milestone M4)', () => {
     });
 
     it('3.5 Probing Deterministic Cursor Pagination under High-Concurrency Writes', async () => {
-      const tenantId = 300; // Has 50 entries from Test 3.1
+      const tenantId = 300;
+      // Seed 50 entries for cursor pagination validation
+      for (let i = 0; i < 50; i++) {
+        await ledger.record({
+          tenantId,
+          provider: 'openai',
+          model: 'gpt-4o-mini',
+          operation: 'completion',
+          promptTokens: (i + 1) * 10,
+          completionTokens: (i + 1) * 5,
+          totalTokens: (i + 1) * 15,
+          costMicroUsd: (i + 1) * 200,
+          isByok: true,
+        });
+      }
       const page1 = await ledger.query(tenantId, { limit: 20 });
       assert.equal(page1.items.length, 20);
       assert.ok(page1.nextCursor !== null);
