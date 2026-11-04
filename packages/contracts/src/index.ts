@@ -16,3 +16,4 @@ export * from './errors';
 export * from './adapters';
 export * from './synthetic';
 export * from './campaigns';
+export * from './extensions';

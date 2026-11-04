@@ -25,6 +25,7 @@ import createConversationRoutes from './routes/conversationRoutes';
 import createWorkflowRoutes from './routes/workflowRoutes';
 import createAiRoutes from './routes/ai.routes';
 import { createCampaignRoutes, createConsentRoutes, createSegmentRoutes } from './routes/campaigns.routes';
+import createOpenApiRoutes from './routes/openapiRoutes';
 import { optionalWhatsappJwt, requireJwt } from './middleware/jwtAuth';
 import { requireChatTenantAccess, requireMediaTenantAccess, requireVoucherTenantAccess } from './middleware/resourceAuth';
 import { coreModel } from './core/coreModel';
@@ -117,6 +118,8 @@ export class App {
     const maxRequests = parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || defaultMaxRequests, 10);
     const hits = new Map<string, RateLimitEntry>();
     const readHeavyRoutes = [
+      /^\/v1\/openapi(?:\.(?:json|yaml))?$/,
+      /^\/v1\/docs(?:\/.*)?$/,
       /^\/agents(?:\/.*)?$/,
       /^\/catalogs(?:\/.*)?$/,
       /^\/chats\/[^/]+\/messages(?:\/.*)?$/,
@@ -224,6 +227,7 @@ export class App {
     this.app.use('/api/v1/campaigns', createCampaignRoutes());
     this.app.use('/api/v1/consent', createConsentRoutes());
     this.app.use('/api/v1/segments', createSegmentRoutes());
+    this.app.use('/api/v1', createOpenApiRoutes());
 
     // Sandbox aislado para testing no productivo (demo fuera del endpoint productivo)
     if (config.security.allowInsecureSandbox && process.env.NODE_ENV !== 'production') {

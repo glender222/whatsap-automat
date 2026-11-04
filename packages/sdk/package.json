@@ -1,0 +1,30 @@
+{
+  "name": "@whatsap-automat/sdk",
+  "version": "0.4.0",
+  "description": "Official TypeScript SDK for Whatsap-Automat developer platform and API v1",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test tests/*.test.ts"
+  },
+  "keywords": [
+    "whatsap-automat",
+    "sdk",
+    "whatsapp",
+    "openapi",
+    "ai-agents",
+    "typescript"
+  ],
+  "author": "Whatsap-Automat Team",
+  "license": "MIT",
+  "dependencies": {
+    "@whatsap-automat/contracts": "file:../contracts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.8.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  }
+}

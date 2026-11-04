@@ -1,0 +1,38 @@
+{
+  "name": "@whatsap-automat/cli",
+  "version": "0.4.0",
+  "description": "Developer CLI tool for scaffolding, validating, packaging, and diagnosing Whatsap-Automat extensions",
+  "bin": {
+    "automat": "./bin/automat.js"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test tests/**/*.test.ts",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "whatsap-automat",
+    "cli",
+    "extensions",
+    "developer-tools",
+    "scaffolding",
+    "sandboxing"
+  ],
+  "author": "Whatsap-Automat Team",
+  "license": "MIT",
+  "dependencies": {
+    "@whatsap-automat/contracts": "file:../contracts",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.8.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

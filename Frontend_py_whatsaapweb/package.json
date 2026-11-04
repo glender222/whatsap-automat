@@ -11,9 +11,10 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "npm run test:tokens && npm run test:campaigns",
+    "test": "npm run test:tokens && npm run test:campaigns && npm run test:extensions",
     "test:tokens": "node --import tsx --test src/styles/tokens.test.ts",
-    "test:campaigns": "node --import tsx --test src/__tests__/campaigns.test.ts"
+    "test:campaigns": "node --import tsx --test src/__tests__/campaigns.test.ts",
+    "test:extensions": "node --import tsx --test src/__tests__/SandboxedExtensionIframe.test.ts"
   },
   "dependencies": {
     "@emoji-mart/data": "^1.2.1",
