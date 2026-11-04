@@ -15,3 +15,4 @@ export * from './identities';
 export * from './errors';
 export * from './adapters';
 export * from './synthetic';
+export * from './campaigns';

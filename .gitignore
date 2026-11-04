@@ -22,6 +22,8 @@ coverage/
 .temporal/
 */.temporal/
 temporal_data/
+.agents/
+*/.agents/
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal

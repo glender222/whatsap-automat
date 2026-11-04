@@ -27,6 +27,7 @@ import AgentTestSessionPage from "../factures/agentes/pages/AgentTestSessionPage
 import CatalogsPage from "../factures/inventario/pages/CatalogsPage";
 import InventoryPage from "../factures/inventario/pages/InventoryPage";
 import { useAgentState } from "../factures/dashboard/hooks/useAgentState";
+import { CampaignWizard, SegmentsManager, EmailChannelConfig } from "../components/campaigns";
 
 import { authService } from "../factures/auth/services/authService";
 
@@ -94,6 +95,10 @@ function AppRoutesInner() {
           <Route path="agentes" element={<Navigate to="/dashboard/ia/agentes" replace />} />
           <Route path="inventario" element={<InventoryPage />} />
           <Route path="catalogos" element={<CatalogsPage />} />
+          <Route path="campanas" element={<CampaignWizard />} />
+          <Route path="campanas/nueva" element={<CampaignWizard />} />
+          <Route path="segmentos" element={<SegmentsManager />} />
+          <Route path="canales/email" element={<EmailChannelConfig />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Route>
 

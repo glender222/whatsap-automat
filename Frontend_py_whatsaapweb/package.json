@@ -11,8 +11,9 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "npm run test:tokens",
-    "test:tokens": "node --import tsx --test src/styles/tokens.test.ts"
+    "test": "npm run test:tokens && npm run test:campaigns",
+    "test:tokens": "node --import tsx --test src/styles/tokens.test.ts",
+    "test:campaigns": "node --import tsx --test src/__tests__/campaigns.test.ts"
   },
   "dependencies": {
     "@emoji-mart/data": "^1.2.1",
