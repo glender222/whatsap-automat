@@ -273,26 +273,38 @@ export class CampaignDispatcher {
       recipients = await this.segments.resolveRecipients(tenantId, campaign.segmentId);
     }
 
+    // Retrieve existing deliveries to prevent duplicate broadcasts on resume
+    const existingDeliveries = await this.getDeliveries(campaign.id, tenantId);
+    const existingByDest = new Map<string, CampaignDeliveryV1>();
+    for (const del of existingDeliveries) {
+      existingByDest.set(del.destination, del);
+    }
+
     campaign.status = 'dispatching';
-    campaign.startedAt = new Date().toISOString();
+    campaign.startedAt = campaign.startedAt || new Date().toISOString();
+    campaign.completedAt = null;
+    campaign.pauseReason = null;
     campaign.statsTotal = recipients.length;
-    campaign.statsDispatched = 0;
-    campaign.statsDelivered = 0;
-    campaign.statsFailed = 0;
-    campaign.statsSuppressed = 0;
 
-    const pacingDelayMs = this.options?.skipPacingDelay
-      ? 0
-      : Math.floor(60_000 / campaign.rateLimitPerMinute);
+    // Recalculate baseline stats from existing deliveries
+    let statsDispatched = 0;
+    let statsDelivered = 0;
+    let statsFailed = 0;
+    let statsSuppressed = 0;
+    for (const del of existingDeliveries) {
+      if (del.status === 'dispatched') statsDispatched++;
+      else if (del.status === 'delivered') { statsDispatched++; statsDelivered++; }
+      else if (del.status === 'suppressed') statsSuppressed++;
+    }
+    campaign.statsDispatched = statsDispatched;
+    campaign.statsDelivered = statsDelivered;
+    campaign.statsFailed = statsFailed;
+    campaign.statsSuppressed = statsSuppressed;
 
-    const adapter = this.channelAdapters.get(campaign.channel);
-
-    for (let i = 0; i < recipients.length; i++) {
-      const recipient = recipients[i];
-      const deliveryId = `del_${campaign.id}_${i + 1}`;
-      const idempotencyKey = `idem_${campaign.id}_${recipient.destination}`;
-
-      // Circuit Breaker check: calculate current failure rate
+    const evaluateCircuitBreaker = (): boolean => {
+      if (campaign.status === 'paused') {
+        return true;
+      }
       const attempted = campaign.statsDispatched + campaign.statsFailed;
       if (attempted >= 5) {
         const failureRate = (campaign.statsFailed / attempted) * 100;
@@ -307,8 +319,32 @@ export class CampaignDispatcher {
               pauseReason: campaign.pauseReason,
             });
           }
-          break;
+          return true;
         }
+      }
+      return false;
+    };
+
+    const pacingDelayMs = this.options?.skipPacingDelay
+      ? 0
+      : Math.floor(60_000 / campaign.rateLimitPerMinute);
+
+    const adapter = this.channelAdapters.get(campaign.channel);
+
+    for (let i = 0; i < recipients.length; i++) {
+      const recipient = recipients[i];
+      const deliveryId = `del_${campaign.id}_${i + 1}`;
+      const idempotencyKey = `idem_${campaign.id}_${recipient.destination}`;
+      const existing = existingByDest.get(recipient.destination);
+
+      // Idempotency: Skip recipient if already successfully dispatched or delivered
+      if (existing && (existing.status === 'dispatched' || existing.status === 'delivered')) {
+        continue;
+      }
+
+      // Circuit Breaker check before proceeding
+      if (evaluateCircuitBreaker()) {
+        break;
       }
 
       // 1. Consent Gate Check
@@ -322,7 +358,7 @@ export class CampaignDispatcher {
       if (!consentResult.permitted) {
         campaign.statsSuppressed++;
         const delivery: CampaignDeliveryV1 = {
-          id: deliveryId,
+          id: existing?.id || deliveryId,
           campaignId,
           tenantId,
           contactId: recipient.contactId || null,
@@ -336,10 +372,10 @@ export class CampaignDispatcher {
           renderedPayload: {},
           dispatchedAt: null,
           deliveredAt: null,
-          createdAt: new Date().toISOString(),
+          createdAt: existing?.createdAt || new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
-        this.memoryDeliveries.set(deliveryId, delivery);
+        this.memoryDeliveries.set(delivery.id, delivery);
         continue;
       }
 
@@ -353,7 +389,7 @@ export class CampaignDispatcher {
         if (isWindowExpired && !campaign.templateId) {
           campaign.statsFailed++;
           const delivery: CampaignDeliveryV1 = {
-            id: deliveryId,
+            id: existing?.id || deliveryId,
             campaignId,
             tenantId,
             contactId: recipient.contactId || null,
@@ -367,10 +403,13 @@ export class CampaignDispatcher {
             renderedPayload: {},
             dispatchedAt: null,
             deliveredAt: null,
-            createdAt: new Date().toISOString(),
+            createdAt: existing?.createdAt || new Date().toISOString(),
             updatedAt: new Date().toISOString(),
           };
-          this.memoryDeliveries.set(deliveryId, delivery);
+          this.memoryDeliveries.set(delivery.id, delivery);
+          if (evaluateCircuitBreaker()) {
+            break;
+          }
           continue;
         }
       }
@@ -406,7 +445,7 @@ export class CampaignDispatcher {
 
         campaign.statsDispatched++;
         const delivery: CampaignDeliveryV1 = {
-          id: deliveryId,
+          id: existing?.id || deliveryId,
           campaignId,
           tenantId,
           contactId: recipient.contactId || null,
@@ -420,14 +459,14 @@ export class CampaignDispatcher {
           renderedPayload: { text: campaign.contentBody },
           dispatchedAt: new Date().toISOString(),
           deliveredAt: null,
-          createdAt: new Date().toISOString(),
+          createdAt: existing?.createdAt || new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
-        this.memoryDeliveries.set(deliveryId, delivery);
+        this.memoryDeliveries.set(delivery.id, delivery);
       } catch (err: any) {
         campaign.statsFailed++;
         const delivery: CampaignDeliveryV1 = {
-          id: deliveryId,
+          id: existing?.id || deliveryId,
           campaignId,
           tenantId,
           contactId: recipient.contactId || null,
@@ -441,10 +480,13 @@ export class CampaignDispatcher {
           renderedPayload: {},
           dispatchedAt: null,
           deliveredAt: null,
-          createdAt: new Date().toISOString(),
+          createdAt: existing?.createdAt || new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
-        this.memoryDeliveries.set(deliveryId, delivery);
+        this.memoryDeliveries.set(delivery.id, delivery);
+        if (evaluateCircuitBreaker()) {
+          break;
+        }
       }
 
       // Pacing delay (token bucket pacing)
@@ -453,9 +495,20 @@ export class CampaignDispatcher {
       }
     }
 
+    evaluateCircuitBreaker();
+
     if (campaign.status === 'dispatching') {
-      campaign.status = 'completed';
-      campaign.completedAt = new Date().toISOString();
+      const attempted = campaign.statsDispatched + campaign.statsFailed;
+      const failureRate = attempted > 0 ? (campaign.statsFailed / attempted) * 100 : 0;
+      if (attempted >= 5 && failureRate > campaign.failurePauseThresholdPercent) {
+        campaign.status = 'paused';
+        campaign.pauseReason = `High failure rate detected (${failureRate.toFixed(1)}% > ${campaign.failurePauseThresholdPercent}%)`;
+      } else if (campaign.statsTotal > 0 && campaign.statsDispatched === 0 && campaign.statsFailed > 0) {
+        campaign.status = 'failed';
+      } else {
+        campaign.status = 'completed';
+        campaign.completedAt = new Date().toISOString();
+      }
     }
     campaign.updatedAt = new Date().toISOString();
 
@@ -489,7 +542,44 @@ export class CampaignDispatcher {
     return campaign;
   }
 
-  async getDeliveries(campaignId: string): Promise<CampaignDeliveryV1[]> {
+  async getDeliveries(campaignId: string, tenantId?: number): Promise<CampaignDeliveryV1[]> {
+    if (tenantId !== undefined) {
+      try {
+        return await this.uow.run(tenantId, async (client) => {
+          const res = await client.query(
+            `SELECT * FROM campaign_deliveries WHERE campaign_id = $1 AND tenant_id = $2 ORDER BY created_at ASC;`,
+            [campaignId, tenantId]
+          );
+          return res.rows.map((row) => ({
+            id: row.id,
+            campaignId: row.campaign_id,
+            tenantId: Number(row.tenant_id),
+            contactId: row.contact_id ? Number(row.contact_id) : null,
+            destination: row.destination,
+            idempotencyKey: row.idempotency_key,
+            status: row.status,
+            suppressionReason: row.suppression_reason,
+            providerMessageId: row.provider_message_id,
+            errorCode: row.error_code,
+            errorMessage: row.error_message,
+            renderedPayload: typeof row.rendered_payload === 'string' ? JSON.parse(row.rendered_payload) : row.rendered_payload,
+            dispatchedAt: row.dispatched_at ? new Date(row.dispatched_at).toISOString() : null,
+            deliveredAt: row.delivered_at ? new Date(row.delivered_at).toISOString() : null,
+            createdAt: new Date(row.created_at).toISOString(),
+            updatedAt: new Date(row.updated_at).toISOString(),
+          }));
+        });
+      } catch {
+        const res: CampaignDeliveryV1[] = [];
+        for (const del of this.memoryDeliveries.values()) {
+          if (del.campaignId === campaignId && Number(del.tenantId) === Number(tenantId)) {
+            res.push(del);
+          }
+        }
+        return res;
+      }
+    }
+
     const res: CampaignDeliveryV1[] = [];
     for (const del of this.memoryDeliveries.values()) {
       if (del.campaignId === campaignId) res.push(del);

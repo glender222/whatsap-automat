@@ -256,27 +256,71 @@ export class SegmentationService {
 
     try {
       return await this.uow.run(tenantId, async (client) => {
-        // Query PostgreSQL contacts
-        let sql = `SELECT c.id, c.phone, c.display_name, c.metadata_json FROM contacts c WHERE c.tenant_id = $1`;
+        // Query PostgreSQL contacts using company_id for operational core tenant isolation
+        let sql = `
+          SELECT c.id, c.phone, COALESCE(c.display_name, c.name, 'Contact') AS display_name,
+                 c.metadata_json,
+                 COALESCE(c.last_seen_at, c.created_at) AS last_seen_at,
+                 COALESCE(
+                   (
+                     SELECT array_agg(DISTINCT t.name)
+                     FROM tag_chats tc
+                     JOIN tags t ON t.id = tc.tag_id AND t.company_id = c.company_id
+                     JOIN conversations conv ON conv.id = tc.conversation_id AND conv.company_id = c.company_id
+                     WHERE conv.contact_id = c.id
+                   ),
+                   ARRAY[]::varchar[]
+                 ) AS db_tags
+          FROM contacts c
+          WHERE c.company_id = $1
+        `;
         const params: unknown[] = [tenantId];
 
         if (!segment.dynamic && segment.staticContactIds.length > 0) {
-          sql += ` AND c.id = ANY($2::integer[])`;
+          sql += ` AND c.id = ANY($${params.length + 1}::integer[])`;
           params.push(segment.staticContactIds);
         }
 
-        sql += ` ORDER BY c.id ASC LIMIT $${params.length + 1} OFFSET $${params.length + 2};`;
-        params.push(limit, offset);
+        sql += ` ORDER BY c.id ASC;`;
 
         const res = await client.query(sql, params);
-        return res.rows.map((row) => ({
-          contactId: Number(row.id),
-          destination: segment.targetChannel === 'email'
-            ? (row.metadata_json?.email || `${row.phone}@example.com`)
-            : row.phone,
-          name: row.display_name,
-          metadata: typeof row.metadata_json === 'string' ? JSON.parse(row.metadata_json) : row.metadata_json,
-        }));
+
+        // Enforce audience rule filtering across all database contacts
+        const matchingRecipients: RecipientRecord[] = [];
+        for (const row of res.rows) {
+          const meta = typeof row.metadata_json === 'string'
+            ? JSON.parse(row.metadata_json || '{}')
+            : (row.metadata_json || {});
+          const metaTags = Array.isArray(meta.tags) ? meta.tags.map(String) : [];
+          const dbTags = Array.isArray(row.db_tags) ? row.db_tags.map(String) : [];
+          const tags = Array.from(new Set([...dbTags, ...metaTags]));
+
+          const contactObj = {
+            id: Number(row.id),
+            tenantId,
+            phone: String(row.phone || ''),
+            email: typeof meta.email === 'string' ? meta.email : undefined,
+            displayName: row.display_name,
+            tags,
+            metadata: meta,
+            lastSeenAt: row.last_seen_at ? new Date(row.last_seen_at).toISOString() : new Date().toISOString(),
+          };
+
+          if (segment.dynamic && !this.matchesCriteria(contactObj, segment.criteria)) {
+            continue;
+          }
+
+          matchingRecipients.push({
+            contactId: contactObj.id,
+            destination: segment.targetChannel === 'email'
+              ? (contactObj.email || `${contactObj.phone}@example.com`)
+              : contactObj.phone,
+            name: contactObj.displayName,
+            metadata: contactObj.metadata,
+          });
+        }
+
+        return matchingRecipients.slice(offset, offset + limit);
       });
     } catch {
       // Memory store fallback

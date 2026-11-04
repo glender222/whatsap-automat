@@ -112,8 +112,13 @@ export function createCampaignRoutes(options: CampaignRoutesOptions = {}): Route
   // 5. GET /api/v1/campaigns/:id/deliveries - Get deliveries audit list
   router.get('/:id/deliveries', requireJwt, tenantContext(), async (req: Request, res: Response) => {
     try {
+      const tenantId = resolveTenantId(req);
       const campaignId = String(req.params.id);
-      const deliveries = await dispatcher.getDeliveries(campaignId);
+      const campaign = await dispatcher.getCampaign(tenantId, campaignId);
+      if (!campaign) {
+        return res.status(404).json({ success: false, error: 'NOT_FOUND', message: 'Campaign not found' });
+      }
+      const deliveries = await dispatcher.getDeliveries(campaignId, tenantId);
       res.status(200).json({ success: true, data: deliveries });
     } catch (err: any) {
       res.status(err.statusCode || 500).json({

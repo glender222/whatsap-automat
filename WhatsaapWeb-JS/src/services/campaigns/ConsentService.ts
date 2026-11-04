@@ -152,10 +152,12 @@ export class ConsentService {
   ): Promise<ConsentVerificationResultV1> {
     const normDest = destination.trim().toLowerCase();
 
-    // Check memory store first if populated
+    // Check memory store
     const exactKey = this.memoryKey(tenantId, channel, normDest, purpose);
     const allKey = this.memoryKey(tenantId, channel, normDest, 'all');
-    const cached = this.memoryLedger.get(exactKey) || this.memoryLedger.get(allKey);
+    const exactRecord = this.memoryLedger.get(exactKey);
+    const allRecord = this.memoryLedger.get(allKey);
+    const memRecords = [exactRecord, allRecord].filter((r): r is ConsentRecordV1 => Boolean(r));
 
     try {
       const dbRecord = await this.uow.run(tenantId, async (client) => {
@@ -165,7 +167,15 @@ export class ConsentService {
             AND channel_type = $2
             AND LOWER(destination) = $3
             AND (purpose = $4 OR purpose = 'all')
-          ORDER BY CASE WHEN purpose = $4 THEN 1 ELSE 2 END, updated_at DESC
+          ORDER BY
+            CASE
+              WHEN status IN ('suppressed', 'opted_out') THEN 1
+              WHEN status = 'revoked' THEN 2
+              WHEN status = 'opted_in' AND purpose = $4 THEN 3
+              WHEN status = 'opted_in' AND purpose = 'all' THEN 4
+              ELSE 5
+            END,
+            updated_at DESC
           LIMIT 1;
         `;
         const res = await client.query(sql, [tenantId, channel, normDest, purpose]);
@@ -188,16 +198,19 @@ export class ConsentService {
       // Fall through to memory store evaluation
     }
 
-    if (cached) {
-      if (cached.status === 'suppressed' || cached.status === 'opted_out') {
-        return { permitted: false, status: cached.status, reason: 'SUPPRESSED', recordId: cached.id };
-      }
-      if (cached.status === 'revoked') {
-        return { permitted: false, status: cached.status, reason: 'REVOKED', recordId: cached.id };
-      }
-      if (cached.status === 'opted_in') {
-        return { permitted: true, status: 'opted_in', reason: 'CONSENT_GRANTED', recordId: cached.id };
-      }
+    // Evaluate memory store with strict suppression priority:
+    // Any explicit suppression/opt-out across exact purpose or global 'all' overrides opt-ins
+    const memSuppressed = memRecords.find(r => r.status === 'suppressed' || r.status === 'opted_out');
+    if (memSuppressed) {
+      return { permitted: false, status: memSuppressed.status, reason: 'SUPPRESSED', recordId: memSuppressed.id };
+    }
+    const memRevoked = memRecords.find(r => r.status === 'revoked');
+    if (memRevoked) {
+      return { permitted: false, status: memRevoked.status, reason: 'REVOKED', recordId: memRevoked.id };
+    }
+    const memOptedIn = (exactRecord?.status === 'opted_in' ? exactRecord : null) || (allRecord?.status === 'opted_in' ? allRecord : null);
+    if (memOptedIn) {
+      return { permitted: true, status: 'opted_in', reason: 'CONSENT_GRANTED', recordId: memOptedIn.id };
     }
 
     // Fail-closed for marketing and broadcast purposes
@@ -251,14 +264,14 @@ export class ConsentService {
         const res = await client.query(revokeSql, [tenantId, customerId, destination || null]);
         purgedConsentCount = res.rowCount || 0;
 
-        // Anonymize contact
+        // Anonymize contact using company_id for operational core tenant isolation
         const anonSql = `
           UPDATE contacts
           SET display_name = 'Anonymized Contact',
               profile_name = 'Anonymized Contact',
               metadata_json = '{}'::jsonb,
               updated_at = NOW()
-          WHERE tenant_id = $1
+          WHERE company_id = $1
             AND (
               id = NULLIF($2, '')::integer
               OR ($3::text IS NOT NULL AND phone = $3)
