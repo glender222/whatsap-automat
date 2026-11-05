@@ -28,6 +28,8 @@ import CatalogsPage from "../factures/inventario/pages/CatalogsPage";
 import InventoryPage from "../factures/inventario/pages/InventoryPage";
 import { useAgentState } from "../factures/dashboard/hooks/useAgentState";
 import { CampaignWizard, SegmentsManager, EmailChannelConfig } from "../components/campaigns";
+import AuditEventsPage from "../pages/Admin/AuditEventsPage";
+import SystemHealthPage from "../pages/Admin/SystemHealthPage";
 
 import { authService } from "../factures/auth/services/authService";
 
@@ -99,6 +101,8 @@ function AppRoutesInner() {
           <Route path="campanas/nueva" element={<CampaignWizard />} />
           <Route path="segmentos" element={<SegmentsManager />} />
           <Route path="canales/email" element={<EmailChannelConfig />} />
+          <Route path="admin/auditoria" element={<PrivateRoute adminOnly><AuditEventsPage /></PrivateRoute>} />
+          <Route path="admin/salud" element={<PrivateRoute adminOnly><SystemHealthPage /></PrivateRoute>} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Route>
 

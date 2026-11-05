@@ -3,7 +3,7 @@ import axios from "axios";
 import { authService } from "../../factures/auth/services/authService";
 
 export const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL ?? "http://localhost:3000/api",
+  baseURL: (import.meta as any)?.env?.VITE_API_URL ?? "http://localhost:3000/api",
   timeout: 20000, // Aumentado a 20 segundos para permitir descargas de WhatsApp
   headers: { "Content-Type": "application/json" },
 });

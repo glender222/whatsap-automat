@@ -21,8 +21,9 @@
     "test:rls": "node --import tsx --test src/test/rls-isolation.test.ts",
     "test:sockets": "node --import tsx --test src/test/socket-security.test.ts",
     "test:tenancy": "node --import tsx --test src/test/tenancy-domain.test.ts",
-    "test:tools": "node --import tsx --test src/test/tools-reales-ia.test.ts",
-    "test:f6": "node --import tsx --test src/test/migration-030-campaigns-consent.test.ts src/test/consent-service.test.ts src/test/campaign-dispatcher.test.ts src/test/email-adapter.test.ts src/test/campaign-routes.test.ts"
+    "doctor": "tsx scripts/doctor.ts",
+    "test:f6": "node --import tsx --test src/test/migration-030-campaigns-consent.test.ts src/test/consent-service.test.ts src/test/campaign-dispatcher.test.ts src/test/email-adapter.test.ts src/test/campaign-routes.test.ts",
+    "test:f8": "node --import tsx --test src/test/secret-vault.test.ts src/test/audit-events-immutability.test.ts src/test/diagnostic-doctor.test.ts src/test/backup-rehearsal.test.ts src/test/license-compliance.test.ts"
   },
   "keywords": [
     "whatsapp",

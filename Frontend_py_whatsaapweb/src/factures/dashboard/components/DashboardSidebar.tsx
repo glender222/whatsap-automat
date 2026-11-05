@@ -10,6 +10,8 @@ import {
   PanelLeftOpen,
   ReceiptText,
   Sparkles,
+  ShieldCheck,
+  Activity,
 } from 'lucide-react';
 import React from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
@@ -54,16 +56,19 @@ export default function DashboardSidebar({ collapsed = false, onToggleCollapsed 
   const commercialActive = isAnyActive(location.pathname, ['/dashboard/inventario', '/dashboard/catalogos']);
   const iaActive = isAnyActive(location.pathname, ['/dashboard/ia/dominios', '/dashboard/ia-settings', '/dashboard/ia/agentes', '/dashboard/agentes']);
   const opsActive = isAnyActive(location.pathname, ['/dashboard/handoff', '/dashboard/pagos']);
+  const adminActive = isAnyActive(location.pathname, ['/dashboard/admin/auditoria', '/dashboard/admin/salud']);
 
   const [commercialOpen, setCommercialOpen] = React.useState(commercialActive);
   const [iaOpen, setIaOpen] = React.useState(iaActive);
   const [opsOpen, setOpsOpen] = React.useState(opsActive);
+  const [adminOpen, setAdminOpen] = React.useState(adminActive);
 
   React.useEffect(() => {
     if (commercialActive) setCommercialOpen(true);
     if (iaActive) setIaOpen(true);
     if (opsActive) setOpsOpen(true);
-  }, [commercialActive, iaActive, opsActive]);
+    if (adminActive) setAdminOpen(true);
+  }, [commercialActive, iaActive, opsActive, adminActive]);
 
   const isActive = (path: string, exact = false) => (
     exact ? location.pathname === path : location.pathname === path || location.pathname.startsWith(`${path}/`)
@@ -215,6 +220,27 @@ export default function DashboardSidebar({ collapsed = false, onToggleCollapsed 
           {[
             { to: '/dashboard/handoff', label: 'Cola Handoff', icon: Hand },
             { to: '/dashboard/pagos', label: 'Validar pagos', icon: ReceiptText },
+          ].map(renderItem)}
+        </NavGroup>
+
+        <NavGroup
+          title="Seguridad y SRE"
+          icon={ShieldCheck}
+          open={adminOpen}
+          active={adminActive}
+          collapsed={collapsed}
+          onToggle={() => {
+            if (collapsed) {
+              onToggleCollapsed?.();
+              setAdminOpen(true);
+              return;
+            }
+            setAdminOpen((value) => !value);
+          }}
+        >
+          {[
+            { to: '/dashboard/admin/auditoria', label: 'Pistas de Auditoría', icon: ShieldCheck, adminOnly: true },
+            { to: '/dashboard/admin/salud', label: 'Salud del Sistema (SRE)', icon: Activity, adminOnly: true },
           ].map(renderItem)}
         </NavGroup>
 
