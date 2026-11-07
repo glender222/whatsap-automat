@@ -1,0 +1,49 @@
+{
+  "name": "@whatsap-automat/mobile",
+  "version": "0.4.0",
+  "private": true,
+  "description": "Whatsap-Automat Mobile Operations Inbox App (React Native / Expo 51+)",
+  "main": "node_modules/expo/AppEntry.js",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test tests/**/*.test.ts"
+  },
+  "keywords": [
+    "whatsap-automat",
+    "mobile",
+    "react-native",
+    "expo",
+    "inbox",
+    "cas-concurrency"
+  ],
+  "author": "Whatsap-Automat Engineering Team",
+  "license": "MIT",
+  "dependencies": {
+    "@react-navigation/native": "^6.1.18",
+    "@react-navigation/native-stack": "^6.10.1",
+    "@whatsap-automat/contracts": "file:../../packages/contracts",
+    "@whatsap-automat/sdk": "file:../../packages/sdk",
+    "expo": "~51.0.38",
+    "expo-secure-store": "~13.0.2",
+    "expo-status-bar": "~1.12.1",
+    "lucide-react-native": "^0.454.0",
+    "react": "18.2.0",
+    "react-native": "0.74.5",
+    "react-native-safe-area-context": "4.10.5",
+    "react-native-screens": "~3.31.1",
+    "react-native-svg": "15.2.0",
+    "socket.io-client": "^4.8.1"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.25.2",
+    "@types/node": "^22.8.1",
+    "@types/react": "~18.2.79",
+    "@types/react-native": "~0.73.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "expo": {
+    "name": "Whatsap-Automat Mobile",
+    "slug": "whatsap-automat-mobile",
+    "version": "0.4.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#090d16"
+    },
+    "scheme": "whatsap-automat",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.whatsapautomat.mobile",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Allows capturing photos to send as customer support attachments.",
+        "NSPhotoLibraryUsageDescription": "Allows attaching photos from library to send in conversation."
+      }
+    },
+    "android": {
+      "package": "com.whatsapautomat.mobile",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#090d16"
+      },
+      "permissions": [
+        "INTERNET",
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE"
+      ]
+    },
+    "plugins": [
+      "expo-secure-store"
+    ],
+    "extra": {
+      "defaultApiUrl": "http://localhost:3000/api/v1",
+      "eas": {
+        "projectId": "whatsap-automat-mobile-p3"
+      }
+    }
+  }
+}

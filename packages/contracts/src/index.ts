@@ -17,3 +17,4 @@ export * from './adapters';
 export * from './synthetic';
 export * from './campaigns';
 export * from './extensions';
+export * from './marketplace';

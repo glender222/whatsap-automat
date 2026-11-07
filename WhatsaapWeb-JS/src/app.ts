@@ -26,6 +26,7 @@ import createWorkflowRoutes from './routes/workflowRoutes';
 import createAiRoutes from './routes/ai.routes';
 import { createCampaignRoutes, createConsentRoutes, createSegmentRoutes } from './routes/campaigns.routes';
 import createOpenApiRoutes from './routes/openapiRoutes';
+import { createMarketplaceRoutes } from './routes/marketplaceRoutes';
 import { optionalWhatsappJwt, requireJwt } from './middleware/jwtAuth';
 import { requireChatTenantAccess, requireMediaTenantAccess, requireVoucherTenantAccess } from './middleware/resourceAuth';
 import { coreModel } from './core/coreModel';
@@ -227,6 +228,7 @@ export class App {
     this.app.use('/api/v1/campaigns', createCampaignRoutes());
     this.app.use('/api/v1/consent', createConsentRoutes());
     this.app.use('/api/v1/segments', createSegmentRoutes());
+    this.app.use('/api/v1/marketplace', createMarketplaceRoutes());
     this.app.use('/api/v1', createOpenApiRoutes());
 
     // Sandbox aislado para testing no productivo (demo fuera del endpoint productivo)
