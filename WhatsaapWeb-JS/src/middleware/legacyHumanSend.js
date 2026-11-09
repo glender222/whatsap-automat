@@ -1,21 +1,10 @@
-const { unlink } = require('node:fs/promises');
+const { removeTemporaryUpload } = require('../shared/temporaryUpload');
 
 const TEXT_SEND_ENDPOINT = '/api/v1/conversations/{id}/messages';
 
 function explicitTemplateName(body) {
   const name = body?.templateName || body?.template;
   return typeof name === 'string' ? name.trim() || undefined : undefined;
-}
-
-async function removeTemporaryUpload(filePath) {
-  if (!filePath) return;
-  try {
-    await unlink(filePath);
-  } catch (error) {
-    if (error.code !== 'ENOENT') {
-      console.warn('No se pudo eliminar un archivo temporal de envío.', { code: error.code });
-    }
-  }
 }
 
 // These endpoints need multipart parsing before authorization to obtain the chat ID.
@@ -64,4 +53,4 @@ function legacyHumanSend(whatsappService, send, { allowTemplates = false } = {})
   });
 }
 
-module.exports = { cleanRejectedUpload, explicitTemplateName, legacyHumanSend, removeTemporaryUpload, withTemporaryUpload };
+module.exports = { cleanRejectedUpload, explicitTemplateName, legacyHumanSend, withTemporaryUpload };

@@ -4,6 +4,8 @@ import { promises as fs } from 'fs';
 import { MetaCloudClient, MetaMediaMessageType } from './whatsapp/meta/MetaCloudClient';
 import { MetaAccountStore } from './whatsapp/meta/MetaAccountStore';
 import { MetaInboxStore } from './whatsapp/meta/MetaInboxStore';
+import { withCompatibleVideo } from './whatsapp/VideoTranscode';
+import { removeTemporaryUpload } from '../shared/temporaryUpload';
 import AgentService from './ai/AgentService';
 import config from '../config/index';
 import pool from '../config/database';
@@ -350,30 +352,34 @@ export class WhatsAppService {
       if (media) {
         try {
           const mediaType = inferMetaMediaType(media.mimetype, options);
-          const upload = await metaClient.uploadMedia(media);
-          result = await metaClient.sendMedia(chatId, upload.mediaId, mediaType, {
-            caption: message || null,
-            filename: media.originalname || null,
-          });
-          await store.persistOutbound({
-            chatId,
-            body: message || null,
-            messageType: mediaType,
-            providerMessageId: result.providerMessageId,
-            raw: { upload: upload.raw, send: result.raw },
-            media: {
-              providerMediaId: upload.mediaId,
-              mimeType: media.mimetype || null,
-              filename: media.originalname || null,
-              sizeBytes: typeof media.size === 'number' ? media.size : null,
+          const sendMedia = async (attachment: typeof media) => {
+            const upload = await metaClient.uploadMedia(attachment);
+            const sent = await metaClient.sendMedia(chatId, upload.mediaId, mediaType, {
               caption: message || null,
-              metadata: { upload: upload.raw, send: result.raw },
-            },
-          });
+              filename: attachment.originalname || null,
+            });
+            await store.persistOutbound({
+              chatId,
+              body: message || null,
+              messageType: mediaType,
+              providerMessageId: sent.providerMessageId,
+              raw: { upload: upload.raw, send: sent.raw },
+              media: {
+                providerMediaId: upload.mediaId,
+                mimeType: attachment.mimetype || null,
+                filename: attachment.originalname || null,
+                sizeBytes: typeof attachment.size === 'number' ? attachment.size : null,
+                caption: message || null,
+                metadata: { upload: upload.raw, send: sent.raw },
+              },
+            });
+            return sent;
+          };
+          result = mediaType === 'video'
+            ? await withCompatibleVideo(media, sendMedia)
+            : await sendMedia(media);
         } finally {
-          if (media.path) {
-            await fs.unlink(media.path).catch(() => undefined);
-          }
+          await removeTemporaryUpload(media.path);
         }
       } else if (templateName) {
         result = await metaClient.sendTemplate(chatId, templateName, templateLanguage, options.components);

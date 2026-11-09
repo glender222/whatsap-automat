@@ -1,8 +1,8 @@
 const { asyncHandler } = require('../middleware/errorHandler');
 const fs = require('fs');
-const ffmpeg = require('fluent-ffmpeg');
 const path = require('path');
-const { legacyHumanSend, removeTemporaryUpload, withTemporaryUpload } = require('../middleware/legacyHumanSend');
+const { legacyHumanSend, withTemporaryUpload } = require('../middleware/legacyHumanSend');
+const { withCompatibleVideo } = require('../services/whatsapp/VideoTranscode');
 
 function getWhatsappCompanyId(req) {
   const user = req?.user || {};
@@ -45,7 +45,7 @@ class MediaController {
    */
   sendMedia = async (req, res) => {
     const { chatId, message } = req.body;
-    let file = req.file || null;
+    const file = req.file || null;
 
     if (!chatId) {
       return res.status(400).json({ success: false, error: 'chatId requerido' });
@@ -59,61 +59,19 @@ class MediaController {
       return res.status(400).json({ success: false, error: 'Solo se permiten imágenes o videos en este endpoint' });
     }
 
-    let outputPath;
-    try {
-      // Si es video, convertir a MP4 H.264 si no es compatible
-      if (mimetype.startsWith('video/')) {
-        // Solo convertir si no es mp4/h264
-        const ext = path.extname(file.originalname).toLowerCase();
-        const isMp4 = ext === '.mp4';
-        // No podemos detectar codec aquí, así que convertimos todo a mp4 por compatibilidad
-        if (!isMp4 || mimetype !== 'video/mp4') {
-          outputPath = `${file.path}-converted.mp4`;
-          await new Promise((resolve, reject) => {
-            ffmpeg(file.path)
-              .outputOptions([
-                '-c:v libx264',
-                '-preset veryfast',
-                '-movflags +faststart',
-                '-pix_fmt yuv420p',
-                '-profile:v baseline',
-                '-level 3.0',
-                '-c:a aac',
-                '-b:a 128k'
-              ])
-              .output(outputPath)
-              .on('end', () => {
-                // Actualizar file para enviar el convertido
-                file = {
-                  ...file,
-                  path: outputPath,
-                  mimetype: 'video/mp4',
-                  originalname: path.basename(outputPath)
-                };
-                resolve();
-              })
-              .on('error', (err) => {
-                console.error('Error al convertir video:', err);
-                reject(new Error('No se pudo convertir el video a formato compatible MP4'));
-              })
-              .run();
-          });
-        }
+    const options = { forceDocument: false, companyId: getWhatsappCompanyId(req) };
+    const send = (attachment) => this.whatsappService.sendMessage(chatId, message, attachment, options);
+    // Meta Cloud normalizes video in the shared provider path used by every upload route.
+    const sent = mimetype.startsWith('video/') && this.whatsappService.provider !== 'meta-cloud'
+      ? await withCompatibleVideo(file, send)
+      : await send(file);
+    return res.json({
+      success: true,
+      data: {
+        id: sent.id?._serialized || sent.id || null,
+        timestamp: sent.timestamp || Math.floor(Date.now()/1000),
       }
-
-      // Forzar nunca como documento
-      const options = { forceDocument: false, companyId: getWhatsappCompanyId(req) };
-      const sent = await this.whatsappService.sendMessage(chatId, message, file, options);
-      return res.json({
-        success: true,
-        data: {
-          id: sent.id?._serialized || sent.id || null,
-          timestamp: sent.timestamp || Math.floor(Date.now()/1000),
-        }
-      });
-    } finally {
-      await removeTemporaryUpload(outputPath);
-    }
+    });
   };
 
   /**

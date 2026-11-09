@@ -1,5 +1,6 @@
 import './fixtures/testEnv';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { randomInt } from 'node:crypto';
 import { once } from 'node:events';
 import { mkdtemp, readdir, rm } from 'node:fs/promises';
@@ -33,10 +34,12 @@ async function listen(t: TestContext, server: Server) {
   return `http://127.0.0.1:${address.port}`;
 }
 
-function multipart(fields: Record<string, string>, mimeType = 'image/png', filename = 'fixture.png') {
+function multipart(
+  fields: Record<string, string>, mimeType = 'image/png', filename = 'fixture.png', content: BlobPart = 'fixture-file',
+) {
   const form = new FormData();
   for (const [key, value] of Object.entries(fields)) form.append(key, value);
-  form.append('file', new Blob(['fixture-file'], { type: mimeType }), filename);
+  form.append('file', new Blob([content], { type: mimeType }), filename);
   return form;
 }
 
@@ -96,20 +99,32 @@ test('legacy HTTP routes never send or persist free-form Meta text and preserve 
     [tenantA, phone],
   ));
 
-  const attempts: { path: string; type?: string; payload: string }[] = [];
+  const attempts: {
+    path: string; type?: string; payload: string; media?: { mimeType: string; name: string; bytes: Buffer };
+  }[] = [];
   let failUpload = false;
+  let failVideoSend = false;
   const graph = await listen(t, createServer(async (req, res) => {
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(Buffer.from(chunk));
-    const payload = Buffer.concat(chunks).toString();
+    const bytes = Buffer.concat(chunks);
+    const payload = bytes.toString();
     assert.equal(req.headers.authorization, `Bearer ${fixtureToken}`);
     assert.equal(req.method, 'POST');
     const path = req.url || '';
     const upload = path.endsWith('/media');
     const data = upload ? undefined : JSON.parse(payload);
-    attempts.push({ path, type: data?.type, payload });
+    let media;
+    if (upload && process.env.LEGACY_META_TEST_VIDEO === '1') {
+      const parts = await new Response(bytes, { headers: { 'content-type': req.headers['content-type']! } }).formData();
+      const file = parts.get('file');
+      assert.ok(file instanceof File);
+      assert.equal(parts.get('type'), file.type);
+      media = { mimeType: file.type, name: file.name, bytes: Buffer.from(await file.arrayBuffer()) };
+    }
+    attempts.push({ path, type: data?.type, payload, media });
     res.setHeader('content-type', 'application/json');
-    if (upload && failUpload) {
+    if ((upload && failUpload) || (data?.type === 'video' && failVideoSend)) {
       res.writeHead(400).end(JSON.stringify({ error: { message: 'fixture rejection' } }));
       return;
     }
@@ -177,7 +192,7 @@ test('legacy HTTP routes never send or persist free-form Meta text and preserve 
   const chat = `/api/chats/${phone}/messages`;
   const jsChat = `/api/js-chats/${phone}/messages`;
   const whatsappAlias = '/api/whatsapp/send-message';
-  const counts = async () => uow.run(tenantA, async (client) => (await client.query(`
+  const counts = async (companyId = tenantA) => uow.run(companyId, async (client) => (await client.query(`
     SELECT (SELECT count(*)::int FROM messages) AS messages,
            (SELECT count(*)::int FROM conversation_send_claims) AS claims,
            (SELECT count(*)::int FROM operational_actions) AS actions
@@ -266,4 +281,80 @@ test('legacy HTTP routes never send or persist free-form Meta text and preserve 
   assert.equal((await send(`/webjs/chats/${phone}/messages`, { message: 'development core text' })).status, 200);
   assert.equal(webCalls[0][1], 'development text');
   assert.equal((coreCalls[0] as { body: string }).body, 'development core text');
+
+  await t.test('real WebM becomes H.264/AAC MP4 and video cleanup is tenant-safe', {
+    skip: process.env.LEGACY_META_TEST_VIDEO !== '1' && 'Set LEGACY_META_TEST_VIDEO=1 with FFmpeg and ffprobe on PATH',
+  }, async () => {
+    const source = execFileSync('ffmpeg', [
+      '-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=64x64:rate=12',
+      '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000', '-t', '0.5',
+      '-c:v', 'libvpx', '-c:a', 'libopus', '-f', 'webm', 'pipe:1',
+    ], { timeout: 10_000 });
+    function probe(input: Buffer) {
+      return JSON.parse(execFileSync('ffprobe', [
+        '-v', 'error', '-show_entries', 'format=format_name:stream=codec_name,codec_type',
+        '-of', 'json', 'pipe:0',
+      ], { input, timeout: 10_000, encoding: 'utf8' })) as {
+        format: { format_name: string }; streams: { codec_type: string; codec_name: string }[];
+      };
+    }
+    assert.deepEqual(probe(source).streams.map((stream) => stream.codec_name), ['vp8', 'opus']);
+    const video = (fields: Record<string, string>, bytes: Buffer = source) =>
+      multipart(fields, 'video/webm', 'fixture.webm', new Uint8Array(bytes));
+    failUpload = false;
+    const mediaRoute = '/api/media/send-media';
+    const beforeA = await counts();
+    const beforeB = await counts(tenantB);
+    const beforeAttempts = attempts.length;
+    for (const route of [mediaRoute, `/api/chats/${conversation.id}/messages`]) {
+      assert.equal((await send(route, video({ chatId: String(conversation.id) }), token(tenantB))).status, 404);
+    }
+    await assertCleanUploadDir();
+    assert.equal(attempts.length, beforeAttempts);
+
+    for (const route of [mediaRoute, chat]) {
+      const start = attempts.length;
+      const response = await send(route, video({ chatId: phone, message: 'Fixture video' }));
+      assert.equal(response.status, 200, JSON.stringify(response.body));
+      const [uploadAttempt, sendAttempt] = attempts.slice(start);
+      assert.equal(attempts.length - start, 2);
+      assert.equal(uploadAttempt.media?.mimeType, 'video/mp4', route);
+      assert.equal(uploadAttempt.media?.name, 'fixture.mp4');
+      const encoded = probe(uploadAttempt.media!.bytes);
+      assert.match(encoded.format.format_name, /mp4/);
+      assert.deepEqual(encoded.streams.map((stream) => [stream.codec_type, stream.codec_name]), [
+        ['video', 'h264'], ['audio', 'aac'],
+      ]);
+      assert.equal(sendAttempt.type, 'video');
+      assert.deepEqual(JSON.parse(sendAttempt.payload).video, {
+        id: 'media-fixture-' + (start + 1), caption: 'Fixture video',
+      });
+      const { rows: [attachment] } = await uow.run(tenantA, (client) => client.query(`
+        SELECT a.mime_type, a.size_bytes::int, a.provider_media_id
+        FROM message_attachments a JOIN messages m ON m.id = a.message_id
+        WHERE m.provider_message_id = $1
+      `, ['wamid.fixture-' + (start + 2)]));
+      assert.deepEqual(attachment, {
+        mime_type: 'video/mp4', size_bytes: uploadAttempt.media!.bytes.length, provider_media_id: 'media-fixture-' + (start + 1),
+      });
+      await assertCleanUploadDir();
+    }
+    const after = await counts();
+    assert.equal(after.messages, beforeA.messages + 2);
+
+    const beforeBadInput = attempts.length;
+    const corrupt = await send(chat, video({ chatId: phone }, Buffer.from('corrupt webm')));
+    assert.equal(corrupt.status, 422);
+    assert.equal(corrupt.body.error, 'VIDEO_CONVERSION_FAILED');
+    assert.equal(attempts.length, beforeBadInput);
+    await assertCleanUploadDir();
+
+    failVideoSend = true;
+    assert.ok((await send(mediaRoute, video({ chatId: phone }))).status >= 400);
+    assert.equal(attempts.length - beforeBadInput, 2);
+    assert.equal(attempts[beforeBadInput].media?.mimeType, 'video/mp4');
+    await assertCleanUploadDir();
+    assert.deepEqual(await counts(), after);
+    assert.deepEqual(await counts(tenantB), beforeB);
+  });
 });
