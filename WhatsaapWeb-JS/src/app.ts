@@ -225,7 +225,7 @@ export class App {
     this.app.use('/api/webhooks/payments', createPaymentWebhookRoutes());
     this.app.use('/api/customer-history', requireJwt, createCustomerHistoryRoutes());
     this.app.use('/api/conversations', requireJwt, createConversationRoutes());
-    this.app.use('/api/v1/conversations', createConversationV1Routes());
+    this.app.use('/api/v1/conversations', createConversationV1Routes(undefined, undefined, this.whatsappService));
     this.app.use('/api/v1/workspaces', createWorkspaceRoutes());
     this.app.use('/api/reports', requireJwt, createReportRoutes());
     this.app.use('/api/whatsapp', requireJwt, createWhatsAppRoutes(this.whatsappService));

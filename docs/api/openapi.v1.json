@@ -301,6 +301,131 @@
         }
       }
     },
+    "/conversations/{id}/messages/{messageId}/attachments/{attachmentId}": {
+      "get": {
+        "summary": "Descargar un adjunto de WhatsApp Cloud",
+        "description": "Usa los IDs canónicos de la conversación, el mensaje y el adjunto del historial. Devuelve solo el archivo de esa combinación en el espacio autenticado.",
+        "operationId": "downloadConversationAttachment",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,9}$"
+            }
+          },
+          {
+            "name": "messageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,9}$"
+            }
+          },
+          {
+            "name": "attachmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,9}$"
+            }
+          },
+          {
+            "name": "Range",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "example": "bytes=0-4095"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Archivo completo",
+            "headers": {
+              "Cache-Control": {
+                "description": "El cliente y los intermediarios deben descartar la respuesta.",
+                "schema": {
+                  "type": "string",
+                  "const": "private, no-store"
+                }
+              }
+            },
+            "content": {
+              "*/*": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "206": {
+            "description": "Rango de bytes del archivo",
+            "headers": {
+              "Cache-Control": {
+                "description": "El cliente y los intermediarios deben descartar la respuesta.",
+                "schema": {
+                  "type": "string",
+                  "const": "private, no-store"
+                }
+              },
+              "Content-Range": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "*/*": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "416": {
+            "description": "Rango de bytes fuera del archivo",
+            "headers": {
+              "Content-Range": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Archivo temporalmente no disponible",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/conversations/{id}/takeover": {
       "post": {
         "summary": "Toma de control humano (Handoff CAS)",

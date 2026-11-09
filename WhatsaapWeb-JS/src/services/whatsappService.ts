@@ -1,9 +1,10 @@
 import path from 'path';
 import { existsSync } from 'fs';
 import { promises as fs } from 'fs';
+import { randomUUID } from 'node:crypto';
 import { MetaCloudClient, MetaMediaMessageType } from './whatsapp/meta/MetaCloudClient';
 import { MetaAccountStore } from './whatsapp/meta/MetaAccountStore';
-import { MetaInboxStore } from './whatsapp/meta/MetaInboxStore';
+import { MetaInboxStore, type MetaMediaAttachment } from './whatsapp/meta/MetaInboxStore';
 import { withCompatibleVideo } from './whatsapp/VideoTranscode';
 import { removeTemporaryUpload } from '../shared/temporaryUpload';
 import AgentService from './ai/AgentService';
@@ -512,38 +513,56 @@ export class WhatsAppService {
         throw error;
       }
 
-      const cachedPath = attachment.internal_path ? String(attachment.internal_path) : null;
-      if (cachedPath && existsSync(cachedPath)) {
-        return {
-          localPath: cachedPath,
-          mimetype: attachment.mime_type || 'application/octet-stream',
-          filename: attachment.filename || path.basename(cachedPath),
-        };
-      }
-
-      const metaClient = await this.getCompanyMetaClient(companyId);
-      const downloaded = await metaClient.downloadMedia(String(attachment.provider_media_id));
-      const uploadDir = path.join(config.whatsapp.uploadDir, 'tenants', String(companyId), 'meta-cloud');
-      await fs.mkdir(uploadDir, { recursive: true });
-      const filename = `${String(attachment.provider_media_id).replace(/[^\w.-]/g, '_')}${extensionFromMime(downloaded.mimeType, attachment.filename ? String(attachment.filename) : null)}`;
-      const localPath = path.join(uploadDir, filename);
-      await fs.writeFile(localPath, downloaded.bytes);
-      await store.markMediaDownloaded({
-        attachmentId: Number(attachment.attachment_id),
-        internalPath: localPath,
-        mimeType: downloaded.mimeType,
-        sizeBytes: downloaded.fileSize,
-        sha256: downloaded.sha256,
-        metadata: { download: downloaded.raw },
-      });
-
-      return {
-        localPath,
-        mimetype: downloaded.mimeType || attachment.mime_type || 'application/octet-stream',
-        filename: attachment.filename || filename,
-      };
+      return this.loadMetaAttachment(store, attachment, attachment.provider_media_id);
     }
     return this.whatsappClient.mediaHandler.downloadMedia(messageId);
+  }
+
+  async downloadConversationAttachment(companyId: number, conversationId: number, messageId: number, attachmentId: number) {
+    const store = this.getMetaStore(companyId);
+    const attachment = await store?.findConversationAttachment(conversationId, messageId, attachmentId);
+    if (!store || !attachment?.provider_media_id) return null;
+    return this.loadMetaAttachment(store, attachment, attachment.provider_media_id, true);
+  }
+
+  private async loadMetaAttachment(store: MetaInboxStore, attachment: MetaMediaAttachment, mediaId: string, scopedCache = false) {
+    const companyId = store.getCompanyId();
+    const uploadDir = path.join(config.whatsapp.uploadDir, 'tenants', String(companyId), 'meta-cloud');
+    const cachedPath = attachment.internal_path;
+    if (cachedPath && (!scopedCache || (path.dirname(cachedPath) === uploadDir &&
+      (await fs.lstat(cachedPath).catch(() => null))?.isFile())) && existsSync(cachedPath)) {
+      return {
+        localPath: cachedPath,
+        mimetype: attachment.mime_type || 'application/octet-stream',
+        filename: attachment.filename || path.basename(cachedPath),
+      };
+    }
+
+    const metaClient = await this.getCompanyMetaClient(companyId);
+    const downloaded = await metaClient.downloadMedia(mediaId);
+    await fs.mkdir(uploadDir, { recursive: true });
+    const filename = `${mediaId.replace(/[^\w.-]/g, '_')}${extensionFromMime(downloaded.mimeType, attachment.filename)}`;
+    const localPath = path.join(uploadDir, filename);
+    const temporaryPath = path.join(uploadDir, `.${randomUUID()}.tmp`);
+    try {
+      await fs.writeFile(temporaryPath, downloaded.bytes, { flag: 'wx' });
+      await fs.rename(temporaryPath, localPath);
+    } finally {
+      await fs.rm(temporaryPath, { force: true });
+    }
+    await store.markMediaDownloaded({
+      attachmentId: attachment.attachment_id,
+      internalPath: localPath,
+      mimeType: downloaded.mimeType,
+      sizeBytes: downloaded.fileSize,
+      sha256: downloaded.sha256,
+      metadata: { download: downloaded.raw },
+    });
+    return {
+      localPath,
+      mimetype: downloaded.mimeType || attachment.mime_type || 'application/octet-stream',
+      filename: attachment.filename || filename,
+    };
   }
 
   async getProfilePhoto(chatId: string): Promise<unknown> {

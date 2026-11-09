@@ -17,6 +17,7 @@ import {
 import {
   ConversationSendError, ConversationSendService, conversationSendService,
 } from '../services/conversations/ConversationSendService';
+import type { WhatsAppService } from '../services/whatsappService';
 
 const requestKeyPattern = /^[A-Za-z0-9_.:-]{1,128}$/;
 
@@ -30,6 +31,7 @@ function problem(
 export default function createConversationV1Routes(
   sender: ConversationSendService = conversationSendService,
   query: ConversationQueryService = conversationQueryService,
+  media?: Pick<WhatsAppService, 'downloadConversationAttachment'>,
 ): Router {
   const router = Router();
   router.use(requireJwt, tenantContext({ allowSandbox: false }));
@@ -74,6 +76,45 @@ export default function createConversationV1Routes(
       if (!result) return problem(req, res, StandardErrorCode.NOT_FOUND, 'Conversation not found');
       return res.json(result);
     } catch (error) { return next(error); }
+  });
+
+  router.get('/:id/messages/:messageId/attachments/:attachmentId', async (req: JwtRequest, res) => {
+    res.setHeader('Cache-Control', 'private, no-store');
+    const ids = [req.params.id, req.params.messageId, req.params.attachmentId].map(String);
+    if (!ids.every(isInternalChatId)) return problem(req, res, StandardErrorCode.NOT_FOUND, 'Attachment not found');
+    if (!media) return problem(req, res, StandardErrorCode.RETRYABLE, 'Attachment service unavailable');
+    const [conversationId, messageId, attachmentId] = ids.map(Number);
+    try {
+      const attachment = await media.downloadConversationAttachment(
+        resolveWhatsappCompanyId(req), conversationId, messageId, attachmentId,
+      );
+      if (!attachment) return problem(req, res, StandardErrorCode.NOT_FOUND, 'Attachment not found');
+
+      const mimetype = /^[\w.+-]+\/[\w.+-]+$/.test(attachment.mimetype) ? attachment.mimetype : 'application/octet-stream';
+      const filename = attachment.filename.replace(/[/\\\u0000-\u001f\u007f]/g, '_');
+      return res.download(attachment.localPath, filename || 'attachment', {
+        cacheControl: false, lastModified: false, acceptRanges: true,
+        headers: { 'Content-Type': mimetype },
+      }, (error) => {
+        if (!error || res.destroyed) return;
+        if (res.headersSent) return void res.destroy();
+        const failure = error as Error & { status?: number; headers?: Record<string, string> };
+        if (failure.status === 416) {
+          const range = failure.headers?.['Content-Range'];
+          if (range) res.setHeader('Content-Range', range);
+          res.status(416).end();
+        } else if (failure.status === 404) {
+          problem(req, res, StandardErrorCode.NOT_FOUND, 'Attachment not found');
+        } else {
+          problem(req, res, StandardErrorCode.RETRYABLE, 'Attachment temporarily unavailable');
+        }
+      });
+    } catch (error) {
+      if ((error as { statusCode?: number } | null)?.statusCode === 404) {
+        return problem(req, res, StandardErrorCode.NOT_FOUND, 'Attachment not found');
+      }
+      return problem(req, res, StandardErrorCode.RETRYABLE, 'Attachment temporarily unavailable');
+    }
   });
 
   router.post('/:id/messages', async (req: JwtRequest, res, next) => {

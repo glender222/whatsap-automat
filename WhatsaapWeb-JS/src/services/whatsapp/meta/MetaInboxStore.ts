@@ -20,6 +20,14 @@ export interface MetaInboxStoreOptions {
   companyId: number;
 }
 
+export interface MetaMediaAttachment {
+  attachment_id: number;
+  provider_media_id: string | null;
+  mime_type: string | null;
+  filename: string | null;
+  internal_path: string | null;
+}
+
 export interface ServiceWindowStatus {
   hasActiveSession: boolean;
   status: 'open' | 'closed';
@@ -757,7 +765,7 @@ export class MetaInboxStore {
     return row;
   }
 
-  async findMediaAttachment(messageId: string): Promise<Record<string, unknown> | null> {
+  async findMediaAttachment(messageId: string): Promise<(MetaMediaAttachment & Record<string, unknown>) | null> {
     const result = await this.query(
       `SELECT
          a.id AS attachment_id,
@@ -788,6 +796,19 @@ export class MetaInboxStore {
       [this.companyId, messageId]
     );
     return result.rows[0] || null;
+  }
+
+  async findConversationAttachment(conversationId: number, messageId: number, attachmentId: number): Promise<MetaMediaAttachment | null> {
+    const result = await this.query(
+      `SELECT a.id AS attachment_id, a.provider_media_id, a.mime_type, a.filename, a.internal_path
+       FROM message_attachments a
+       JOIN messages m ON m.id = a.message_id
+       JOIN conversations c ON c.id = m.conversation_id AND c.company_id = m.company_id
+       WHERE c.company_id = $1 AND c.id = $2 AND m.id = $3 AND a.id = $4
+         AND m.channel = 'whatsapp' AND m.provider = 'meta-cloud' AND a.provider = 'meta-cloud'`,
+      [this.companyId, conversationId, messageId, attachmentId],
+    );
+    return result.rows[0] ?? null;
   }
 
   async markMediaDownloaded(input: {

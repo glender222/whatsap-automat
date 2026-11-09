@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash, createHmac, randomInt, randomUUID } from 'node:crypto';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { test } from 'node:test';
 import { io, Socket } from 'socket.io-client';
@@ -451,6 +453,60 @@ test('real API isolates two companies through auth, signed ingress, inbox, socke
   assert.equal(fromMessage.fileUrl, `/api/media/${mediaMessageId}`);
   assert.equal(fromMessage.chatId, chatId);
   assert.equal(fromMessage.mimeType, 'application/pdf');
+
+  const documentId = uploadedMessage.rows[0].id;
+  const tenantMedia = path.join(config.whatsapp.uploadDir, 'tenants', String(owner.user.companyId), 'meta-cloud');
+  const primaryPath = path.join(tenantMedia, `${randomUUID()}.pdf`);
+  const secondaryPath = path.join(tenantMedia, `${randomUUID()}.png`);
+  const primaryBytes = Buffer.from('%PDF-1.4\nfixture first attachment\n%%EOF\n');
+  const secondaryBytes = Buffer.from('89504e470d0a1a0a', 'hex');
+  await mkdir(tenantMedia, { recursive: true });
+  t.after(() => Promise.all([rm(primaryPath, { force: true }), rm(secondaryPath, { force: true })]));
+  await Promise.all([writeFile(primaryPath, primaryBytes), writeFile(secondaryPath, secondaryBytes)]);
+  const [primaryId, secondaryId] = await withTenantTransaction(owner.user.companyId, async (db) => {
+    const first = await db.query(
+      `UPDATE message_attachments SET internal_path=$2, size_bytes=$3, storage_status='downloaded'
+       WHERE message_id=$1 RETURNING id`, [documentId, primaryPath, primaryBytes.length],
+    );
+    const second = await db.query(
+      `INSERT INTO message_attachments (message_id, provider, provider_media_id, filename, mime_type, size_bytes, internal_path, storage_status)
+       VALUES ($1, 'meta-cloud', $1::text, 'second-fixture.png', 'image/png', $2, $3, 'downloaded') RETURNING id`,
+      [documentId, secondaryBytes.length, secondaryPath],
+    );
+    return [first.rows[0].id, second.rows[0].id];
+  });
+  const attachmentPage = await api(`${canonicalPath}/messages?limit=1`, 200, owner.accessToken);
+  const pagedDocument = conversationMessageV1Schema.parse(attachmentPage.items[0]);
+  assert.equal(pagedDocument.id, String(documentId));
+  assert.deepEqual(pagedDocument.attachments.map(({ id }) => id), [String(primaryId), String(secondaryId)]);
+  assert.ok(attachmentPage.nextCursor);
+  const olderPage = await api(`${canonicalPath}/messages?limit=1&cursor=${encodeURIComponent(attachmentPage.nextCursor)}`, 200, owner.accessToken);
+  assert.ok(olderPage.items.every(({ id }: { id: string }) => id !== pagedDocument.id));
+
+  const files = `${canonicalPath}/messages/${documentId}/attachments`;
+  const download = (url: string, token?: string, range?: string) => fetch(`${base}${url}`, {
+    headers: { ...(token && { Authorization: `Bearer ${token}` }), ...(range && { Range: range }) },
+  });
+  for (const [attachmentId, expected, mimetype] of [[primaryId, primaryBytes, 'application/pdf'], [secondaryId, secondaryBytes, 'image/png']] as const) {
+    const file = await download(`${files}/${attachmentId}`, owner.accessToken);
+    assert.equal(file.status, 200);
+    assert.equal(file.headers.get('cache-control'), 'private, no-store');
+    assert.equal(file.headers.get('content-type'), mimetype);
+    assert.match(file.headers.get('content-disposition') || '', /^attachment;/);
+    assert.deepEqual(Buffer.from(await file.arrayBuffer()), expected);
+  }
+  const partial = await download(`${files}/${primaryId}`, owner.accessToken, 'bytes=0-4');
+  assert.equal(partial.status, 206);
+  assert.equal(partial.headers.get('cache-control'), 'private, no-store');
+  assert.equal(partial.headers.get('content-range'), `bytes 0-4/${primaryBytes.length}`);
+  assert.deepEqual(Buffer.from(await partial.arrayBuffer()), primaryBytes.subarray(0, 5));
+  const invalidRange = await download(`${files}/${primaryId}`, owner.accessToken, 'bytes=9999-');
+  assert.equal(invalidRange.status, 416);
+  assert.equal(invalidRange.headers.get('content-range'), `bytes */${primaryBytes.length}`);
+  await api(`${files}/${primaryId}`, 401);
+  await api(`${files}/${primaryId}`, 404, other.accessToken);
+  await api(`${canonicalPath}/messages/${messagePage.items[0].id}/attachments/${primaryId}`, 404, owner.accessToken);
+  await api(`${canonicalPath}/messages/${mediaMessageId}/attachments/${primaryId}`, 404, owner.accessToken);
 
   await withTenantTransaction(tenantId, (db) => db.query(
     `INSERT INTO operational_actions (company_id, contact_id, order_id, conversation_id, action_type, description)
