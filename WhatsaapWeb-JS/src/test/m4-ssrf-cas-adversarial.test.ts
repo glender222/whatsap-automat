@@ -259,11 +259,11 @@ function createConcurrencyMockUoW() {
           // -------------------------------------------------------------------
           // 5. APPROVAL_REQUESTS: SELECT by id
           // -------------------------------------------------------------------
-          if (sql.includes('SELECT id, status, version, expires_at FROM approval_requests')) {
-            const approvalId = String(params[0]);
-            const app = store.approvals.get(approvalId) || store.approvals.get(`${tenantId}:${approvalId}`);
+          if (sql.includes('FROM approval_requests') && sql.includes('WHERE id = $1 AND tenant_id = $2')) {
+            const [approvalId, companyId] = params;
+            const app = store.approvals.get(`${companyId}:${approvalId}`);
             if (!app) return { rowCount: 0, rows: [] };
-            return { rowCount: 1, rows: [{ ...app }] };
+            return { rowCount: 1, rows: [{ ...app, expired: Date.parse(app.expires_at) <= Date.now() }] };
           }
 
           if (sql.includes('FROM approval_requests') && sql.includes('id = $2')) {
@@ -285,7 +285,7 @@ function createConcurrencyMockUoW() {
             const expectedVer = Number(params[5]);
 
             const app = store.approvals.get(approvalId) || store.approvals.get(`${tId}:${approvalId}`);
-            if (!app || app.version !== expectedVer || app.status !== 'pending') {
+            if (!app || app.version !== expectedVer || app.status !== 'pending' || Date.parse(app.expires_at) <= Date.now()) {
               return { rowCount: 0, rows: [] };
             }
 

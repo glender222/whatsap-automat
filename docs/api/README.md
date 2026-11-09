@@ -97,6 +97,10 @@ El contrato incluye operaciones previstas. En la API v1 de conversaciones se pue
 
 Agent Studio conserva cada borrador como una revisión numerada e inmutable. Para leer o validar una revisión anterior, indica `?version=N`. La validación comprueba la estructura sin ejecutar el grafo y devuelve `publicationEvidence: false`. El simulador de regresión de `/api/v1/ai/eval/simulate` devuelve resultados sintéticos. La publicación requiere ejecutar una evaluación de servidor con un conjunto de pruebas autorizado, asociar su evidencia al tenant, la revisión y su hash, y usar esa revisión exacta en el runtime.
 
+### Herramientas de agente
+
+`/api/v1/ai/tools` muestra las herramientas disponibles para el tenant. `http_request` admite `GET` y `HEAD` sin cuerpo, con validación de la dirección de destino y las redirecciones. Al cambiar de origen se eliminan las cabeceras de autenticación reconocidas.
+
 ## 4. Marketplace comunitario
 
 Las rutas usan el prefijo `/api/v1/marketplace`.

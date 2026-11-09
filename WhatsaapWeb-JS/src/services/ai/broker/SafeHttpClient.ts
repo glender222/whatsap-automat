@@ -22,6 +22,8 @@ export interface SafeHttpResponse {
   resolvedIp: string;
 }
 
+const crossOriginCredentials = new Set(['authorization', 'proxy-authorization', 'cookie', 'cookie2', 'x-api-key', 'api-key']);
+
 export class SafeHttpClient {
   private static readonly DEFAULT_TIMEOUT_MS = 30_000;
   private static readonly MAX_REDIRECTS = 5;
@@ -92,11 +94,9 @@ export class SafeHttpClient {
 
         // Security: Strip sensitive headers on cross-origin redirects
         if (targetParsed.origin !== parsedUrl.origin) {
-          delete currentHeaders['authorization'];
-          delete currentHeaders['Authorization'];
-          delete currentHeaders['proxy-authorization'];
-          delete currentHeaders['cookie'];
-          delete currentHeaders['x-api-key'];
+          for (const header of Object.keys(currentHeaders)) {
+            if (crossOriginCredentials.has(header.toLowerCase())) delete currentHeaders[header];
+          }
         }
 
         // Method adjustments according to RFC 7231 / RFC 7538

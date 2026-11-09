@@ -749,7 +749,7 @@ describe('M2 Adversarial Stress Challenge: SSRF Egress Firewall & SafeHttpClient
         }
       });
 
-    it('empirical finding: demonstrates that non-normalized header casing (Cookie, X-Api-Key) survives cross-origin redirects', async () => {
+    it('strips credentials with mixed-case header names on cross-origin redirects', async () => {
       const originalLookup = dns.lookup;
       const originalHttpRequest = http.request;
       const capturedHeaders: Record<string, string>[] = [];
@@ -788,14 +788,16 @@ describe('M2 Adversarial Stress Challenge: SSRF Egress Firewall & SafeHttpClient
           headers: {
             Cookie: 'sess=capitalized-cookie',
             'X-Api-Key': 'key-capitalized',
+            AUTHORIZATION: 'Bearer fixture',
+            'Proxy-Authorization': 'Basic fixture',
           },
         });
 
         assert.equal(capturedHeaders.length, 2);
-        // Note: SafeHttpClient only deletes currentHeaders['cookie'] and currentHeaders['x-api-key']
-        // Consequently, 'Cookie' and 'X-Api-Key' remain on cross-origin redirect
-        assert.equal(capturedHeaders[1]['Cookie'], 'sess=capitalized-cookie');
-        assert.equal(capturedHeaders[1]['X-Api-Key'], 'key-capitalized');
+        for (const name of ['Cookie', 'X-Api-Key', 'AUTHORIZATION', 'Proxy-Authorization']) {
+          assert.ok(capturedHeaders[0][name]);
+          assert.equal(capturedHeaders[1][name], undefined);
+        }
       } finally {
         (dns as any).lookup = originalLookup;
         (http as any).request = originalHttpRequest;

@@ -556,6 +556,16 @@ describe('PR-F5-02 ToolBroker Security Barrier & Interception Engine Tests', () 
   });
 
   describe('Suite 7: SSRF Egress Firewall Interception (Step 7)', () => {
+    it('rejects an external HTTP write before making a request', async () => {
+      const result = await broker.execute({
+        tenantId: 1, agentGraphId: 'graph_01', runId: 'run_01', toolName: 'http_request', actorRoles: ['admin'],
+        input: { url: 'http://169.254.169.254/update', method: 'POST', body: { action: 'change' } },
+      });
+      assert.equal(result.status, 'failed');
+      assert.equal(result.riskLevel, 'read');
+      assert.equal(result.error?.code, 'VALIDATION_ERROR');
+    });
+
     it('blocks http_request targeting RFC 1918 private address (192.168.1.1)', async () => {
       const req: ToolExecutionRequestV1 = {
         tenantId: 1,
