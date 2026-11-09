@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { promises as fs } from 'fs';
+import { openAsBlob } from 'node:fs';
 
 const mediaDownloadOrigins = new Set(['https://graph.facebook.com', 'https://lookaside.fbsbx.com']);
 const maxMediaDownloadBytes = 100_000_000;
@@ -337,21 +337,24 @@ export class MetaCloudClient {
     }));
   }
 
-  async uploadMedia(file: { path: string; mimetype?: string; originalname?: string }): Promise<MetaUploadResult> {
-    const bytes = await fs.readFile(file.path);
+  async uploadMedia(
+    file: { path: string; mimetype?: string; originalname?: string }, options: { redirect?: RequestRedirect } = {},
+  ): Promise<MetaUploadResult> {
     const mimeType = file.mimetype || 'application/octet-stream';
     const filename = file.originalname || 'upload';
+    const blob = await openAsBlob(file.path, { type: mimeType });
     const formData = new FormData();
     formData.append('messaging_product', 'whatsapp');
     formData.append('type', mimeType);
-    formData.append('file', new Blob([bytes], { type: mimeType }), filename);
+    formData.append('file', blob, filename);
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.config.requestTimeoutMs || 20000);
 
     try {
-      const response = await fetch(`${this.baseUrl}/${this.config.phoneNumberId}/media`, {
+      const response = await (this.fetchGraph ?? fetch)(`${this.baseUrl}/${this.config.phoneNumberId}/media`, {
         method: 'POST',
+        redirect: options.redirect,
         signal: controller.signal,
         headers: {
           Authorization: `Bearer ${this.config.accessToken}`,
@@ -379,7 +382,7 @@ export class MetaCloudClient {
     to: string,
     mediaId: string,
     mediaType: MetaMediaMessageType,
-    options: { caption?: string | null; filename?: string | null } = {}
+    options: { caption?: string | null; filename?: string | null; redirect?: RequestRedirect; callbackData?: string } = {}
   ): Promise<MetaSendResult> {
     const mediaPayload: Record<string, unknown> = { id: mediaId };
     if (options.caption && ['image', 'video', 'document'].includes(mediaType)) {
@@ -391,10 +394,12 @@ export class MetaCloudClient {
 
     const result = await this.request(`/${this.config.phoneNumberId}/messages`, {
       method: 'POST',
+      redirect: options.redirect,
       body: {
         messaging_product: 'whatsapp',
         to: this.normalizeRecipient(to),
         type: mediaType,
+        ...(options.callbackData && { biz_opaque_callback_data: options.callbackData }),
         [mediaType]: mediaPayload,
       },
     });

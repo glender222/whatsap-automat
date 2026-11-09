@@ -2,7 +2,11 @@ import './fixtures/testEnv';
 import assert from 'node:assert/strict';
 import { createHmac, randomInt } from 'node:crypto';
 import { once } from 'node:events';
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { createServer, type Server, type ServerResponse } from 'node:http';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { test, type TestContext } from 'node:test';
 import { sendMessageResultV1Schema } from '@whatsap-automat/contracts';
 import express, { type Request } from 'express';
@@ -70,6 +74,26 @@ async function send(
   return { status: response.status, body };
 }
 
+async function sendAttachment(
+  url: string, conversationId: number, key: string, version: number, access?: string,
+  options: { bytes?: string; filename?: string; mime?: string; caption?: string; forceDocument?: string } = {},
+) {
+  const body = new FormData();
+  body.append('file', new Blob([options.bytes ?? 'Fixture attachment'], { type: options.mime ?? 'text/plain' }),
+    options.filename ?? 'cotización.txt');
+  body.append('expectedConversationVersion', String(version));
+  if (options.caption !== undefined) body.append('message', options.caption);
+  if (options.forceDocument !== undefined) body.append('forceDocument', options.forceDocument);
+  const response = await fetch(`${url}/api/v1/conversations/${conversationId}/messages/attachments`, {
+    method: 'POST',
+    headers: { 'idempotency-key': key, ...(access ? { authorization: `Bearer ${access}` } : {}) },
+    body,
+  });
+  const result = await response.json();
+  if (response.status === 202) sendMessageResultV1Schema.parse(result);
+  return { status: response.status, body: result };
+}
+
 async function signedWebhook(
   url: string, phoneId: string, content: Record<string, unknown>, secret = appSecret,
 ) {
@@ -98,7 +122,7 @@ test('canonical send rejects unauthorized and unsupported requests before reserv
   assert.equal(unsupported.body.metadata.reasonCode, 'MESSAGE_KIND_UNSUPPORTED');
 });
 
-test('durable CAS sends one Graph POST per intent and reconciles authenticated receipts without retrying uncertainty', {
+test('durable CAS sends one Graph POST per text or attachment intent and reconciles signed receipts', {
   skip: !connectionString && 'CONVERSATION_SEND_TEST_DATABASE_URL is required',
 }, async (t) => {
   const db = new Pool({ connectionString });
@@ -134,9 +158,17 @@ test('durable CAS sends one Graph POST per intent and reconciles authenticated r
   }
   const originalProvider = config.whatsapp.provider;
   const originalSecret = config.meta.appSecret;
+  const originalUploadDir = config.multer.dest;
+  const uploadDir = await mkdtemp(join(tmpdir(), 'canonical-attachment-'));
   config.whatsapp.provider = 'meta-cloud';
   config.meta.appSecret = appSecret;
-  t.after(() => { config.whatsapp.provider = originalProvider; config.meta.appSecret = originalSecret; });
+  config.multer.dest = uploadDir;
+  t.after(async () => {
+    config.whatsapp.provider = originalProvider;
+    config.meta.appSecret = originalSecret;
+    config.multer.dest = originalUploadDir;
+    await rm(uploadDir, { recursive: true, force: true });
+  });
 
   const webhook = Object.assign(Object.create(WhatsAppService.prototype) as WhatsAppService, {
     provider: 'meta-cloud',
@@ -150,23 +182,41 @@ test('durable CAS sends one Graph POST per intent and reconciles authenticated r
 
   type GraphRequest = { url?: string; method?: string; auth?: string; body: Record<string, any> };
   const graphRequests: GraphRequest[] = [];
-  let reply = (_request: GraphRequest, response: ServerResponse): void => {
+  const mediaRequests: GraphRequest[] = [];
+  let reply: (request: GraphRequest, response: ServerResponse) => void | Promise<void> = (_request, response) => {
     response.end(JSON.stringify({ messages: [{ id: 'wamid.test-default' }] }));
+  };
+  let uploadReply = (_request: GraphRequest, response: ServerResponse): void | Promise<void> => {
+    response.end(JSON.stringify({ id: `fixture-media-${mediaRequests.length}` }));
   };
   const graph = await listen(t, createServer(async (request, response) => {
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
-    const capture = {
-      url: request.url, method: request.method, auth: request.headers.authorization,
-      body: JSON.parse(Buffer.concat(chunks).toString()),
-    };
-    graphRequests.push(capture);
+    const capture = { url: request.url, method: request.method, auth: request.headers.authorization };
+    const bytes = Buffer.concat(chunks);
     response.setHeader('Content-Type', 'application/json');
-    reply(capture, response);
+    if (request.url?.endsWith('/media')) {
+      const form = await new Response(new Uint8Array(bytes), {
+        headers: { 'content-type': request.headers['content-type'] ?? '' },
+      }).formData();
+      const file = form.get('file');
+      assert.ok(file instanceof File);
+      const upload = { ...capture, body: {
+        bytes: await file.text(), filename: file.name, type: file.type,
+        messagingProduct: form.get('messaging_product'), declaredType: form.get('type'),
+      } };
+      mediaRequests.push(upload);
+      await uploadReply(upload, response);
+    } else {
+      const message = { ...capture, body: JSON.parse(bytes.toString()) };
+      graphRequests.push(message);
+      await reply(message, response);
+    }
   }).listen(0, '127.0.0.1'));
   const fetchGraph: typeof fetch = (input, init) => {
     const target = new URL(String(input));
     assert.equal(target.origin, 'https://graph.facebook.com');
+    assert.equal(init?.redirect, 'error');
     return fetch(`${graph}${target.pathname}${target.search}`, init);
   };
   const sender = () => new ConversationSendService(uow, accounts, true, fetchGraph);
@@ -365,4 +415,121 @@ test('durable CAS sends one Graph POST per intent and reconciles authenticated r
   assert.deepEqual(await send(restarted, tenantBId, 'missing-provider-ack', 1, accessB), networkLoss);
   assert.equal(graphRequests.length, 5);
   assert.equal(graphRequests[4].auth, 'Bearer fixture-other-tenant-token');
+
+  await t.test('multipart replays exact bytes, rejects stale or foreign sends, and recovers lost acknowledgement', async () => {
+    const attachmentRecipient = '12025550106';
+    await inbound(phoneA, attachmentRecipient);
+    const attachmentId = await conversation(tenantA, attachmentRecipient);
+    const attachment = { caption: 'Fixture caption', forceDocument: 'true' };
+    const perform = (key: string, expectedVersion = 1, input = attachment, access = accessA) =>
+      sendAttachment(url, attachmentId, key, expectedVersion, access, input);
+    assert.equal((await sendAttachment(url, attachmentId, 'unauthenticated', 1)).status, 401);
+    assert.equal((await perform('read-only', 1, attachment, token(tenantA, actor, 'READ_ONLY'))).status, 403);
+    assert.equal((await perform('another-operator', 1, attachment, token(tenantA, actor + 1))).body.metadata.reasonCode,
+      'HUMAN_TAKEOVER_REQUIRED');
+    assert.equal((await perform('another-tenant', 1, attachment, accessB)).status, 404);
+    assert.equal((await perform('stale-attachment', 0)).body.metadata.reasonCode, 'CONVERSATION_VERSION_CHANGED');
+    assert.equal((await sendAttachment(url, closedId, 'expired-attachment', 1, accessA)).body.metadata.reasonCode,
+      'SERVICE_WINDOW_CLOSED');
+    assert.equal((await sendAttachment(url, attachmentId, 'unsupported-attachment', 1, accessA,
+      { mime: 'text/html' })).body.metadata.reasonCode, 'ATTACHMENT_TYPE_UNSUPPORTED');
+    assert.equal((await perform('malformed-attachment', 1, { ...attachment, forceDocument: 'yes' })).status, 422);
+    assert.equal(mediaRequests.length, 0);
+
+    // Rotate the actual scoped credential after preflight but before upload returns.
+    uploadReply = async (_request, response) => {
+      await accounts.upsertConnection(tenantA, { phoneNumberId: phoneA, accessToken: 'fixture-rotated-token', graphVersion: 'v25.0' });
+      response.end(JSON.stringify({ id: 'media-old-account' }));
+    };
+    const accountChanged = await perform('rotating-account');
+    assert.equal(accountChanged.status, 409);
+    assert.equal(accountChanged.body.metadata.reasonCode, 'SENDING_ACCOUNT_CHANGED');
+    assert.equal(graphRequests.length, 5);
+
+    // A provider upload with no media acknowledgement can be retried safely.
+    uploadReply = (_request, response) => { response.destroy(); };
+    const unavailable = await perform('attachment-key');
+    assert.equal(unavailable.status, 503);
+    assert.equal(unavailable.body.metadata.reasonCode, 'ATTACHMENT_UPLOAD_UNAVAILABLE');
+    assert.equal(graphRequests.length, 5);
+
+    let observedAttachment: Record<string, unknown> | undefined;
+    let observedForeignAttachment: unknown[] | undefined;
+    uploadReply = (_request, response) => { response.end(JSON.stringify({ id: `fixture-media-${mediaRequests.length}` })); };
+    reply = async (request, response) => {
+      const rowsForTenant = (tenantId: number) => uow.run(tenantId, async (sql) => (await sql.query(`
+        SELECT a.provider_media_id, a.filename, a.mime_type, a.caption, m.message_type, m.status
+        FROM message_attachments a JOIN messages m ON m.id = a.message_id
+        WHERE a.provider_media_id = $1
+      `, [request.body.document.id])).rows);
+      [observedAttachment] = await rowsForTenant(tenantA);
+      observedForeignAttachment = await rowsForTenant(tenantB);
+      // The provider may have accepted the recipient message before closing its socket.
+      response.destroy();
+    };
+    const [first, concurrent] = await Promise.all([perform('attachment-key'), perform('attachment-key')]);
+    assert.deepEqual(first, concurrent);
+    assert.equal(first.status, 202);
+    assert.equal(first.body.deliveryState, 'unknown_delivery');
+    assert.equal(graphRequests.length, 6);
+    assert.ok(mediaRequests.length === 3 || mediaRequests.length === 4);
+    const sendRequest = graphRequests[5];
+    const mediaId = sendRequest.body.document.id;
+    assert.deepEqual(observedAttachment, {
+      provider_media_id: mediaId, filename: 'cotización.txt', mime_type: 'text/plain', caption: 'Fixture caption',
+      message_type: 'document', status: 'unknown_delivery',
+    });
+    assert.deepEqual(observedForeignAttachment, []);
+    assert.equal(sendRequest.url, `/v25.0/${phoneA}/messages`);
+    assert.equal(sendRequest.auth, 'Bearer fixture-rotated-token');
+    assert.deepEqual(sendRequest.body, {
+      messaging_product: 'whatsapp', to: attachmentRecipient, type: 'document',
+      biz_opaque_callback_data: sendRequest.body.biz_opaque_callback_data,
+      document: { id: mediaId, caption: 'Fixture caption', filename: 'cotización.txt' },
+    });
+    assert.match(sendRequest.body.biz_opaque_callback_data, /^automat:[a-f0-9-]{36}$/);
+    assert.deepEqual(mediaRequests.at(-1), {
+      url: `/v25.0/${phoneA}/media`, method: 'POST', auth: 'Bearer fixture-rotated-token',
+      body: { bytes: 'Fixture attachment', filename: 'cotización.txt', type: 'text/plain',
+        messagingProduct: 'whatsapp', declaredType: 'text/plain' },
+    });
+    const uploadsAfterDispatch = mediaRequests.length;
+    for (const changed of [
+      { bytes: 'Changed bytes' }, { filename: 'changed.txt' }, { mime: 'application/pdf' },
+      { caption: 'Changed caption' }, { forceDocument: 'false' },
+    ]) {
+      const mismatch = await perform('attachment-key', 1, { ...attachment, ...changed });
+      assert.equal(mismatch.status, 409);
+      assert.equal(mismatch.body.metadata.reasonCode, 'IDEMPOTENCY_KEY_CONFLICT');
+    }
+    assert.equal((await send(url, attachmentId, 'attachment-key', 1, accessA)).body.metadata.reasonCode,
+      'IDEMPOTENCY_KEY_CONFLICT');
+    assert.deepEqual(await sendAttachment(restarted, attachmentId, 'attachment-key', 1, accessA, attachment), first);
+    assert.equal((await perform('unsafe-new-key', 2)).body.metadata.reasonCode, 'DELIVERY_UNRESOLVED');
+    assert.equal(mediaRequests.length, uploadsAfterDispatch);
+
+    const mediaReceipt = {
+      id: 'wamid.attachment-recovered', status: 'delivered', timestamp: now(), recipient_id: attachmentRecipient,
+      biz_opaque_callback_data: sendRequest.body.biz_opaque_callback_data,
+    };
+    assert.equal((await signedWebhook(url, phoneA, { statuses: [mediaReceipt] }, 'invalid')).status, 403);
+    assert.equal((await signedWebhook(url, phoneB, { statuses: [mediaReceipt] })).status, 200);
+    assert.deepEqual(await perform('attachment-key'), first);
+    const delivered = await signedWebhook(url, phoneA, { statuses: [mediaReceipt] });
+    assert.equal(delivered.status, 200, await delivered.text());
+    assert.deepEqual(await sendAttachment(restarted, attachmentId, 'attachment-key', 1, accessA, attachment), {
+      status: 202, body: { providerMessageId: mediaReceipt.id, accepted: true, rawStatus: 'delivered', deliveryState: 'delivered' },
+    });
+    const history = await fetch(`${url}/api/v1/conversations/${attachmentId}/messages?clientRequestId=attachment-key`, {
+      headers: { authorization: `Bearer ${accessA}` },
+    });
+    const item = (await history.json()).items[0];
+    assert.equal(item.deliveryState, 'delivered');
+    assert.equal(item.attachments[0].filename, 'cotización.txt');
+    assert.equal(item.attachments[0].mimeType, 'text/plain');
+    assert.equal(graphRequests.length, 6);
+    assert.equal(mediaRequests.length, uploadsAfterDispatch);
+    for (let check = 0; check < 20 && (await readdir(uploadDir)).length > 0; check++) await delay(10);
+    assert.deepEqual(await readdir(uploadDir), []);
+  });
 });

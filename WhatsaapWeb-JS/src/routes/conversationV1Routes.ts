@@ -10,6 +10,9 @@ import {
 import { JwtRequest, requireJwt, resolveWhatsappCompanyId, toPositiveInt } from '../middleware/jwtAuth';
 import { isInternalChatId } from '../middleware/resourceAuth';
 import { tenantContext } from '../middleware/tenantContext';
+import config from '../config/index';
+import { removeTemporaryUpload } from '../shared/temporaryUpload';
+import { ConversationAttachmentError, type AttachmentFile } from '../services/conversations/ConversationAttachment';
 import { ConversationQueryService, conversationQueryService, parseConversationPage } from '../services/conversations/ConversationQueryService';
 import {
   CasConflictError, ConversationNotFoundError, conversationCasService,
@@ -20,6 +23,16 @@ import {
 import type { WhatsAppService } from '../services/whatsappService';
 
 const requestKeyPattern = /^[A-Za-z0-9_.:-]{1,128}$/;
+const operatorRoles = ['ADMIN', 'EMPLEADO', 'SUPERADMIN'];
+const multer = require('multer') as any;
+
+function signedOperator(req: JwtRequest) {
+  const actor = req.tenantContext;
+  if (actor?.userId && actor.userId <= 2147483647 && actor.tenantId <= 2147483647 &&
+      operatorRoles.includes(actor.role ?? '')) {
+    return { tenantId: actor.tenantId, actorId: actor.userId };
+  }
+}
 
 function problem(
   req: JwtRequest, res: Response, code: StandardErrorCode, detail: string, metadata?: Record<string, unknown>,
@@ -34,6 +47,12 @@ export default function createConversationV1Routes(
   media?: Pick<WhatsAppService, 'downloadConversationAttachment'>,
 ): Router {
   const router = Router();
+  const attachmentUpload = multer({
+    dest: config.multer.dest,
+    defParamCharset: 'utf8',
+    // Busboy signals its limit upon reaching it. Allow files exactly at the configured cap.
+    limits: { fileSize: Math.min(config.multer.maxFileSize, 100_000_000) + 1, files: 1, fields: 3, fieldSize: 4096 },
+  }).single('file');
   router.use(requireJwt, tenantContext({ allowSandbox: false }));
 
   router.get('/', async (req: JwtRequest, res, next) => {
@@ -120,9 +139,8 @@ export default function createConversationV1Routes(
   router.post('/:id/messages', async (req: JwtRequest, res, next) => {
     const id = String(req.params.id);
     if (!isInternalChatId(id)) return problem(req, res, StandardErrorCode.NOT_FOUND, 'Conversation not found');
-    const actor = req.tenantContext;
-    if (!actor?.userId || actor.userId > 2147483647 || actor.tenantId > 2147483647 ||
-        !['ADMIN', 'EMPLEADO', 'SUPERADMIN'].includes(actor.role ?? '')) {
+    const actor = signedOperator(req);
+    if (!actor) {
       return problem(req, res, StandardErrorCode.POLICY_DENIED, 'A signed operator identity is required');
     }
     const key = req.get('Idempotency-Key');
@@ -147,7 +165,7 @@ export default function createConversationV1Routes(
 
     try {
       const result = await sender.send({
-        tenantId: actor.tenantId, actorId: actor.userId, conversationId: Number(id), expectedVersion: version, key, text,
+        ...actor, conversationId: Number(id), expectedVersion: version, key, text,
       });
       return res.setHeader('Cache-Control', 'no-store').status(202).json(result);
     } catch (error) {
@@ -155,6 +173,57 @@ export default function createConversationV1Routes(
         return problem(req, res, error.code, error.message, { reasonCode: error.reasonCode, ...error.metadata });
       }
       return next(new Error('The conversation message could not be prepared.'));
+    }
+  });
+
+  router.post('/:id/messages/attachments', async (req: JwtRequest & { file?: AttachmentFile }, res, next) => {
+    const id = String(req.params.id);
+    if (!isInternalChatId(id)) return problem(req, res, StandardErrorCode.NOT_FOUND, 'Conversation not found');
+    const actor = signedOperator(req);
+    if (!actor) return problem(req, res, StandardErrorCode.POLICY_DENIED, 'A signed operator identity is required');
+    const key = req.get('Idempotency-Key');
+    if (!key || !requestKeyPattern.test(key) || !req.is('multipart/form-data')) {
+      return problem(req, res, StandardErrorCode.VALIDATION_ERROR, 'Provide an idempotency key and multipart attachment.');
+    }
+
+    try {
+      try {
+        await new Promise<void>((resolve, reject) => {
+          attachmentUpload(req, res, (error?: Error) => error ? reject(error) : resolve());
+        });
+      } catch (error) {
+        const code = (error as { code?: string } | undefined)?.code;
+        if (code && !(error instanceof multer.MulterError)) {
+          return problem(req, res, StandardErrorCode.RETRYABLE, 'Attachment upload temporarily unavailable.');
+        }
+        return problem(req, res, StandardErrorCode.VALIDATION_ERROR, 'Invalid multipart attachment.', {
+          reasonCode: code === 'LIMIT_FILE_SIZE' ? 'ATTACHMENT_SIZE_INVALID' : 'ATTACHMENT_MULTIPART_INVALID',
+        });
+      }
+      const { expectedConversationVersion, message = '', forceDocument, ...extra } = req.body ?? {};
+      if (!req.file || Object.keys(extra).length || typeof expectedConversationVersion !== 'string' ||
+          !/^(0|[1-9]\d*)$/.test(expectedConversationVersion) || Number(expectedConversationVersion) >= 2147483647 ||
+          typeof message !== 'string' || message.length > 1024 || /[\u0000\uD800-\uDFFF]/u.test(message) ||
+          (forceDocument !== undefined && forceDocument !== 'true' && forceDocument !== 'false')) {
+        return problem(req, res, StandardErrorCode.VALIDATION_ERROR, 'Invalid attachment fields.');
+      }
+
+      const result = await sender.sendAttachment({
+        ...actor, conversationId: Number(id), expectedVersion: Number(expectedConversationVersion), key,
+        file: req.file, caption: message, forceDocument: forceDocument === 'true',
+      });
+      return res.setHeader('Cache-Control', 'no-store').status(202).json(result);
+    } catch (error) {
+      if (error instanceof ConversationSendError) {
+        return problem(req, res, error.code, error.message, { reasonCode: error.reasonCode, ...error.metadata });
+      }
+      if (error instanceof ConversationAttachmentError) {
+        return problem(req, res, error.retryable ? StandardErrorCode.RETRYABLE : StandardErrorCode.VALIDATION_ERROR,
+          error.message, { reasonCode: error.reasonCode });
+      }
+      return next(new Error('The conversation attachment could not be prepared.'));
+    } finally {
+      await removeTemporaryUpload(req.file?.path);
     }
   });
 
