@@ -1,6 +1,7 @@
 import {
   Activity,
   BarChart3,
+  ClipboardCheck,
   GitBranch,
   Hand,
   Inbox,
@@ -73,6 +74,7 @@ export const workspaceSections: WorkspaceSection[] = [
       { to: '/gestion-web/settings/general', label: 'Configuración', icon: Settings },
       { to: '/gestion-web/permisos', label: 'Permisos', icon: Shield, adminOnly: true },
       { to: '/dashboard/admin/ejecuciones', label: 'Ejecuciones', icon: ListChecks, adminOnly: true },
+      { to: '/dashboard/aprobaciones', label: 'Aprobaciones', icon: ClipboardCheck, adminOnly: true },
       { to: '/dashboard/admin/auditoria', label: 'Auditoría', icon: ShieldCheck, adminOnly: true },
       { to: '/dashboard/admin/salud', label: 'Salud del sistema', icon: Activity, adminOnly: true },
     ],
