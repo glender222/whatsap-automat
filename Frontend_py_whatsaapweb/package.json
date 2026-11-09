@@ -11,7 +11,7 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "npm run test:tokens && npm run test:campaigns && npm run test:extensions && npm run test:admin && npm run test:marketplace && npm run test:workflows && npm run test:agent-graphs && npm run test:canonical-inbox",
+    "test": "npm run test:tokens && npm run test:campaigns && npm run test:extensions && npm run test:admin && npm run test:marketplace && npm run test:workflows && npm run test:agent-graphs && npm run test:canonical-inbox && npm run test:pdf-media",
     "test:tokens": "node --import tsx --test src/styles/tokens.test.ts",
     "test:campaigns": "node --import tsx --test src/__tests__/campaigns.test.ts",
     "test:extensions": "node --import tsx --test src/__tests__/SandboxedExtensionIframe.test.ts",
@@ -19,43 +19,36 @@
     "test:marketplace": "node --import tsx --test src/__tests__/marketplace.test.ts",
     "test:workflows": "node --import tsx --test src/__tests__/workflows.test.ts",
     "test:agent-graphs": "node --import tsx --test src/__tests__/agent-graphs.test.ts",
-    "test:canonical-inbox": "node --import tsx --test src/__tests__/canonical-inbox.test.ts"
+    "test:canonical-inbox": "node --import tsx --test src/__tests__/canonical-inbox.test.ts",
+    "test:pdf-media": "node --import tsx --test src/__tests__/pdf-media.test.ts"
   },
   "dependencies": {
     "@emoji-mart/data": "^1.2.1",
     "@emoji-mart/react": "^1.1.1",
-    "@react-pdf-viewer/core": "^3.12.0",
-    "@react-pdf-viewer/default-layout": "^3.12.0",
     "autoprefixer": "^10.4.21",
-    "axios": "^1.12.2",
-    "body-parser": "^2.2.0",
-    "cors": "^2.8.5",
+    "axios": "^1.21.1",
     "docx-preview": "^0.3.7",
     "emoji-mart": "^5.6.0",
-    "express": "^5.1.0",
     "jotai": "^2.15.0",
     "lucide-react": "^0.544.0",
-    "postcss": "^8.5.6",
+    "pdfjs-dist": "^6.5.438",
+    "postcss": "^8.5.32",
     "qrcode": "^1.5.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-player": "^3.3.3",
-    "react-router-dom": "^7.9.1",
+    "react-router-dom": "^7.18.5",
     "socket.io-client": "^4.8.1",
     "tailwindcss": "^3.4.17",
-    "wavesurfer.js": "^7.10.1",
-    "whatsapp-web.js": "^1.34.4"
+    "wavesurfer.js": "^7.10.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.33.0",
-    "@types/body-parser": "^1.19.6",
-    "@types/express": "^5.0.3",
     "@types/node": "^24.5.1",
     "@types/qrcode": "^1.5.5",
     "@types/react": "^19.1.13",
     "@types/react-dom": "^19.1.9",
     "@vitejs/plugin-react-swc": "^4.0.0",
-    "concurrently": "^9.2.1",
     "eslint": "^9.33.0",
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.20",
@@ -63,6 +56,11 @@
     "tsx": "^4.23.15",
     "typescript": "~5.8.3",
     "typescript-eslint": "^8.39.1",
-    "vite": "^7.1.2"
+    "vite": "^7.3.8"
+  },
+  "overrides": {
+    "@typescript-eslint/typescript-estree": {
+      "minimatch": "^11.0.5"
+    }
   }
 }

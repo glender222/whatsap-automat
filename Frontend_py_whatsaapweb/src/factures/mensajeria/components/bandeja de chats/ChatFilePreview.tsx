@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import FilePreview from '../../../../shared/components/FilePreview';
+import { isPdfFile } from '../../../../shared/components/pdfMedia';
 import type { WhatsAppMessage } from '../../../../shared/types/wsp';
 import { FileText, FileSpreadsheet, Presentation, FileArchive, File } from 'lucide-react';
 import { useIndexedMessages } from '../../hooks/useIndexedMessages';
@@ -129,11 +130,11 @@ const ChatFilePreview: React.FC<ChatFilePreviewProps> = ({ msg, onClick, chatId 
 
     // Es documento SI NO ES VIDEO y coincide con tipos de documento
     const isDoc = !isVideo && (
-        mime.startsWith('application/pdf') ||
+        isPdfFile(mime, name) ||
         mime.includes('officedocument') ||
         mime.includes('spreadsheet') ||
         mime.includes('presentation') ||
-        (name && name.match(/\.(pdf|docx?|xlsx?|pptx?|doc|xls|ppt|csv|zip|rar|7z|tar|gz)$/i))
+        (name && name.match(/\.(docx?|xlsx?|pptx?|doc|xls|ppt|csv|zip|rar|7z|tar|gz)$/i))
     );
     // --- FIN LÓGICA MODIFICADA ---
 
@@ -186,31 +187,31 @@ const ChatFilePreview: React.FC<ChatFilePreviewProps> = ({ msg, onClick, chatId 
         const isUploading = msg.isOptimistic && !msg.uploadError;
         
         return (
-            <div
-                className={`flex items-center gap-3 p-3 rounded-lg border ${borderColor} ${bgColor} max-w-xs ${
+            <button type="button" disabled={isUploading || !onClick}
+                className={`flex w-full items-center gap-3 p-3 rounded-lg border ${borderColor} ${bgColor} max-w-xs text-left ${
                     isUploading ? 'cursor-wait opacity-60' : 'cursor-pointer hover:shadow-md'
                 } transition-shadow`}
                 onClick={onClick}
-                title={isUploading ? 'Subiendo archivo...' : 'Click para abrir'}
+                aria-label={`Abrir documento ${name || 'adjunto'}`}
             >
                 {/* Icono del tipo de archivo */}
-                <div className={`flex-shrink-0 w-12 h-12 flex items-center justify-center rounded-lg ${bgColor} border ${borderColor} relative`}>
+                <span className={`flex-shrink-0 w-12 h-12 flex items-center justify-center rounded-lg ${bgColor} border ${borderColor} relative`}>
                     {isUploading && (
-                        <div className="absolute inset-0 flex items-center justify-center bg-white bg-opacity-90 rounded-lg">
-                            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-500"></div>
-                        </div>
+                        <span className="absolute inset-0 flex items-center justify-center bg-white bg-opacity-90 rounded-lg">
+                            <span className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-500"></span>
+                        </span>
                     )}
                     <Icon size={28} className={iconColor} />
-                </div>
+                </span>
                 
                 {/* Información del archivo */}
-                <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium text-gray-800 truncate">{name}</div>
-                    <div className="text-xs text-gray-500 mt-0.5">
+                <span className="flex-1 min-w-0">
+                    <span className="block text-sm font-medium text-gray-800 truncate">{name}</span>
+                    <span className="block text-xs text-gray-500 mt-0.5">
                         {ext.toUpperCase()} • Documento
-                    </div>
-                </div>
-            </div>
+                    </span>
+                </span>
+            </button>
         );
     }
 

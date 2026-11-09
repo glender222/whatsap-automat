@@ -12,6 +12,7 @@ import { api } from '../../../shared/axios/http';
 import { saveMessage, saveMedia } from '../../../lib/db';
 import { downloadMediaAPI, getMediaInfoAPI } from './mediaService';
 import { getMediaUrl as buildMediaUrl } from '../../../shared/utils/urls';
+import { isPdfFile } from '../../../shared/components/pdfMedia';
 
 /**
  * Obtiene los mensajes de un chat específico
@@ -77,8 +78,9 @@ async function saveMessageToCache(message: any, chatId: string): Promise<void> {
     id: message.id?._serialized || message.id || `${chatId}_${Date.now()}`
   });
 
-  // Si tiene media, descargar y guardar
-  if (message.hasMedia && message.id) {
+  // El visor PDF obtiene el original con la sesión actual al abrirlo.
+  const pdf = isPdfFile(message.media?.mimetype ?? message.mimetype, message.media?.filename ?? message.filename);
+  if (message.hasMedia && message.id && !pdf) {
     const mediaId = message.id?._serialized || message.id;
     const blob = await downloadMessageMedia(mediaId);
     

@@ -5,6 +5,8 @@ import ChatFilePreview from './ChatFilePreview';
 import AudioMessage from '../extras/AudioMessage';
 import type { WhatsAppMessage } from '../../../../shared/types/wsp';
 import FilePreview from '../../../../shared/components/FilePreview'; 
+import PdfDocumentDialog from '../../../../shared/components/PdfDocumentDialog';
+import { isPdfFile } from '../../../../shared/components/pdfMedia';
 import { getAuthenticatedMediaBlob, getAuthenticatedMediaObjectUrl } from '../../services/mediaService';
 import { getSessionStatus, completeSession } from '../../services/sessionService';
 import { deliveryLabel } from '../../services/canonicalConversationApi';
@@ -364,6 +366,8 @@ const MessagesPanel: React.FC<MessagesPanelProps> = ({
   const [isFinishing, setIsFinishing] = useState(false);
   // NUEVO ESTADO PARA EL MODAL DE DOCUMENTOS
   const [previewingDoc, setPreviewingDoc] = useState<WhatsAppMessage | null>(null);
+  const previewFileName = previewingDoc?.media?.filename ?? previewingDoc?.filename ?? '';
+  const previewMime = previewingDoc?.media?.mimetype ?? previewingDoc?.mimetype ?? '';
   const timeline = useMemo(() => buildTimeline(messages, agentActivity), [messages, agentActivity]);
 
   useEffect(() => {
@@ -430,7 +434,7 @@ const MessagesPanel: React.FC<MessagesPanelProps> = ({
       }
       
       const mime = mimetype ?? '';
-      const isDoc = mime.startsWith('application/pdf') || mime.includes('officedocument') || mime.includes('spreadsheet') || mime.includes('presentation') || (filename ?? '').match(/\.(pdf|docx?|xlsx?|pptx?)$/i);
+      const isDoc = isPdfFile(mime, filename) || mime.includes('officedocument') || mime.includes('spreadsheet') || mime.includes('presentation') || (filename ?? '').match(/\.(docx?|xlsx?|pptx?)$/i);
       
       // LÓGICA MODIFICADA
       if (isDoc) {
@@ -574,10 +578,10 @@ const MessagesPanel: React.FC<MessagesPanelProps> = ({
       )}
 
       {/* NUEVO: Modal de vista previa de documento */}
-      {previewingDoc && <DocumentPreviewModal
-        doc={previewingDoc}
-        onClose={() => setPreviewingDoc(null)}
-      />}
+      {previewingDoc && (isPdfFile(previewMime, previewFileName) ? (
+        <PdfDocumentDialog url={previewingDoc.media?.mediaUrl || previewingDoc.mediaUrl || `/api/media/${encodeURIComponent(previewingDoc.id)}`}
+          fileName={previewFileName} onClose={() => setPreviewingDoc(null)} />
+      ) : <DocumentPreviewModal doc={previewingDoc} onClose={() => setPreviewingDoc(null)} />)}
     </div>
   );
 };

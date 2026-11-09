@@ -1,11 +1,11 @@
 import React from 'react';
 // @ts-ignore
 import ReactPlayer from 'react-player';
-import { Worker, Viewer } from '@react-pdf-viewer/core';
-import '@react-pdf-viewer/core/lib/styles/index.css';
-import '@react-pdf-viewer/default-layout/lib/styles/index.css';
+import { isPdfFile } from './pdfMedia';
 // @ts-ignore
 import { renderAsync } from 'docx-preview';
+
+const PdfPreview = React.lazy(() => import('./PdfPreview'));
 
 export type FilePreviewProps = {
   url: string;
@@ -18,7 +18,6 @@ const isImage = (type: string) => /image\/(jpeg|png|gif|webp)/.test(type);
 // AHORA TAMBIÉN REVISA EL NOMBRE DEL ARCHIVO
 // ✅ EXPANDIDO: Más formatos de video soportados
 const isVideo = (type: string, name: string) => /video\/.*/.test(type) || (name && name.match(/\.(mp4|webm|ogg|mov|avi|mkv|flv|wmv|m4v|3gp|3gpp|asf|mpg|mpeg|m2v|m4v|f4v|f4p|f4a|f4b)$/i));
-const isPdf = (type: string, name: string) => type === 'application/pdf' || (name && name.endsWith('.pdf'));
 const isDocx = (type: string, name: string) => type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || (name && name.endsWith('.docx'));
 const isSticker = (type: string, name: string) => type === 'image/webp' || (name && name.endsWith('.webp'));
 // --- FIN LÓGICA MODIFICADA ---
@@ -48,11 +47,11 @@ export const FilePreview: React.FC<FilePreviewProps> = ({ url, mimeType = '', fi
   }
   // --- FIN LÓGICA MODIFICADA ---
 
-  if (isPdf(mimeType, fileName)) {
+  if (isPdfFile(mimeType, fileName)) {
     return (
-      <Worker workerUrl="https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js">
-        <Viewer fileUrl={url} />
-      </Worker>
+      <React.Suspense fallback={<p role="status" className="text-sm">Preparando visor PDF…</p>}>
+        <PdfPreview key={url} url={url} fileName={fileName} />
+      </React.Suspense>
     );
   }
 

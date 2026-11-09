@@ -1,5 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import FilePreview from '../../../../shared/components/FilePreview';
+import PdfDocumentDialog from '../../../../shared/components/PdfDocumentDialog';
+import { isPdfFile } from '../../../../shared/components/pdfMedia';
 import AvatarCircle from './AvatarCircle';
 import { getMediaUrl } from '../../../../shared/utils/urls';
 import type { WhatsAppMessage } from '../../../../shared/types/wsp';
@@ -49,11 +51,11 @@ const UserMediaPanel: React.FC<UserMediaPanelProps> = ({
 
       // 3. Documentos (todo lo demás que califique)
       const isDoc = m.type === 'document' ||
-        mime === 'application/pdf' ||
+        isPdfFile(mime, name) ||
         mime.includes('officedocument') ||
         mime.includes('spreadsheet') ||
         mime.includes('presentation') ||
-        (name && name.match(/\.(pdf|docx?|xlsx?|pptx?|doc|xls|ppt|csv|zip|rar|7z|tar|gz)$/i));
+        (name && name.match(/\.(docx?|xlsx?|pptx?|doc|xls|ppt|csv|zip|rar|7z|tar|gz)$/i));
 
       if (isDoc) {
         docs.push(m);
@@ -130,7 +132,10 @@ const UserMediaPanel: React.FC<UserMediaPanelProps> = ({
           ))}
 
           {/* Modal de vista previa de documento */}
-          {selectedDoc && (
+          {selectedDoc && (isPdfFile(selectedDoc.mimetype, selectedDoc.filename) ? (
+            <PdfDocumentDialog url={selectedDoc.mediaUrl || `/api/media/${encodeURIComponent(selectedDoc.id)}`}
+              fileName={selectedDoc.filename ?? ''} onClose={() => setSelectedDoc(null)} />
+          ) : (
             <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50 p-4">
               <div className="bg-white rounded-lg shadow-lg p-4 max-w-3xl w-full max-h-[90vh] overflow-auto relative">
 
@@ -163,7 +168,7 @@ const UserMediaPanel: React.FC<UserMediaPanelProps> = ({
                 </div>
               </div>
             </div>
-          )}
+          ))}
         </div>
       )}
     </div>

@@ -17,6 +17,7 @@ export async function copyImageToClipboard(imageUrl: string) {
 }
 // src/factures/mensajeria/services/mediaService.ts
 import { api } from '../../../shared/axios/http';
+import { isPdfFile } from '../../../shared/components/pdfMedia';
 
 export function getMediaErrorMessage(error: any): string {
   const data = error?.response?.data || {};
@@ -456,7 +457,8 @@ export async function fetchAndCacheMessages(
     const msgs = response.data?.data || response.data || [];
     for (const msg of msgs) {
       await saveMessage({ ...msg, chatId });
-      if (msg.mediaUrl) {
+      const pdf = isPdfFile(msg.media?.mimetype ?? msg.mimetype, msg.media?.filename ?? msg.filename);
+      if (msg.mediaUrl && !pdf) {
         try {
           const mediaBlob = await getAuthenticatedMediaBlob(msg.mediaUrl || msg.id);
           await saveMedia(msg.id, mediaBlob);
