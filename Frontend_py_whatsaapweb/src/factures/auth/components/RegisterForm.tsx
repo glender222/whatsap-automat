@@ -102,7 +102,8 @@ export default function RegisterForm() {
               <input id="register-email" name="email" type="email" autoComplete="email" value={email}
                 onChange={(event) => setEmail(event.target.value)} className={inputClass} required />
             </div>
-            <PasswordField id="register-password" label="Contraseña" value={password} onChange={setPassword} describedBy="register-requirements" />
+            <PasswordField id="register-password" label="Contraseña" value={password}
+              onChange={(value) => { setPassword(value); if (error === mismatchMessage) setError(''); }} describedBy="register-requirements" />
             <ul id="register-requirements" className="space-y-1 text-sm text-gray-700">
               {requirements.map(({ label, met }) => (
                 <li key={label} className="flex items-center gap-2">
