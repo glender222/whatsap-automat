@@ -29,7 +29,7 @@ whatsap-automat/
 | **Framework Base** | React 18.3.1, Vite 7.1.2 | Express 5.1.0 (con soporte async nativo) |
 | **Manejo de Estado** | Jotai 2.15.0 (Atoms modulares) | En memoria + PostgreSQL (`pg` 8.16.3) |
 | **Estilos & UI** | Tailwind CSS 3.4.17, Lucide React | N/A (Headless API) |
-| **Visores & Multimedia** | WaveSurfer.js 7, PDF.js, docx-preview, React-Player | fluent-ffmpeg, Multer 2.0 |
+| **Visores & Multimedia** | WaveSurfer.js 7, PDF.js, docx-preview, React-Player | FFmpeg, ffprobe, Multer 2.5 |
 | **Comunicación en Vivo**| Socket.IO Client 4.8.1 | Socket.IO 4.8.1 (Rooms por chat y dashboard) |
 | **Proveedor WhatsApp** | Consumo vía API Backend | Híbrido: Meta Cloud API (Oficial) / Baileys (Legacy) |
 | **Motor de IA** | Consola de administración y pruebas | Runtime Multi-Agente (OpenAI / OpenCode compatible) |
