@@ -84,18 +84,63 @@ test('reads the actual session status response without inventing an active windo
   assert.deepEqual(await apiClient.getChatSessionStatus('123@c.us'), status);
 });
 
-test('sends text to the actual chat endpoint without retrying a transport failure', async () => {
+test('sends canonical text with a stable request key and never retries a transport failure automatically', async () => {
   await authStorage.saveAuthSession(session);
   let attempts = 0;
+  const command = { conversationId: '8', expectedVersion: 3, key: 'mobile-request-1', text: 'Hola' };
   globalThis.fetch = async (input, init) => {
     attempts++;
-    assert.equal(input, `${session.apiUrl}/api/chats/123%40c.us/messages`);
-    assert.deepEqual(JSON.parse(String(init?.body)), { message: 'Hola' });
-    throw new TypeError('network failed after dispatch');
+    assert.equal(input, `${session.apiUrl}/api/v1/conversations/8/messages`);
+    assert.equal(init?.method, 'POST');
+    const headers = new Headers(init?.headers);
+    assert.equal(headers.get('Authorization'), 'Bearer access-token');
+    assert.equal(headers.get('Idempotency-Key'), command.key);
+    assert.deepEqual(JSON.parse(String(init?.body)), {
+      expectedConversationVersion: 3, message: { kind: 'text', text: 'Hola' },
+    });
+    if (attempts === 1) throw new TypeError('network failed after dispatch');
+    return json(202, { accepted: true, providerMessageId: 'wamid.qa', deliveryState: 'provider_accepted' });
   };
 
-  await assert.rejects(apiClient.sendMessage('123@c.us', 'Hola'), TypeError);
+  await assert.rejects(apiClient.sendMessage(command), TypeError);
   assert.equal(attempts, 1);
+  assert.equal(await apiClient.sendMessage(command), 'accepted');
+  assert.equal(attempts, 2);
+});
+
+test('distinguishes an acknowledged rejection, unresolved delivery and a canonical conflict', async () => {
+  await authStorage.saveAuthSession(session);
+  const command = { conversationId: 8, expectedVersion: 3, key: 'mobile-request-1', text: 'Hola' };
+  globalThis.fetch = async () => json(202, { accepted: false, deliveryState: 'failed', providerMessageId: null });
+  assert.equal(await apiClient.sendMessage(command), 'failed');
+  globalThis.fetch = async () => json(202, { accepted: false, deliveryState: 'unknown_delivery', providerMessageId: null });
+  assert.equal(await apiClient.sendMessage(command), 'unknown_delivery');
+  globalThis.fetch = async () => json(202, { accepted: true, deliveryState: 'provider_accepted', providerMessageId: null });
+  assert.equal(await apiClient.sendMessage(command), 'unknown_delivery');
+  globalThis.fetch = async () => json(409, {
+    detail: 'Conversation version changed.', metadata: { reasonCode: 'CONVERSATION_VERSION_CHANGED', currentVersion: 4 },
+  });
+  await assert.rejects(apiClient.sendMessage(command), (error: unknown) =>
+    error instanceof MobileApiError && error.status === 409 &&
+      error.metadata?.reasonCode === 'CONVERSATION_VERSION_CHANGED' && error.metadata.currentVersion === 4);
+});
+
+test('maps canonical history and cursor for reconciliation of an exact outbound request', async () => {
+  await authStorage.saveAuthSession(session);
+  globalThis.fetch = async (input) => {
+    assert.equal(input, `${session.apiUrl}/api/v1/conversations/8/messages?limit=50&cursor=qa%2Fcursor`);
+    return json(200, { items: [{
+      id: '10', body: 'Hola', direction: 'outbound', deliveryState: 'unknown_delivery',
+      clientRequestId: 'mobile-request-1', causedBy: { type: 'human' }, attachments: [], createdAt: '2026-08-01T10:00:00Z',
+    }], nextCursor: 'older' });
+  };
+  assert.deepEqual(await apiClient.listConversationMessages(8, 'qa/cursor'), {
+    messages: [{
+      id: '10', body: 'Hola', fromMe: true, timestamp: Date.parse('2026-08-01T10:00:00Z'),
+      type: 'text', status: 'unknown_delivery', clientRequestId: 'mobile-request-1',
+    }],
+    nextCursor: 'older',
+  });
 });
 
 test('sends CAS version to the real takeover endpoint and reads the version returned by the server', async () => {

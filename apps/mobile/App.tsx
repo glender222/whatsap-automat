@@ -4,7 +4,7 @@ import { DarkTheme, NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { apiClient, handleUnauthorized } from './src/services/apiClient';
+import { apiClient, handleUnauthorized, type MobileTextCommand } from './src/services/apiClient';
 import { authStorage, type AuthSession } from './src/services/authStorage';
 import { SessionContext } from './src/services/sessionContext';
 import { SignInScreen } from './src/screens/SignInScreen';
@@ -30,6 +30,7 @@ export default function App() {
   const [session, setSession] = useState<AuthSession | null | undefined>(undefined);
   const [storageError, setStorageError] = useState<'read' | 'clear' | null>(null);
   const [signInNotice, setSignInNotice] = useState('');
+  const [pendingReplies, setPendingReplies] = useState(() => new Map<string, MobileTextCommand>());
   const currentSession = useRef<AuthSession | null>(null);
 
   function updateSession(value: AuthSession | null) {
@@ -48,6 +49,7 @@ export default function App() {
     currentSession.current = null;
     setSession(undefined);
     setStorageError(null);
+    setPendingReplies(new Map());
     try {
       await authStorage.clearAuthSession();
       updateSession(null);
@@ -75,6 +77,20 @@ export default function App() {
     if (previous) void apiClient.signOut(previous).catch(() => undefined);
   }
 
+  const rememberReply = useCallback((chatId: string, command: MobileTextCommand) => {
+    if (!session || currentSession.current !== session) return;
+    setPendingReplies((current) => new Map(current).set(chatId, command));
+  }, [session]);
+
+  const forgetReply = useCallback((chatId: string, command: MobileTextCommand) => {
+    setPendingReplies((current) => {
+      if (current.get(chatId) !== command) return current;
+      const next = new Map(current);
+      next.delete(chatId);
+      return next;
+    });
+  }, []);
+
   let screen = (
     <View style={styles.center}>
       <ActivityIndicator accessibilityLabel="Abriendo Whatsap Automat" size="large" color={colors.accent} />
@@ -93,7 +109,7 @@ export default function App() {
     screen = <SignInScreen onSignIn={signIn} notice={signInNotice} />;
   } else if (session) {
     screen = (
-      <SessionContext.Provider value={{ session, signOut }}>
+      <SessionContext.Provider value={{ session, signOut, pendingReplies, rememberReply, forgetReply }}>
         <NavigationContainer theme={navigationTheme}>
           <Stack.Navigator screenOptions={{ headerShown: false }}>
             <Stack.Screen name="Inbox" component={InboxScreen} />

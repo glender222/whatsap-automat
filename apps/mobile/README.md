@@ -25,6 +25,8 @@ npx expo export --platform all
 
 Las credenciales nativas se guardan en Expo SecureStore. La vista web conserva la sesión en memoria hasta que se recarga la página. El historial se actualiza al volver a la app y cada 15 segundos mientras la pantalla está activa.
 
+Para responder, el operador toma el control de la conversación y el servidor comprueba la versión y la ventana de atención. Si la entrega queda sin confirmar, el cliente pausa los envíos nuevos y permite reintentar la misma solicitud con su clave original mientras la sesión permanece abierta. El historial del servidor distingue los mensajes aceptados, fallidos y sin confirmar.
+
 ## Distribución
 
 Una exportación de Expo verifica los paquetes JavaScript para Android, iOS y web. Los instaladores nativos requieren un proyecto de compilación configurado, credenciales de firma y validación en un dispositivo.

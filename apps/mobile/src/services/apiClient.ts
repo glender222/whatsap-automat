@@ -34,7 +34,31 @@ export interface MobileMessage {
   timestamp: number;
   type?: string;
   status?: string;
+  clientRequestId?: string | null;
 }
+
+interface ConversationMessagePage {
+  items: {
+    id: string;
+    body: string | null;
+    direction: 'inbound' | 'outbound';
+    deliveryState: string;
+    clientRequestId: string | null;
+    causedBy: { type: string };
+    attachments: unknown[];
+    createdAt: string;
+  }[];
+  nextCursor: string | null;
+}
+
+export interface MobileTextCommand {
+  conversationId: number | string;
+  expectedVersion: number;
+  key: string;
+  text: string;
+}
+
+export type MobileSendOutcome = 'accepted' | 'failed' | 'unknown_delivery';
 
 interface TakeoverResult {
   conversationId: string;
@@ -51,7 +75,7 @@ export class MobileApiError extends Error {
   constructor(
     public readonly status: number,
     message: string,
-    public readonly metadata?: { currentVersion?: unknown; ownerId?: unknown; ownerType?: unknown },
+    public readonly metadata?: { currentVersion?: unknown; ownerId?: unknown; ownerType?: unknown; reasonCode?: unknown },
   ) {
     super(message);
     this.name = 'MobileApiError';
@@ -82,12 +106,15 @@ export function handleUnauthorized(callback: (accessToken: string) => void): () 
   return () => { if (onUnauthorized === callback) onUnauthorized = undefined; };
 }
 
-async function request<T>(origin: string, path: string, init: RequestInit = {}, accessToken?: string, unwrapped = false): Promise<T> {
-  const headers = {
-    Accept: 'application/json, application/problem+json',
-    ...(init.body ? { 'Content-Type': 'application/json' } : {}),
-    ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-  };
+type ResponseFormat = 'envelope' | 'legacy-status' | 'canonical';
+
+async function request<T>(
+  origin: string, path: string, init: RequestInit = {}, accessToken?: string, format: ResponseFormat = 'envelope',
+): Promise<T> {
+  const headers = new Headers(init.headers);
+  headers.set('Accept', 'application/json, application/problem+json');
+  if (init.body) headers.set('Content-Type', 'application/json');
+  if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`);
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15_000);
@@ -96,7 +123,7 @@ async function request<T>(origin: string, path: string, init: RequestInit = {}, 
     if (response.status === 401 && accessToken) onUnauthorized?.(accessToken);
 
     const body = await response.json().catch(() => null);
-    if (!response.ok || body?.success !== true) {
+    if (!response.ok || !body || (format !== 'canonical' && body.success !== true)) {
       const message = body?.userMessage ?? body?.detail ?? body?.message ?? body?.error;
       throw new MobileApiError(
         response.status,
@@ -104,17 +131,17 @@ async function request<T>(origin: string, path: string, init: RequestInit = {}, 
         body?.metadata && typeof body.metadata === 'object' ? body.metadata : undefined,
       );
     }
-    return unwrapped ? body as T : (body as ApiEnvelope<T>).data;
+    return format === 'envelope' ? (body as ApiEnvelope<T>).data : body as T;
   } finally {
     clearTimeout(timeout);
   }
 }
 
-async function authenticated<T>(path: string, init?: RequestInit, unwrapped = false): Promise<T> {
+async function authenticated<T>(path: string, init?: RequestInit, format?: ResponseFormat): Promise<T> {
   const session = await authStorage.getAuthSession();
   if (!session) throw new MobileApiError(401, 'Tu sesión terminó. Inicia sesión nuevamente.');
   const origin = normalizeServerUrl(session.apiUrl, typeof __DEV__ !== 'undefined' && __DEV__);
-  return request<T>(origin, path, init, session.accessToken, unwrapped);
+  return request<T>(origin, path, init, session.accessToken, format);
 }
 
 export const apiClient = {
@@ -152,11 +179,31 @@ export const apiClient = {
     );
   },
 
+  async listConversationMessages(conversationId: number | string, cursor?: string) {
+    const page = await authenticated<ConversationMessagePage>(
+      `/v1/conversations/${encodeURIComponent(conversationId)}/messages?limit=50${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
+      undefined,
+      'canonical',
+    );
+    return {
+      messages: page.items.map((message): MobileMessage => ({
+        id: message.id,
+        body: message.body,
+        fromMe: message.direction === 'outbound',
+        timestamp: Date.parse(message.createdAt),
+        type: message.attachments.length ? 'attachment' : 'text',
+        status: message.deliveryState,
+        clientRequestId: message.causedBy.type === 'human' ? message.clientRequestId : null,
+      })),
+      nextCursor: page.nextCursor,
+    };
+  },
+
   getChatSessionStatus(chatId: string): Promise<ChatSessionStatus> {
     return authenticated<ChatSessionStatus>(
       `/chats/${encodeURIComponent(chatId)}/session/status`,
       undefined,
-      true,
+      'legacy-status',
     );
   },
 
@@ -164,11 +211,19 @@ export const apiClient = {
     return authenticated<void>(`/chats/${encodeURIComponent(chatId)}/read`, { method: 'POST' });
   },
 
-  sendMessage(chatId: string, message: string): Promise<unknown> {
-    return authenticated(`/chats/${encodeURIComponent(chatId)}/messages`, {
+  async sendMessage(command: MobileTextCommand): Promise<MobileSendOutcome> {
+    const { conversationId, expectedVersion, key, text } = command;
+    const result = await authenticated<{ accepted?: unknown; deliveryState?: unknown; providerMessageId?: unknown }>(
+      `/v1/conversations/${encodeURIComponent(conversationId)}/messages`, {
       method: 'POST',
-      body: JSON.stringify({ message }),
-    });
+      headers: { 'Idempotency-Key': key },
+      body: JSON.stringify({ expectedConversationVersion: expectedVersion, message: { kind: 'text', text } }),
+    }, 'canonical');
+    if (result.deliveryState === 'failed' || result.deliveryState === 'cancelled') return 'failed';
+    if (result.deliveryState === 'unknown_delivery') return 'unknown_delivery';
+    if (result.accepted === true && typeof result.providerMessageId === 'string' && result.providerMessageId &&
+        ['dispatched', 'provider_accepted', 'delivered', 'read'].includes(String(result.deliveryState))) return 'accepted';
+    return 'unknown_delivery';
   },
 
   takeoverConversation(conversationId: number | string, expectedVersion: number): Promise<TakeoverResult> {

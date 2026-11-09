@@ -1,9 +1,13 @@
 import { createContext, useContext } from 'react';
 import type { AuthSession } from './authStorage';
+import type { MobileTextCommand } from './apiClient';
 
 export const SessionContext = createContext<{
   session: AuthSession;
   signOut: () => void;
+  pendingReplies: ReadonlyMap<string, MobileTextCommand>;
+  rememberReply: (chatId: string, command: MobileTextCommand) => void;
+  forgetReply: (chatId: string, command: MobileTextCommand) => void;
 } | null>(null);
 
 export function useSession() {

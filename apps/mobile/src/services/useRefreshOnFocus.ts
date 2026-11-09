@@ -4,8 +4,8 @@ import { useFocusEffect } from '@react-navigation/native';
 
 export function useRefreshOnFocus(load: () => Promise<void>) {
   const pending = useRef<Promise<void> | null>(null);
-  const refresh = useCallback(() => {
-    if (pending.current) return pending.current;
+  const refresh = useCallback((requireFresh = false): Promise<void> => {
+    if (pending.current) return requireFresh ? pending.current.then(() => refresh()) : pending.current;
     const request = load().finally(() => {
       if (pending.current === request) pending.current = null;
     });

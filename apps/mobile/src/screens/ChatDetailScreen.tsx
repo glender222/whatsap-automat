@@ -1,4 +1,5 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { uuid } from 'expo';
 import {
   ActivityIndicator,
   FlatList,
@@ -15,7 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import ArrowLeft from 'lucide-react-native/icons/arrow-left';
 import Send from 'lucide-react-native/icons/send';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { apiClient, MobileApiError, type MobileChatOwnership, type MobileMessage } from '../services/apiClient';
+import { apiClient, MobileApiError, type MobileChatOwnership, type MobileMessage, type MobileTextCommand } from '../services/apiClient';
 import { useSession } from '../services/sessionContext';
 import { useRefreshOnFocus } from '../services/useRefreshOnFocus';
 import { TakeoverButton } from '../components/TakeoverButton';
@@ -29,15 +30,32 @@ function mergeMessages(current: MobileMessage[], fresh: MobileMessage[]) {
   return [...messages.values()].sort((a, b) => a.timestamp - b.timestamp);
 }
 
+function isUnresolvedReply(message: MobileMessage) {
+  return message.fromMe && Boolean(message.clientRequestId) && message.status === 'unknown_delivery';
+}
+
 const deliveryLabels: Record<string, string> = {
   sent: 'Enviado',
+  dispatched: 'Enviado',
+  provider_accepted: 'Aceptado por WhatsApp',
   delivered: 'Entregado',
   read: 'Leído',
   failed: 'Falló',
+  cancelled: 'Cancelado',
+  unknown_delivery: 'Entrega sin confirmar',
 };
 
+const sendRejectionLabels: Record<string, string> = {
+  CONVERSATION_VERSION_CHANGED: 'La conversación cambió. Revisa su estado antes de volver a enviar.',
+  HUMAN_TAKEOVER_REQUIRED: 'Toma el control de la conversación antes de enviar.',
+  SERVICE_WINDOW_CLOSED: 'La ventana de atención cerró. Usa una plantilla aprobada desde el espacio web.',
+};
+
+const acceptedNotice = 'WhatsApp aceptó el mensaje.';
+const failedNotice = 'El servidor confirmó que el mensaje no se envió.';
+
 export function ChatDetailScreen({ route, navigation }: Props) {
-  const { session } = useSession();
+  const { session, pendingReplies, rememberReply, forgetReply } = useSession();
   const [chat, setChat] = useState(route.params.chat);
   const [messages, setMessages] = useState<MobileMessage[]>([]);
   const [draft, setDraft] = useState('');
@@ -46,6 +64,7 @@ export function ChatDetailScreen({ route, navigation }: Props) {
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [canLoadOlder, setCanLoadOlder] = useState(false);
   const [sending, setSending] = useState(false);
+  const [serverDeliveryBlocked, setServerDeliveryBlocked] = useState(false);
   const [hasActiveSession, setHasActiveSession] = useState<boolean | null>(null);
   const [loadError, setLoadError] = useState('');
   const [sendNotice, setSendNotice] = useState('');
@@ -53,8 +72,12 @@ export function ChatDetailScreen({ route, navigation }: Props) {
   const listRef = useRef<FlatList<MobileMessage>>(null);
   const lastReadMessage = useRef<string | null>(null);
   const initialPageLoaded = useRef(false);
+  const loadedHistoryId = useRef<string | null>(null);
+  const olderCursor = useRef<string | null>(null);
+  const sendInFlight = useRef(false);
 
-  const chatId = chat.id;
+  const { id: chatId, conversationId, stateVersion, assignedUserId } = chat;
+  const pending = pendingReplies.get(chatId);
   const updateOwnership = useCallback((ownership: MobileChatOwnership) => {
     const { conversationId, stateVersion, assignedUserId, aiPaused } = ownership;
     if (stateVersion == null || !Number.isInteger(stateVersion)) return;
@@ -70,7 +93,9 @@ export function ChatDetailScreen({ route, navigation }: Props) {
   const load = useCallback(async () => {
     try {
       const [messageResult, sessionResult] = await Promise.allSettled([
-        apiClient.listMessages(chatId),
+        conversationId != null
+          ? apiClient.listConversationMessages(conversationId)
+          : apiClient.listMessages(chatId).then((messages) => ({ messages, nextCursor: null })),
         apiClient.getChatSessionStatus(chatId),
       ]);
       const active = sessionResult.status === 'fulfilled' && typeof sessionResult.value.hasActiveSession === 'boolean'
@@ -78,14 +103,21 @@ export function ChatDetailScreen({ route, navigation }: Props) {
       if (sessionResult.status === 'fulfilled') updateOwnership(sessionResult.value);
       setHasActiveSession(active);
       if (messageResult.status === 'rejected') throw messageResult.reason;
-      const page = messageResult.value;
-      if (!initialPageLoaded.current) {
+      const { messages: page, nextCursor } = messageResult.value;
+      const historyId = conversationId != null ? String(conversationId) : null;
+      const replaceHistory = !initialPageLoaded.current || loadedHistoryId.current !== historyId;
+      if (replaceHistory) {
         initialPageLoaded.current = true;
-        setCanLoadOlder(page.length === 50);
+        loadedHistoryId.current = historyId;
+        lastReadMessage.current = null;
+        olderCursor.current = nextCursor;
+        setCanLoadOlder(conversationId != null ? Boolean(nextCursor) : page.length === 50);
       }
-      setMessages((current) => mergeMessages(current, page));
+      setMessages((current) => mergeMessages(replaceHistory ? [] : current, page));
+      if (page.some(isUnresolvedReply)) setServerDeliveryBlocked(false);
       setLoadError('');
-      const latestInbound = page.slice().reverse().find((item) => !item.fromMe)?.id;
+      const latestInbound = page.reduce<MobileMessage | undefined>((latest, item) =>
+        !item.fromMe && (!latest || item.timestamp > latest.timestamp) ? item : latest, undefined)?.id;
       if (latestInbound && lastReadMessage.current !== latestInbound) {
         lastReadMessage.current = latestInbound;
         void apiClient.markAsRead(chatId).catch(() => {
@@ -97,8 +129,23 @@ export function ChatDetailScreen({ route, navigation }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [chatId, updateOwnership]);
+  }, [chatId, conversationId, updateOwnership]);
   const refresh = useRefreshOnFocus(load);
+
+  useEffect(() => {
+    if (!pending || sending) return;
+    const status = messages.find((item) => item.clientRequestId === pending.key)?.status;
+    if (!status) return;
+    if (['dispatched', 'provider_accepted', 'delivered', 'read'].includes(status)) {
+      forgetReply(chatId, pending);
+      setDraft('');
+      setSendNotice(acceptedNotice);
+    } else if (status === 'failed' || status === 'cancelled') {
+      forgetReply(chatId, pending);
+      setDraft(pending.text);
+      setSendNotice(failedNotice);
+    }
+  }, [chatId, forgetReply, messages, pending, sending]);
 
   async function refreshChat() {
     setRefreshing(true);
@@ -110,9 +157,16 @@ export function ChatDetailScreen({ route, navigation }: Props) {
     if (loadingOlder || !messages[0]?.timestamp) return;
     setLoadingOlder(true);
     try {
-      const page = await apiClient.listMessages(chatId, messages[0].timestamp);
-      setMessages((current) => mergeMessages(current, page));
-      setCanLoadOlder(page.length === 50);
+      if (conversationId != null && olderCursor.current) {
+        const page = await apiClient.listConversationMessages(conversationId, olderCursor.current);
+        olderCursor.current = page.nextCursor;
+        setMessages((current) => mergeMessages(current, page.messages));
+        setCanLoadOlder(Boolean(page.nextCursor));
+      } else if (conversationId == null) {
+        const page = await apiClient.listMessages(chatId, messages[0].timestamp);
+        setMessages((current) => mergeMessages(current, page));
+        setCanLoadOlder(page.length === 50);
+      }
       setLoadError('');
     } catch {
       setLoadError('No se pudieron cargar los mensajes anteriores.');
@@ -142,27 +196,49 @@ export function ChatDetailScreen({ route, navigation }: Props) {
     }
   }
 
-  const canSend = hasActiveSession === true && Boolean(draft.trim()) && !sending;
+  const hasUnresolvedDelivery = serverDeliveryBlocked || messages.some(isUnresolvedReply);
+  const ownsConversation = assignedUserId != null && String(assignedUserId) === session.userId;
+  const canEdit = hasActiveSession === true && !loadError && !pending && !hasUnresolvedDelivery && !sending;
+  const canSend = canEdit && ownsConversation && conversationId != null && stateVersion != null && Boolean(draft.trim());
 
-  async function send() {
-    if (!canSend) return;
-    const message = draft.trim();
+  async function send(command: MobileTextCommand) {
+    if (sendInFlight.current) return;
+    sendInFlight.current = true;
+    rememberReply(chatId, command);
     setSending(true);
     setSendNotice('');
     try {
-      await apiClient.sendMessage(chatId, message);
-      setDraft('');
-      setSendNotice('Mensaje enviado.');
-      await refresh();
-      requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
+      const outcome = await apiClient.sendMessage(command);
+      if (outcome === 'accepted') {
+        forgetReply(chatId, command);
+        setDraft('');
+        setSendNotice(acceptedNotice);
+        requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
+      } else if (outcome === 'failed') {
+        forgetReply(chatId, command);
+        setDraft(command.text);
+        setSendNotice(failedNotice);
+      }
     } catch (error) {
-      setSendNotice(error instanceof MobileApiError && error.status >= 400 && error.status < 500
-        ? error.message
-        : 'No se confirmó el envío. Actualiza la conversación antes de volver a enviar.');
-      await refresh();
+      if (error instanceof MobileApiError && error.status >= 400 && error.status < 500 && error.status !== 408) {
+        const reason = error.metadata?.reasonCode;
+        if (reason === 'DELIVERY_UNRESOLVED') setServerDeliveryBlocked(true);
+        forgetReply(chatId, command);
+        setDraft(command.text);
+        setSendNotice(typeof reason === 'string' && sendRejectionLabels[reason]
+          ? sendRejectionLabels[reason]
+          : 'El servidor rechazó el envío. Revisa la conversación antes de volver a intentarlo.');
+      }
     } finally {
+      await refresh(true);
+      sendInFlight.current = false;
       setSending(false);
     }
+  }
+
+  function sendDraft() {
+    if (!canSend || conversationId == null || stateVersion == null || sendInFlight.current) return;
+    void send({ conversationId, expectedVersion: stateVersion, key: uuid.v4(), text: draft.trim() });
   }
 
   const title = chat.name?.trim() || chatId;
@@ -230,6 +306,22 @@ export function ChatDetailScreen({ route, navigation }: Props) {
         {!loading && hasActiveSession === null ? (
           <Text style={styles.notice} accessibilityRole="alert">No se pudo verificar la ventana de atención. Desliza para actualizar antes de enviar.</Text>
         ) : null}
+        {hasActiveSession && !ownsConversation && !pending && !hasUnresolvedDelivery ? (
+          <Text style={styles.notice}>Toma el control de la conversación para enviar una respuesta.</Text>
+        ) : null}
+        {!sending && (pending || hasUnresolvedDelivery) ? (
+          <View>
+            <Text style={styles.notice} accessibilityRole="alert">La entrega del último envío sigue sin confirmar. Los envíos nuevos están en pausa.</Text>
+            <Pressable accessibilityRole="button" style={styles.loadOlder} onPress={() => void refreshChat()} disabled={refreshing}>
+              <Text style={styles.action}>Actualizar conversación</Text>
+            </Pressable>
+            {pending ? (
+              <Pressable accessibilityRole="button" style={styles.loadOlder} onPress={() => void send(pending)}>
+                <Text style={styles.action}>Reintentar el mismo envío</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
         {sendNotice ? <Text accessibilityLiveRegion="polite" style={styles.notice}>{sendNotice}</Text> : null}
 
         <View style={styles.composer}>
@@ -239,8 +331,9 @@ export function ChatDetailScreen({ route, navigation }: Props) {
             placeholder={hasActiveSession === false ? 'Ventana de atención cerrada' : 'Escribe un mensaje'}
             placeholderTextColor={colors.textMuted}
             multiline
-            editable={hasActiveSession === true && !sending}
-            value={draft}
+            editable={canEdit}
+            maxLength={4096}
+            value={pending?.text ?? draft}
             onChangeText={setDraft}
           />
           <Pressable
@@ -249,7 +342,7 @@ export function ChatDetailScreen({ route, navigation }: Props) {
             accessibilityState={{ disabled: !canSend, busy: sending }}
             style={[styles.send, !canSend && styles.disabled]}
             disabled={!canSend}
-            onPress={() => void send()}
+            onPress={sendDraft}
           >
             {sending ? <ActivityIndicator color={colors.textPrimary} /> : <Send size={18} color={colors.textPrimary} />}
           </Pressable>
