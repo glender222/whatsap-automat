@@ -143,7 +143,7 @@ cp -n Frontend_py_whatsaapweb/.env.example Frontend_py_whatsaapweb/.env
 npm --prefix WhatsaapWeb-JS run db:migrate
 npm --prefix WhatsaapWeb-JS run db:status</code></pre>
             </div>
-            <p class="fine">Comprueba que todas las migraciones figuren como aplicadas. El script puede salir sin error cuando PostgreSQL no responde.</p>
+            <p class="fine">Comprueba que todas las migraciones figuren como aplicadas. El comando devuelve un código de error si falla la conexión o una migración.</p>
           </li>
           <li>
             <span class="step-number" aria-hidden="true">04</span>

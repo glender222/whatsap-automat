@@ -88,13 +88,13 @@ Los `.env` reales están ignorados en ambos proyectos. Los `.env.example` contie
 
 ## PostgreSQL
 
-Configura en `.env` una base existente y un usuario con permisos para crear/actualizar el esquema:
+Configura en `.env` una base existente y un rol de desarrollo propietario de esa base con `NOSUPERUSER` y `NOBYPASSRLS`.
 
 ```env
 DB_HOST=localhost
 DB_PORT=5432
 DB_NAME=whatsapp_empresas
-DB_USER=postgres
+DB_USER=whatsap_app
 DB_PASSWORD=
 ```
 
@@ -105,7 +105,21 @@ npm run db:migrate
 npm run db:status
 ```
 
-Los scripts actuales informan de forma legible cuando PostgreSQL no está disponible, pero pueden terminar sin un código de error. Para dar este paso por válido, revisa la salida y confirma que la conexión y todas las migraciones aparecen aplicadas; no aceptes un mensaje de “PostgreSQL no disponible” como éxito.
+El comando de migración serializa ejecuciones concurrentes y devuelve un código distinto de cero si PostgreSQL falla. `db:status` consulta el estado y `db:migrate -- --dry-run` enumera los archivos sin conectarse. La ruta `/ready` devuelve `503` hasta que todas las migraciones de la compilación estén aplicadas.
+
+### Respaldar y restaurar la base de negocio
+
+Configura un servicio PostgreSQL de respaldo con acceso a todas las filas y otro para una base de restauración vacía. El rol de ejecución de la aplicación debe conservar RLS y carecer de `BYPASSRLS`.
+
+```bash
+umask 077
+PGSERVICE=automat-backup pg_dump --format=custom > automat-business.dump
+sha256sum automat-business.dump > automat-business.dump.sha256
+sha256sum -c automat-business.dump.sha256
+pg_restore --exit-on-error --single-transaction --dbname=service=automat-restore automat-business.dump
+```
+
+Verifica la lista de migraciones, los conteos de negocio y el aislamiento por empresa con el rol de ejecución. Arranca la API restaurada con el tráfico externo detenido y consulta `/ready` antes de reactivar webhooks y workers. Restaura las claves de cifrado y el almacenamiento de adjuntos desde sus respaldos. Los datos de ejecución de Temporal tienen su propio procedimiento. [Restauración de Temporal](../deploy/temporal/README.md#6-procedimientos-de-respaldo-y-restauración-ops-01)
 
 ## OpenAI y OpenCode
 

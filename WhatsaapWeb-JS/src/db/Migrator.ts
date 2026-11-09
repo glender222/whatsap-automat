@@ -1,4 +1,4 @@
-import { Pool } from 'pg';
+import { Pool, PoolClient } from 'pg';
 import * as fs from 'fs';
 import * as path from 'path';
 import pool from '../config/database';
@@ -20,13 +20,9 @@ export class Migrator {
     this.migrationsDir = options.migrationsDir || path.join(__dirname, 'migrations');
   }
 
-  /**
-   * Asegura la existencia de la tabla de control de migraciones.
-   * En dry-run no toca la base de datos.
-   */
-  async init(): Promise<void> {
-    if (this.dryRun) return;
-    await this.pool.query(`
+  /** Asegura la existencia de la tabla de control bajo el bloqueo de migración. */
+  private async init(db: PoolClient): Promise<void> {
+    await db.query(`
       CREATE TABLE IF NOT EXISTS schema_migrations (
         version VARCHAR(255) PRIMARY KEY,
         applied_at TIMESTAMPTZ DEFAULT NOW()
@@ -37,14 +33,11 @@ export class Migrator {
   /**
    * Lista todas las migraciones disponibles y su estado.
    */
-  async listMigrations(): Promise<Migration[]> {
-    if (!fs.existsSync(this.migrationsDir)) {
-      return [];
-    }
-
+  async listMigrations(db: Pool | PoolClient = this.pool): Promise<Migration[]> {
     const files = fs.readdirSync(this.migrationsDir)
       .filter(f => f.endsWith('.sql'))
       .sort();
+    if (!files.length) throw new Error('No se encontraron migraciones SQL');
 
     if (this.dryRun) {
       return files.map(filename => {
@@ -53,14 +46,9 @@ export class Migrator {
       });
     }
 
-    let appliedSet = new Set<string>();
-    try {
-      const query = { text: 'SELECT version FROM schema_migrations', query_timeout: 3000 };
-      const { rows } = await this.pool.query<{ version: string }>(query);
-      appliedSet = new Set(rows.map(r => r.version));
-    } catch (err: any) {
-      throw err;
-    }
+    const query = { text: 'SELECT version FROM schema_migrations', query_timeout: 3000 };
+    const { rows } = await db.query<{ version: string }>(query);
+    const appliedSet = new Set(rows.map(r => r.version));
 
     return files.map(filename => {
       const version = path.basename(filename, '.sql');
@@ -73,47 +61,52 @@ export class Migrator {
    * Retorna las aplicadas y las omitidas (ya aplicadas).
    */
   async migrate(): Promise<{ applied: string[]; skipped: string[] }> {
-    const migrations = await this.listMigrations();
-    const applied: string[] = [];
-    const skipped: string[] = [];
-
-    for (const migration of migrations) {
-      if (migration.applied) {
-        skipped.push(migration.version);
-        console.log(`⏭️  Migration ${migration.version} already applied`);
-        continue;
-      }
-
-      const filePath = path.join(this.migrationsDir, migration.filename);
-      const sql = fs.readFileSync(filePath, 'utf-8');
-
-      if (this.dryRun) {
-        console.log(`[DRY RUN] Would apply ${migration.version}`);
-        applied.push(migration.version);
-        continue;
-      }
-
-      const client = await this.pool.connect();
-      try {
-        await client.query('BEGIN');
-        await client.query(sql);
-        await client.query(
-          'INSERT INTO schema_migrations (version) VALUES ($1)',
-          [migration.version]
-        );
-        await client.query('COMMIT');
-        console.log(`✅ Applied migration ${migration.version}`);
-        applied.push(migration.version);
-      } catch (err) {
-        await client.query('ROLLBACK').catch(() => { /* ignore rollback errors */ });
-        console.error(`❌ Failed to apply migration ${migration.version}:`, err);
-        throw err;
-      } finally {
-        client.release();
-      }
+    if (this.dryRun) {
+      const migrations = await this.listMigrations();
+      for (const migration of migrations) console.log(`[DRY RUN] Would apply ${migration.version}`);
+      return { applied: [], skipped: [] };
     }
 
-    return { applied, skipped };
+    const applied: string[] = [];
+    const skipped: string[] = [];
+    const client = await this.pool.connect();
+    let locked = false;
+    let discardClient = false;
+
+    try {
+      await client.query("SELECT pg_advisory_lock(hashtextextended('whatsap-automat:migrations', 0))");
+      locked = true;
+      await this.init(client);
+      const migrations = await this.listMigrations(client);
+      for (const migration of migrations) {
+        if (migration.applied) {
+          skipped.push(migration.version);
+          console.log(`⏭️  Migration ${migration.version} already applied`);
+          continue;
+        }
+
+        const sql = fs.readFileSync(path.join(this.migrationsDir, migration.filename), 'utf-8');
+        try {
+          await client.query('BEGIN');
+          await client.query(sql);
+          await client.query('INSERT INTO schema_migrations (version) VALUES ($1)', [migration.version]);
+          await client.query('COMMIT');
+          console.log(`✅ Applied migration ${migration.version}`);
+          applied.push(migration.version);
+        } catch (error) {
+          await client.query('ROLLBACK').catch(() => { discardClient = true; });
+          console.error(`❌ Failed to apply migration ${migration.version}:`, error);
+          throw error;
+        }
+      }
+      return { applied, skipped };
+    } finally {
+      if (locked && !discardClient) {
+        await client.query("SELECT pg_advisory_unlock(hashtextextended('whatsap-automat:migrations', 0))")
+          .catch(() => { discardClient = true; });
+      }
+      client.release(discardClient);
+    }
   }
 
   /**

@@ -15,7 +15,7 @@ git clone --branch integration/v0.4-consolidated https://github.com/glender222/w
 cd whatsap-automat
 npm --prefix packages/contracts ci
 npm --prefix packages/contracts run build
-npm --prefix WhatsaapWeb-JS ci
+PUPPETEER_SKIP_DOWNLOAD=true npm --prefix WhatsaapWeb-JS ci
 npm --prefix Frontend_py_whatsaapweb ci
 ```
 
@@ -35,7 +35,7 @@ npm --prefix WhatsaapWeb-JS run db:migrate
 npm --prefix WhatsaapWeb-JS run db:status
 ```
 
-Confirma que todas las migraciones aparezcan como aplicadas. El script puede salir sin error cuando PostgreSQL no responde.
+Confirma que todas las migraciones aparezcan como aplicadas. Un fallo de conexión o migración devuelve un código de salida distinto de cero.
 
 ## Arrancar y comprobar
 
@@ -49,7 +49,7 @@ npm --prefix WhatsaapWeb-JS run dev
 npm --prefix Frontend_py_whatsaapweb run dev
 
 # Comprobación de la API
-curl --fail --silent --show-error http://localhost:3000/health
+curl --fail --silent --show-error http://localhost:3000/ready
 ```
 
 Con los puertos por defecto, la web queda en `http://localhost:5173` y el visor de la API en `http://localhost:3000/api/v1/docs`.
