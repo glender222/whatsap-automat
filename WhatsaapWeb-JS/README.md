@@ -56,6 +56,7 @@ Obligatorias para todo arranque:
 
 - `DB_PASSWORD`
 - `JWT_SECRET`, aleatorio y con al menos 32 caracteres
+- `MASTER_ENCRYPTION_KEY`, una clave aleatoria de al menos 32 caracteres para la bóveda de credenciales
 
 Obligatorias cuando `WHATSAPP_PROVIDER=meta-cloud`:
 

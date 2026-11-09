@@ -109,6 +109,8 @@ jobs:
       META_WEBHOOK_VERIFY_TOKEN: ci-meta-verify-token-only
       META_WA_ACCESS_TOKEN: synthetic-local-token
       META_APP_SECRET: ci-meta-signing-secret-only
+      META_TOKEN_ENCRYPTION_KEY: ci-meta-credential-encryption-key-only
+      MASTER_ENCRYPTION_KEY: ci-application-vault-encryption-key-only
       PORT: 3024
       HOST: 127.0.0.1
       PRODUCT_SMOKE_URL: http://127.0.0.1:3024

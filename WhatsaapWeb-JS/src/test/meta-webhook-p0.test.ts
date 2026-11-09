@@ -1,10 +1,8 @@
+import './fixtures/testEnv';
 import crypto from 'node:crypto';
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, mock, test } from 'node:test';
 import type { NextFunction, Request, Response } from 'express';
-
-process.env.JWT_SECRET ||= 'test-only-jwt-secret-with-at-least-32-characters';
-process.env.DB_PASSWORD ||= 'test-only-database-password';
 
 const config = require('../config/index') as typeof import('../config/index').default;
 const createMetaWebhookRoutes = require('../routes/metaWebhookRoutes').default as typeof import('../routes/metaWebhookRoutes').default;
