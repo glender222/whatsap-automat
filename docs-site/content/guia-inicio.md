@@ -67,6 +67,7 @@ npm --prefix Frontend_py_whatsaapweb test
 
 ## Referencias
 
+- Cuando el portal incluye el kit de desarrollo, el ZIP contiene paquetes de npm instalables para el SDK de TypeScript y la CLI, una rueda del SDK de Python y sumas SHA-256.
 - El paquete de documentación incluye `openapi.v1.json` y `openapi.v1.yaml`, el contrato OpenAPI 3.1 del repositorio.
 - Consulta las [versiones y artefactos de GitHub](https://github.com/glender222/whatsap-automat/releases) y los [resultados de CI](https://github.com/glender222/whatsap-automat/actions/workflows/ci.yml) del commit que uses.
 - Para levantar la demo de orquestación por separado, consulta la [guía de Temporal](https://github.com/glender222/whatsap-automat/blob/integration/v0.4-consolidated/deploy/temporal/README.md).

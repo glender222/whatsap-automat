@@ -1,6 +1,9 @@
 """Build the documentation portal from its explicitly listed source files."""
 
+import argparse
+import hashlib
 import json
+import re
 import shutil
 import tempfile
 import zipfile
@@ -53,7 +56,27 @@ def validate_links(staging):
             raise ValueError(f"Archivo referenciado no disponible: {target}")
 
 
-def build():
+def validate_developer_kit(path):
+    with zipfile.ZipFile(path) as kit:
+        names = kit.namelist()
+        if len(names) != 6 or len(set(names)) != len(names) or kit.testzip() is not None:
+            raise ValueError("El kit de desarrollo tiene archivos incompletos o repetidos")
+        checksums = {}
+        for line in kit.read("SHA256SUMS").decode("utf-8").splitlines():
+            expected, name = line.split("  ", 1)
+            if name in checksums:
+                raise ValueError("El kit de desarrollo contiene una suma repetida")
+            checksums[name] = expected
+        if set(checksums) != set(names) - {"SHA256SUMS"}:
+            raise ValueError("El kit de desarrollo requiere una suma por archivo")
+        for name, expected in checksums.items():
+            if not re.fullmatch(r"[a-zA-Z0-9_.-]+", name) or name in {".", ".."}:
+                raise ValueError("El kit de desarrollo contiene una ruta inválida")
+            if hashlib.sha256(kit.read(name)).hexdigest() != expected:
+                raise ValueError(f"No coincide la suma SHA-256 de {name}")
+
+
+def build(developer_kit=None):
     with tempfile.TemporaryDirectory(dir=HERE) as temp:
         staging = Path(temp) / "site"
         downloads = staging / "downloads"
@@ -62,6 +85,16 @@ def build():
             shutil.copyfile(HERE / "site" / name, staging / name)
         for name, source in DOWNLOADS.items():
             shutil.copyfile(source, downloads / name)
+
+        if developer_kit is not None:
+            validate_developer_kit(developer_kit)
+            shutil.copyfile(developer_kit, downloads / "whatsap-automat-developer-kit.zip")
+        else:
+            index = staging / "index.html"
+            index.write_text(re.sub(
+                r"^ *<!-- developer-kit:start -->.*?<!-- developer-kit:end -->\n", "",
+                index.read_text(encoding="utf-8"), flags=re.MULTILINE | re.DOTALL,
+            ), encoding="utf-8")
 
         spec = json.loads((downloads / "openapi.v1.json").read_text(encoding="utf-8"))
         if not spec.get("openapi", "").startswith("3.1.") or not spec.get("paths"):
@@ -82,4 +115,6 @@ def build():
 
 
 if __name__ == "__main__":
-    build()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--developer-kit", type=Path)
+    build(parser.parse_args().developer_kit)
