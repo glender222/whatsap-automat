@@ -3,18 +3,6 @@
   "lastUpdated": "2026-11-04",
   "mandate": "WAA-024 / ADR-018",
   "exceptions": {
-    "@react-pdf-viewer/core": {
-      "license": "Commercial-Developer-Evaluation",
-      "rationale": "Client-side PDF document preview component in Frontend_py_whatsaapweb; client-only sandbox; scheduled for replacement with native HTML5 canvas/PDF.js in Phase F9",
-      "approvedBy": "Security & Compliance Officer",
-      "expiresAt": "2027-12-31"
-    },
-    "@react-pdf-viewer/default-layout": {
-      "license": "Commercial-Developer-Evaluation",
-      "rationale": "Client-side PDF UI layout wrapper; scheduled for replacement in Phase F9",
-      "approvedBy": "Security & Compliance Officer",
-      "expiresAt": "2027-12-31"
-    },
     "caniuse-lite": {
       "license": "CC-BY-4.0",
       "rationale": "Standard browser compatibility dataset used by postcss/autoprefixer; permissible attribution data",

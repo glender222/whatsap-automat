@@ -339,31 +339,19 @@ describe('Adversarial Verification: CapabilityRegistry, HMAC Security & Anti-Rep
       assert.strictEqual(verifyWebhookHmac(secret, testPayload, undefined), false);
     });
 
-    test('1.9 Constant-time verification prevents early-abort timing leakage', () => {
+    test('1.9 Every equal-length signature uses the constant-time comparison', (context) => {
       const validHmac = crypto.createHmac('sha256', secret).update(testPayload).digest('hex');
       const mismatch0 = (validHmac[0] === 'a' ? 'b' : 'a') + validHmac.slice(1);
       const mismatch63 = validHmac.slice(0, 63) + (validHmac[63] === 'a' ? 'b' : 'a');
-
-      const iterations = 1000;
-
-      // Benchmark mismatch at byte 0
-      const t0Start = process.hrtime.bigint();
-      for (let i = 0; i < iterations; i++) {
-        verifyWebhookHmac(secret, testPayload, `sha256=${mismatch0}`);
-      }
-      const t0Total = Number(process.hrtime.bigint() - t0Start);
-
-      // Benchmark mismatch at byte 63
-      const t63Start = process.hrtime.bigint();
-      for (let i = 0; i < iterations; i++) {
-        verifyWebhookHmac(secret, testPayload, `sha256=${mismatch63}`);
-      }
-      const t63Total = Number(process.hrtime.bigint() - t63Start);
-
-      // The time difference per operation should be in the order of nanoseconds/sub-microseconds
-      const diffPerOpNs = Math.abs(t0Total - t63Total) / iterations;
-      // Timing variation between mismatching at byte 0 vs byte 63 should be negligible (< 10 microseconds)
-      assert.ok(diffPerOpNs < 10000, `Timing difference too high: ${diffPerOpNs}ns per op`);
+      const compare = context.mock.method(crypto, 'timingSafeEqual');
+      assert.equal(verifyWebhookHmac(secret, testPayload, `sha256=${validHmac}`), true);
+      assert.equal(verifyWebhookHmac(secret, testPayload, `sha256=${mismatch0}`), false);
+      assert.equal(verifyWebhookHmac(secret, testPayload, `sha256=${mismatch63}`), false);
+      assert.equal(verifyWebhookHmac(secret, testPayload, `sha256=${validHmac.slice(0, -1)}`), false);
+      assert.equal(compare.mock.callCount(), 3);
+      assert.deepEqual(compare.mock.calls.map(({ arguments: [actual, received] }) => [actual.toString(), received.toString()]), [
+        [validHmac, validHmac], [validHmac, mismatch0], [validHmac, mismatch63],
+      ]);
     });
   });
 

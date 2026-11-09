@@ -37,7 +37,8 @@ const TARGET_PACKAGES = [
   'packages/sdk',
   'packages/cli',
   'WhatsaapWeb-JS',
-  'Frontend_py_whatsaapweb'
+  'Frontend_py_whatsaapweb',
+  'apps/mobile'
 ];
 
 const PERMISSIVE_WHITELIST = new Set([
@@ -49,10 +50,11 @@ const PERMISSIVE_WHITELIST = new Set([
   'Unlicense',
   'CC0-1.0',
   'CC-BY-4.0',
+  'BlueOak-1.0.0', // https://spdx.org/licenses/BlueOak-1.0.0.html
   'Zlib'
 ]);
 
-const COPYLEFT_REGEX = /\b(AGPL|SSPL|EUPL|BUSL|BSL)\b|(?<!\b(?:OR)\s+)\b(GPL|LGPL)\b/i;
+const COPYLEFT_REGEX = /\b(AGPL|GPL|LGPL|SSPL|EUPL|BUSL|BSL)\b/i;
 
 // Load exceptions if present
 const exceptionsFile = path.join(rootDir, 'scripts/license-exceptions.json');
@@ -109,40 +111,59 @@ function resolvePackageLicense(pkgDir) {
   return { license: raw || 'UNKNOWN', name, version };
 }
 
-function evaluateLicense(licenseStr, pkgName) {
-  if (exceptions[pkgName]) {
-    return { status: 'EXCEPTION', reason: exceptions[pkgName].rationale };
-  }
-
-  if (pkgName.startsWith('@react-pdf-viewer/')) {
-    return { status: 'EXCEPTION', reason: 'Approved client-side document viewer exception' };
-  }
-
-  if (PERMISSIVE_WHITELIST.has(licenseStr)) {
-    return { status: 'PASS' };
-  }
-
-  // Dual or compound license resolution
-  if (licenseStr.includes(' OR ')) {
-    const parts = licenseStr.replace(/[()]/g, '').split(' OR ').map(s => s.trim());
-    if (parts.some(p => PERMISSIVE_WHITELIST.has(p))) {
-      return { status: 'PASS', elected: parts.find(p => PERMISSIVE_WHITELIST.has(p)) };
-    }
-  }
-
-  if (licenseStr.includes(' AND ')) {
-    const parts = licenseStr.replace(/[()]/g, '').split(' AND ').map(s => s.trim());
-    if (parts.every(p => PERMISSIVE_WHITELIST.has(p))) {
-      return { status: 'PASS' };
-    }
-  }
-
-  // Viral copyleft rejection
+function rejectedLicense(licenseStr) {
   if (COPYLEFT_REGEX.test(licenseStr)) {
     return { status: 'FAIL', reason: `Viral copyleft license rejected: ${licenseStr}` };
   }
-
   return { status: 'WARN', reason: `Non-whitelisted license: ${licenseStr}` };
+}
+
+function evaluateExpression(input) {
+  const expression = typeof input === 'string' ? input.trim() : 'UNKNOWN';
+  if (PERMISSIVE_WHITELIST.has(expression)) return { status: 'PASS' };
+
+  const separators = { AND: [], OR: [] };
+  let depth = 0;
+  let wrapped = expression.startsWith('(') && expression.endsWith(')');
+  for (const match of expression.matchAll(/\(|\)|(?<=[\s)])(?:AND|OR)(?=[\s(])/g)) {
+    const token = match[0];
+    if (token === '(') depth++;
+    else if (token === ')') {
+      depth--;
+      if (depth < 0) return rejectedLicense(expression);
+      if (depth === 0 && match.index !== expression.length - 1) wrapped = false;
+    } else if (depth === 0) separators[token].push(match);
+  }
+  if (depth !== 0) return rejectedLicense(expression);
+  if (wrapped) return evaluateExpression(expression.slice(1, -1));
+
+  // AND binds more tightly than OR per the SPDX license expression grammar.
+  // https://spdx.github.io/spdx-spec/v2.3/SPDX-license-expressions/
+  const operator = separators.OR.length ? 'OR' : 'AND';
+  if (!separators[operator].length) return rejectedLicense(expression);
+
+  let offset = 0;
+  const terms = separators[operator].map(({ index }) => {
+    const term = expression.slice(offset, index).trim();
+    offset = index + operator.length;
+    return term;
+  });
+  terms.push(expression.slice(offset).trim());
+  if (terms.some(term => !term)) return rejectedLicense(expression);
+  const decisions = terms.map(evaluateExpression);
+  if (operator === 'AND' && decisions.every(({ status }) => status === 'PASS')) return { status: 'PASS' };
+  if (operator === 'OR') {
+    const approved = decisions.findIndex(({ status }) => status === 'PASS');
+    if (approved >= 0) return { status: 'PASS', elected: terms[approved] };
+  }
+  return rejectedLicense(expression);
+}
+
+function evaluateLicense(licenseStr, pkgName) {
+  if (exceptions[pkgName]?.license === licenseStr) {
+    return { status: 'EXCEPTION', reason: exceptions[pkgName].rationale };
+  }
+  return evaluateExpression(licenseStr);
 }
 
 const results = {
@@ -162,7 +183,12 @@ for (const targetRel of TARGET_PACKAGES) {
   const nodeModulesDir = path.join(targetDir, 'node_modules');
   if (!fs.existsSync(nodeModulesDir)) continue;
 
+  const visited = new Set();
   function walk(current) {
+    if (!fs.existsSync(current)) return;
+    const realPath = fs.realpathSync(current);
+    if (visited.has(realPath)) return;
+    visited.add(realPath);
     let entries = [];
     try { entries = fs.readdirSync(current); } catch (e) { return; }
 
@@ -187,8 +213,10 @@ for (const targetRel of TARGET_PACKAGES) {
           version,
           license,
           status: evalResult.status,
+          elected: evalResult.elected,
           reason: evalResult.reason || null
         });
+        walk(path.join(full, 'node_modules'));
       }
     }
   }
