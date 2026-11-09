@@ -35,3 +35,14 @@ export class MarketplaceError extends Error {
     super(message);
   }
 }
+
+export interface MarketplacePublication {
+  id: string;
+  extensionId: string;
+  displayName: string;
+  version: string;
+  type: 'channel' | 'tool' | 'ui';
+  state: 'published' | 'withdrawn';
+  publishedAt: string;
+  withdrawnAt: string | null;
+}

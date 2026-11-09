@@ -120,12 +120,14 @@ Las rutas usan el prefijo `/api/v1/marketplace`.
 | `GET /extensions/{id}` | Público | Metadatos de una extensión publicada. |
 | `POST /validate` | Público | Validación de manifiesto y comprobación SHA-256 si se proporcionan los bytes y el hash. |
 | `POST /extensions` | Administrador autenticado | Registra o actualiza la extensión de su empresa. Si otra empresa ya registró el identificador o el nombre, devuelve `409`. |
+| `GET /publications` | Administrador autenticado | Lista publicaciones propias, incluidas las retiradas. Acepta `limit` y `offset` y devuelve `pagination.hasMore`. |
+| `POST /extensions/{id}/withdraw` | Administrador propietario | Retira la ficha del catálogo. Repetir la solicitud devuelve el mismo estado y fecha de retirada. |
 | `POST /extensions/{id}/rate` | Usuario autenticado | Crea o reemplaza la puntuación del usuario en su empresa. |
 | `GET /extensions/{id}/ratings` | Usuario autenticado | Reseñas y puntuaciones de su empresa. |
 
 La migración `034_marketplace_catalog.sql` crea el catálogo y las reseñas en PostgreSQL. Los nombres e identificadores se reservan en la transacción que publica la extensión. Cada usuario puede mantener una puntuación por extensión y empresa. PostgreSQL actualiza los totales públicos en la misma transacción y restringe el acceso a las reseñas detalladas por empresa mediante RLS. `GET /health` devuelve `503` si el catálogo no puede consultar su almacenamiento.
 
-El registro empieza vacío y las publicaciones comunitarias aparecen sin verificar. El editor aloja por separado los archivos de descarga en HTTPS. El servidor usa los bytes enviados para comprobar o calcular el hash y guarda los metadatos en PostgreSQL. La instalación de extensiones desde este catálogo requiere integración con el runtime.
+El registro empieza vacío y las publicaciones comunitarias aparecen sin verificar. El editor aloja por separado los archivos de descarga en HTTPS. El servidor usa los bytes enviados para comprobar o calcular el hash y guarda los metadatos en PostgreSQL. La instalación de extensiones está deshabilitada. La migración `042_marketplace_publication_withdrawal.sql` añade el estado y la auditoría de retirada. La retirada conserva identificadores, alias y reseñas, excluye la ficha de los endpoints públicos y devuelve `409` si se intenta volver a publicar mediante `POST /extensions`. La gestión del catálogo no controla los archivos alojados por el editor.
 
 Para ejecutar las pruebas de PostgreSQL, usa una base aislada con las migraciones aplicadas y un rol sin `SUPERUSER` ni `BYPASSRLS`. Las pruebas crean empresas y publicaciones en esa base. Configura `MARKETPLACE_TEST_DATABASE_URL` y ejecuta desde `WhatsaapWeb-JS`:
 

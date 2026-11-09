@@ -18,6 +18,28 @@ function resolveActor(req: Request, res: Response) {
   return null;
 }
 
+function resolveAdmin(req: Request, res: Response) {
+  const actor = resolveActor(req, res);
+  if (!actor || actor.role === 'ADMIN') return actor;
+  res.status(403).json({
+    type: 'https://whatsap-automat.internal/errors/ADMIN_REQUIRED',
+    title: 'Administrator Role Required',
+    status: 403,
+  });
+  return null;
+}
+
+function extensionNotFound(res: Response, id?: string) {
+  return res.status(404).json({
+    type: 'https://whatsap-automat.internal/errors/EXTENSION_NOT_FOUND',
+    title: 'Extension Not Found',
+    status: 404,
+    ...(id && { detail: `No extension found with id "${id}"` }),
+  });
+}
+
+const publicationPageSchema = marketplaceSearchQuerySchema.pick({ limit: true, offset: true });
+
 function readArchive(value: unknown): Buffer | undefined {
   if (value === undefined || value === null || value === '') return undefined;
   if (typeof value !== 'string') throw new MarketplaceError(400, 'tarballBase64 must be a base64 string.');
@@ -58,14 +80,7 @@ export function createMarketplaceRoutes(registry?: MarketplaceRegistry): Router 
   router.get('/extensions/:id', async (req: Request, res: Response) => {
     const extId = String(req.params.id);
     const listing = await service.getExtension(extId);
-    if (!listing) {
-      return res.status(404).json({
-        type: 'https://whatsap-automat.internal/errors/EXTENSION_NOT_FOUND',
-        title: 'Extension Not Found',
-        status: 404,
-        detail: `No extension found with id "${extId}"`,
-      });
-    }
+    if (!listing) return extensionNotFound(res, extId);
     return res.json({
       success: true,
       data: listing,
@@ -74,15 +89,8 @@ export function createMarketplaceRoutes(registry?: MarketplaceRegistry): Router 
 
   // POST /api/v1/marketplace/extensions - Register / publish extension
   router.post('/extensions', ...authenticatedTenant, async (req: Request, res: Response) => {
-    const actor = resolveActor(req, res);
+    const actor = resolveAdmin(req, res);
     if (!actor) return;
-    if (actor.role !== 'ADMIN') {
-      return res.status(403).json({
-        type: 'https://whatsap-automat.internal/errors/ADMIN_REQUIRED',
-        title: 'Administrator Role Required',
-        status: 403,
-      });
-    }
     try {
       const {
         manifest,
@@ -122,6 +130,32 @@ export function createMarketplaceRoutes(registry?: MarketplaceRegistry): Router 
         errors: err.errors || [err.message],
       });
     }
+  });
+
+  router.get('/publications', ...authenticatedTenant, async (req: Request, res: Response) => {
+    const actor = resolveAdmin(req, res);
+    if (!actor) return;
+    const parsed = publicationPageSchema.safeParse(req.query);
+    if (!parsed.success) {
+      return res.status(400).json({
+        type: 'https://whatsap-automat.internal/errors/INVALID_QUERY',
+        title: 'Invalid Marketplace Query',
+        status: 400,
+      });
+    }
+    const { limit, offset } = parsed.data;
+    const { items, hasMore } = await service.listPublications(actor.tenantId, limit, offset);
+    res.set('Cache-Control', 'private, no-store');
+    return res.json({ success: true, data: items, pagination: { limit, offset, hasMore } });
+  });
+
+  router.post('/extensions/:id/withdraw', ...authenticatedTenant, async (req: Request, res: Response) => {
+    const actor = resolveAdmin(req, res);
+    if (!actor) return;
+    const publication = await service.withdrawPublication(actor.tenantId, actor.userId, String(req.params.id));
+    if (!publication) return extensionNotFound(res);
+    res.set('Cache-Control', 'private, no-store');
+    return res.json({ success: true, data: publication });
   });
 
   // POST /api/v1/marketplace/extensions/:id/rate - Submit rating

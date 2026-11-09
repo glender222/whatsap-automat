@@ -116,6 +116,74 @@ describe('Marketplace PostgreSQL with FORCE RLS', { skip: !connectionString && '
     assert.equal(foreignWrite.rowCount, 0);
   });
 
+  test('owner withdrawal is durable and idempotent, with private access and reserved identity', async (t) => {
+    const request = await marketplaceHttp(t, new MarketplaceRegistry(db));
+    const admin = accessToken({ userId: 51, companyId: tenantA, rol: 'ADMIN' });
+    const otherAdmin = accessToken({ userId: 52, companyId: tenantB, rol: 'ADMIN' });
+    const operator = accessToken({ userId: 53, companyId: tenantA, rol: 'EMPLEADO' });
+    const extensionId = `${runId}-withdrawn`;
+    const extensionName = `${extensionId}-name`;
+    const published = await request('/extensions', jsonPost({ manifest: manifest(extensionId, extensionName) }, admin));
+    assert.equal(published.status, 201);
+    const listing = (await published.json()).data;
+
+    const path = `/extensions/${encodeURIComponent(listing.id)}`;
+    const withdraw = path + '/withdraw';
+    assert.equal((await request('/publications')).status, 401);
+    assert.equal((await request('/publications', { headers: { authorization: `Bearer ${operator}` } })).status, 403);
+    assert.equal((await request(withdraw, jsonPost({}))).status, 401);
+    assert.equal((await request(withdraw, jsonPost({}, operator))).status, 403);
+    assert.equal((await request(withdraw, jsonPost({}, otherAdmin, { 'x-tenant-id': String(tenantA) }))).status, 404);
+    assert.equal((await request(path + '/rate', jsonPost({ score: 4, review: 'Preserve this review' }, otherAdmin))).status, 200);
+
+    const responses = await Promise.all([
+      request(withdraw, jsonPost({ tenantId: tenantB, userId: 999 }, admin)),
+      request(`/extensions/${extensionId}/withdraw`, jsonPost({}, admin)),
+    ]);
+    assert.deepEqual(responses.map((response) => response.status), [200, 200]);
+    const [first, second] = await Promise.all(responses.map((response) => response.json()));
+    assert.deepEqual(first, second);
+    assert.equal(first.data.state, 'withdrawn');
+    assert.ok(Date.parse(first.data.withdrawnAt));
+    assert.equal(responses[0].headers.get('cache-control'), 'private, no-store');
+
+    const anotherInstance = await marketplaceHttp(t, new MarketplaceRegistry(db));
+    const repeat = await anotherInstance(withdraw, jsonPost({}, admin));
+    assert.equal(repeat.status, 200);
+    assert.deepEqual(await repeat.json(), first);
+    for (const alias of [listing.id, extensionId, extensionName]) {
+      assert.equal((await anotherInstance(`/extensions/${encodeURIComponent(alias)}`)).status, 404);
+    }
+    const publicSearch = await anotherInstance(`/extensions?q=${extensionId}`);
+    assert.equal((await publicSearch.json()).pagination.total, 0);
+    assert.equal((await anotherInstance(path + '/rate', jsonPost({ score: 5 }, otherAdmin))).status, 404);
+
+    const ownership = async (auth: string) => anotherInstance('/publications?limit=100', { headers: { authorization: `Bearer ${auth}` } });
+    const owner = await ownership(admin);
+    assert.equal(owner.status, 200);
+    assert.equal(owner.headers.get('cache-control'), 'private, no-store');
+    assert.deepEqual((await owner.json()).data.find((item: { id: string }) => item.id === listing.id), first.data);
+    assert.ok(!(await (await ownership(otherAdmin)).json()).data.some((item: { id: string }) => item.id === listing.id));
+
+    for (const auth of [admin, otherAdmin]) {
+      const republish = await request('/extensions', jsonPost({
+        manifest: { ...manifest(extensionId, extensionName), version: '1.1.0' },
+      }, auth));
+      assert.equal(republish.status, 409);
+    }
+    const aliasCollision = await request('/extensions', jsonPost({ manifest: manifest(extensionName) }, otherAdmin));
+    assert.equal(aliasCollision.status, 409);
+    const { rows: [record] } = await tenantWork.run(tenantA, (client) => client.query(`
+      SELECT withdrawn_by, listing->>'status' AS status
+      FROM marketplace_extensions WHERE id = $1
+    `, [listing.id]));
+    assert.deepEqual(record, { withdrawn_by: '51', status: 'deprecated' });
+    const { rows: [review] } = await tenantWork.run(tenantB, (client) => client.query(`
+      SELECT score, review FROM marketplace_ratings WHERE listing_id = $1
+    `, [listing.id]));
+    assert.deepEqual(review, { score: 4, review: 'Preserve this review' });
+  });
+
   test('persists rating upserts across API instances and exposes only public aggregates', async (t) => {
     const firstPool = new Pool({ connectionString });
     let firstPoolClosed = false;

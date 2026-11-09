@@ -151,6 +151,14 @@ export class MarketplaceRegistry {
     return this.store.publish(options.publisherTenantId, validated.data);
   }
 
+  listPublications(publisherTenantId: number, limit: number, offset: number) {
+    return this.store.listPublications(publisherTenantId, limit, offset);
+  }
+
+  withdrawPublication(publisherTenantId: number, actorId: number, alias: string) {
+    return this.store.withdrawPublication(publisherTenantId, actorId, alias);
+  }
+
   /**
    * Lists catalog extensions with filtering, searching, and pagination.
    */

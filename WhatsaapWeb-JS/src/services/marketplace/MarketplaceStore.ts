@@ -3,13 +3,27 @@ import { Pool } from 'pg';
 import { ExtensionRating, MarketplaceListing, MarketplaceSearchQuery } from '@whatsap-automat/contracts';
 import { TenantScopedUoW } from '../../db/TenantScopedUoW';
 import { Queryable } from '../../shared/UnitOfWorkPort';
-import { MarketplaceError, SubmitRatingOptions } from './types';
+import { MarketplaceError, MarketplacePublication, SubmitRatingOptions } from './types';
 
 interface ListingRow {
   listing: MarketplaceListing;
   rating_count: string;
   score_total: string;
   updated_at: Date;
+}
+
+interface PublicationRow {
+  listing: MarketplaceListing;
+  withdrawn_at: Date | null;
+}
+
+function publicationDto(row: PublicationRow): MarketplacePublication {
+  const { id, extensionId, displayName, version, type, publishedAt } = row.listing;
+  return {
+    id, extensionId, displayName, version, type, publishedAt,
+    state: row.withdrawn_at ? 'withdrawn' : 'published',
+    withdrawnAt: row.withdrawn_at?.toISOString() ?? null,
+  };
 }
 
 interface RatingRow {
@@ -77,6 +91,7 @@ export class MarketplaceStore {
             SET listing = $4::jsonb || jsonb_build_object('id', id, 'publishedAt', listing->'publishedAt'),
                 updated_at = clock_timestamp()
             WHERE extension_id = $1 AND name = $2 AND publisher_tenant_id = $3
+              AND withdrawn_at IS NULL
             RETURNING id
           `, [listing.extensionId, listing.name, publisherTenantId, listing]);
           listingId = updated.rows[0]?.id;
@@ -91,6 +106,41 @@ export class MarketplaceStore {
       if ((error as { code?: string }).code === '23505') throw conflict;
       throw error;
     }
+  }
+
+  async listPublications(publisherTenantId: number, limit: number, offset: number) {
+    return this.tenantWork.run(publisherTenantId, async (client) => {
+      const { rows } = await client.query<PublicationRow>(`
+        SELECT listing, withdrawn_at
+        FROM marketplace_extensions
+        WHERE publisher_tenant_id = $1 AND (withdrawn_at IS NOT NULL OR listing->>'status' = 'published')
+        ORDER BY published_at DESC, id LIMIT $2 OFFSET $3
+      `, [publisherTenantId, limit + 1, offset]);
+      return { items: rows.slice(0, limit).map(publicationDto), hasMore: rows.length > limit };
+    });
+  }
+
+  async withdrawPublication(publisherTenantId: number, actorId: number, alias: string): Promise<MarketplacePublication | null> {
+    return this.tenantWork.run(publisherTenantId, async (client) => {
+      const { rows: [current] } = await client.query<PublicationRow>(`
+        SELECT extension.listing, extension.withdrawn_at
+        FROM marketplace_extension_aliases AS aliases
+        JOIN marketplace_extensions AS extension ON extension.id = aliases.listing_id
+        WHERE aliases.alias = $1 AND extension.publisher_tenant_id = $2
+          AND (extension.withdrawn_at IS NOT NULL OR extension.listing->>'status' = 'published')
+        FOR UPDATE OF extension
+      `, [alias, publisherTenantId]);
+      if (!current) return null;
+      if (current.withdrawn_at) return publicationDto(current);
+      const { rows: [updated] } = await client.query<PublicationRow>(`
+        UPDATE marketplace_extensions
+        SET listing = jsonb_set(listing, '{status}', '"deprecated"'),
+            withdrawn_at = clock_timestamp(), withdrawn_by = $3, updated_at = clock_timestamp()
+        WHERE id = $1 AND publisher_tenant_id = $2
+        RETURNING listing, withdrawn_at
+      `, [current.listing.id, publisherTenantId, actorId]);
+      return publicationDto(updated);
+    });
   }
 
   async listExtensions(query: MarketplaceSearchQuery): Promise<{ items: MarketplaceListing[]; total: number }> {
@@ -153,7 +203,7 @@ export class MarketplaceStore {
       if (!review) throw new MarketplaceError(404, 'Marketplace extension not found.');
 
       const listing = await this.getExtension(review.listing_id, client);
-      if (!listing) throw new Error('The rated marketplace listing could not be read.');
+      if (!listing) throw new MarketplaceError(404, 'Marketplace extension not found.');
       return { listing, rating: reviewDto(review, listing.extensionId) };
     });
   }
