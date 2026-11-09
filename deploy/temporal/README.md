@@ -14,6 +14,8 @@ temporal operator namespace describe --address 127.0.0.1:7233 --namespace defaul
 
 La UI abre en `http://127.0.0.1:8233`. Las imágenes de Temporal están fijadas a sus versiones y sumas de imagen. El servicio de esquema descarga el código fuente de esa versión y comprueba su SHA-256 antes de aplicar las migraciones de PostgreSQL. Para actualizar un volumen existente, detén el entorno anterior y respalda ambas bases antes del arranque. [Ejemplo oficial de Temporal con PostgreSQL](https://github.com/temporalio/samples-server/blob/main/compose/docker-compose-postgres.yml)
 
+El archivo `compose.demo.yaml` de la raíz reutiliza estos servicios y conserva el volumen de la demo. El perfil `worker` añade el ejemplo de Temporal y arranca cuando el namespace está listo. Esa entrada requiere Docker Compose 2.20 o posterior. [Inclusión de archivos Compose](https://docs.docker.com/reference/compose-file/include/)
+
 ---
 
 ## 1. Arquitectura de Despliegue

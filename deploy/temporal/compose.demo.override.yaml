@@ -1,0 +1,7 @@
+volumes:
+  temporal-postgres-data:
+    name: demo-temporal-postgres-data
+
+networks:
+  default:
+    name: demo-temporal-network

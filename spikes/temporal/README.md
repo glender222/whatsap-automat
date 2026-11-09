@@ -38,7 +38,7 @@ El stack base de **Temporal OSS + PostgreSQL dedicado ocupa únicamente ~212 MiB
 
 ### 3.1 Prerrequisitos
 - Node.js >= 20 (recomendado v22+)
-- Docker & Docker Compose v2+
+- Docker y Docker Compose 2.20 o posterior
 
 ### 3.2 Levantar el Stack de Demostración Temporal OSS
 Desde la raíz del repositorio:
@@ -46,16 +46,18 @@ Desde la raíz del repositorio:
 # Levantar PostgreSQL segregado, Servidor Temporal y Web UI
 docker compose -f compose.demo.yaml up -d
 
-# Verificar estado y health checks
-docker compose -f compose.demo.yaml ps
+# Verificar el servidor y los servicios de inicialización
+docker compose -f compose.demo.yaml ps -a
 
 # Comprobar salud del cluster gRPC
-docker exec demo-temporal-admin-tools temporal operator cluster health
+temporal operator cluster health --address 127.0.0.1:7233
 # Salida esperada: SERVING
 
 # Acceder a la Web UI en el navegador:
 # http://localhost:8233
 ```
+
+El perfil `worker` añade el worker de demostración y espera a que exista el namespace. Si personalizas el namespace o las credenciales, usa `--env-file deploy/temporal/.env` en los comandos de Compose. La demo conserva su volumen `demo-temporal-postgres-data`. [Configuración de Temporal](../../deploy/temporal/README.md)
 
 ### 3.3 Ejecución de Pruebas Automatizadas del Spike
 Desde la subcarpeta `spikes/temporal`:
@@ -105,8 +107,8 @@ npm run start:client timer
 
 ### 3.6 Desmantelamiento (Teardown)
 ```bash
-# Detener contenedores y eliminar volúmenes efímeros
-docker compose -f compose.demo.yaml down -v
+# Detener la demo y conservar los datos de PostgreSQL
+docker compose -f compose.demo.yaml down
 ```
 
 ---

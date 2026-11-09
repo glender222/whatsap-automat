@@ -1,120 +1,21 @@
-# Compose de demostración para Whatsap-Automat — PR-07 (Temporal OSS Stack)
-# Ejecuta PostgreSQL segregado para Temporal, Temporal Server con auto-setup,
-# Temporal Web UI y opcionalmente el worker de demostración.
-#
-# Cumple con OSS-01: Clone + compose demo reproducible sin dependencias externas obligatorias.
-#
-# Comandos de uso:
-#   docker compose -f compose.demo.yaml up -d
-#   docker compose -f compose.demo.yaml --profile worker up -d
-#   docker compose -f compose.demo.yaml ps
-#   docker compose -f compose.demo.yaml down -v
+# Demo de Temporal OSS y worker opcional. Requiere Docker Compose 2.20 o posterior.
+include:
+  - path:
+      - ./deploy/temporal/docker-compose.yml
+      - ./deploy/temporal/compose.demo.override.yaml
 
 services:
-  temporal-postgresql:
-    image: postgres:16-alpine
-    container_name: demo-temporal-postgresql
-    environment:
-      POSTGRES_USER: ${TEMPORAL_POSTGRES_USER:-temporal}
-      POSTGRES_PASSWORD: ${TEMPORAL_POSTGRES_PASSWORD:-temporal}
-      POSTGRES_DB: ${TEMPORAL_POSTGRES_DB:-temporal}
-    ports:
-      - "${TEMPORAL_DB_PORT:-5435}:5432"
-    volumes:
-      - demo-temporal-postgres-data:/var/lib/postgresql/data
-      - ./deploy/temporal/init-temporal-db.sh:/docker-entrypoint-initdb.d/init-temporal-db.sh:ro
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${TEMPORAL_POSTGRES_USER:-temporal} -d ${TEMPORAL_POSTGRES_DB:-temporal}"]
-      interval: 3s
-      timeout: 5s
-      retries: 10
-    networks:
-      - demo-temporal-net
-
-  temporal:
-    image: temporalio/auto-setup:latest
-    container_name: demo-temporal-server
-    depends_on:
-      temporal-postgresql:
-        condition: service_healthy
-    environment:
-      DB: postgres12
-      DB_PORT: 5432
-      POSTGRES_USER: ${TEMPORAL_POSTGRES_USER:-temporal}
-      POSTGRES_PWD: ${TEMPORAL_POSTGRES_PASSWORD:-temporal}
-      POSTGRES_SEEDS: temporal-postgresql
-      BIND_ON_IP: 0.0.0.0
-      TEMPORAL_CLI_ADDRESS: temporal:7233
-      DEFAULT_NAMESPACE: ${TEMPORAL_NAMESPACE:-default}
-      DEFAULT_NAMESPACE_RETENTION: 3d
-    ports:
-      - "${TEMPORAL_PORT:-7233}:7233"
-    healthcheck:
-      test: ["CMD", "temporal", "operator", "cluster", "health", "--address", "127.0.0.1:7233"]
-      interval: 5s
-      timeout: 5s
-      retries: 25
-      start_period: 15s
-    networks:
-      - demo-temporal-net
-
-  temporal-ui:
-    image: temporalio/ui:latest
-    container_name: demo-temporal-ui
-    depends_on:
-      temporal:
-        condition: service_healthy
-    environment:
-      TEMPORAL_ADDRESS: temporal:7233
-      TEMPORAL_CORS_ORIGINS: http://localhost:3000,http://localhost:5173
-    ports:
-      - "${TEMPORAL_UI_PORT:-8233}:8080"
-    healthcheck:
-      test: ["CMD-SHELL", "nc -z 127.0.0.1 8080 || exit 1"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-      start_period: 10s
-    networks:
-      - demo-temporal-net
-
-  temporal-admin-tools:
-    image: temporalio/admin-tools:latest
-    container_name: demo-temporal-admin-tools
-    depends_on:
-      temporal:
-        condition: service_healthy
-    environment:
-      TEMPORAL_ADDRESS: temporal:7233
-      TEMPORAL_CLI_ADDRESS: temporal:7233
-    stdin_open: true
-    tty: true
-    networks:
-      - demo-temporal-net
-
   temporal-spike-worker:
     build:
       context: ./spikes/temporal
       dockerfile: Dockerfile
-    container_name: demo-temporal-spike-worker
     profiles:
       - worker
       - full
     depends_on:
-      temporal:
-        condition: service_healthy
+      temporal-namespace:
+        condition: service_completed_successfully
     environment:
       TEMPORAL_ADDRESS: temporal:7233
       TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-default}
       TEMPORAL_TASK_QUEUE: ${TEMPORAL_TASK_QUEUE:-spike-task-queue}
-    networks:
-      - demo-temporal-net
-
-volumes:
-  demo-temporal-postgres-data:
-    name: demo-temporal-postgres-data
-
-networks:
-  demo-temporal-net:
-    name: demo-temporal-network
-    driver: bridge
