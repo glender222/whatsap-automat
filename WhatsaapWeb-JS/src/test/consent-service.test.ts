@@ -13,7 +13,7 @@ describe('PR-F6-03: ConsentService & GDPR Right to be Forgotten Verification', (
 
   beforeEach(() => {
     ragService = createMemoryKnowledgeBaseService();
-    consentService = new ConsentService(undefined as any, ragService);
+    consentService = new ConsentService(null, ragService);
   });
 
   describe('Suite 1: Opt-In & Suppression Lifecycle', () => {

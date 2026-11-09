@@ -18,8 +18,8 @@ describe('PR-F6-04: CampaignDispatcher Pacing, Window Checks & Circuit Breaker',
   beforeEach(() => {
     sentCommands = [];
     emittedEvents = [];
-    consentService = new ConsentService(undefined as any);
-    segmentationService = new SegmentationService(undefined as any);
+    consentService = new ConsentService(null);
+    segmentationService = new SegmentationService(null);
 
     mockAdapter = {
       kind: 'whatsapp-cloud',
@@ -48,7 +48,7 @@ describe('PR-F6-04: CampaignDispatcher Pacing, Window Checks & Circuit Breaker',
   describe('Suite 1: Campaign Creation & Paced Dispatch', () => {
     it('creates campaign with rate limit and failure pause threshold', async () => {
       const dispatcher = new CampaignDispatcher(
-        undefined as any,
+        null,
         consentService,
         segmentationService,
         { skipPacingDelay: true }
@@ -72,7 +72,7 @@ describe('PR-F6-04: CampaignDispatcher Pacing, Window Checks & Circuit Breaker',
 
     it('dispatches campaign and generates auditable deliveries', async () => {
       const dispatcher = new CampaignDispatcher(
-        undefined as any,
+        null,
         consentService,
         segmentationService,
         {
@@ -126,7 +126,7 @@ describe('PR-F6-04: CampaignDispatcher Pacing, Window Checks & Circuit Breaker',
   describe('Suite 2: Pre-Dispatch Consent Integration', () => {
     it('suppresses recipients without opt-in and marks delivery as suppressed', async () => {
       const dispatcher = new CampaignDispatcher(
-        undefined as any,
+        null,
         consentService,
         segmentationService,
         {
@@ -188,7 +188,7 @@ describe('PR-F6-04: CampaignDispatcher Pacing, Window Checks & Circuit Breaker',
       const expiredDestination = '+573009999999';
 
       const dispatcher = new CampaignDispatcher(
-        undefined as any,
+        null,
         consentService,
         segmentationService,
         {
@@ -233,7 +233,7 @@ describe('PR-F6-04: CampaignDispatcher Pacing, Window Checks & Circuit Breaker',
       const expiredDestination = '+573009999999';
 
       const dispatcher = new CampaignDispatcher(
-        undefined as any,
+        null,
         consentService,
         segmentationService,
         {
@@ -305,7 +305,7 @@ describe('PR-F6-04: CampaignDispatcher Pacing, Window Checks & Circuit Breaker',
       };
 
       const dispatcher = new CampaignDispatcher(
-        undefined as any,
+        null,
         consentService,
         segmentationService,
         {

@@ -8,11 +8,12 @@ import {
   RecordConsentInputV1,
   ConsentVerificationResultV1,
   RightToBeForgottenResultV1,
-  consentRecordV1Schema,
   recordConsentInputV1Schema,
+  consentPurposeSchema,
 } from '@whatsap-automat/contracts';
 import { TenantScopedUoW, tenantScopedUoW } from '../../db/TenantScopedUoW';
 import { KnowledgeBaseService, knowledgeBaseService } from '../ai/rag/KnowledgeBaseService';
+import { CampaignRequestError } from './CampaignRequestError';
 
 export interface ConsentRecordFilter {
   channelType?: ChannelKind;
@@ -23,12 +24,12 @@ export interface ConsentRecordFilter {
 }
 
 export class ConsentService {
-  // In-memory fallback ledger for test environments and non-db synthetic runs
+  // Isolated store used only when tests explicitly pass a null Unit of Work.
   private memoryLedger = new Map<string, ConsentRecordV1>();
 
   constructor(
-    private readonly uow: TenantScopedUoW = tenantScopedUoW,
-    private readonly ragService: KnowledgeBaseService = knowledgeBaseService
+    private readonly uow: TenantScopedUoW | null = tenantScopedUoW,
+    private readonly ragService: Pick<KnowledgeBaseService, 'purgeKnowledge'> = knowledgeBaseService
   ) {}
 
   private memoryKey(tenantId: number | string, channel: string, destination: string, purpose: string): string {
@@ -45,66 +46,13 @@ export class ConsentService {
     const input = recordConsentInputV1Schema.parse(rawInput);
     const id = `cst_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
     const now = new Date().toISOString();
-    const destination = input.destination.trim();
+    const destination = input.destination.trim().toLowerCase();
+    if (!destination) throw new CampaignRequestError(400, 'INVALID_DESTINATION', 'El destinatario es obligatorio.');
     const revokedAt = (input.status === 'opted_out' || input.status === 'revoked' || input.status === 'suppressed')
       ? now
       : null;
 
-    try {
-      return await this.uow.run(tenantId, async (client) => {
-        const sql = `
-          INSERT INTO consent_records (
-            id, tenant_id, contact_id, channel_type, destination, purpose,
-            status, evidence_type, evidence_proof, opted_in_at, revoked_at,
-            created_at, updated_at
-          ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, NOW(), NOW()
-          )
-          ON CONFLICT (tenant_id, channel_type, destination, purpose)
-          DO UPDATE SET
-            contact_id = COALESCE(EXCLUDED.contact_id, consent_records.contact_id),
-            status = EXCLUDED.status,
-            evidence_type = EXCLUDED.evidence_type,
-            evidence_proof = EXCLUDED.evidence_proof,
-            revoked_at = EXCLUDED.revoked_at,
-            updated_at = NOW()
-          RETURNING *;
-        `;
-        const res = await client.query(sql, [
-          id,
-          tenantId,
-          input.contactId || null,
-          input.channelType,
-          destination,
-          input.purpose,
-          input.status,
-          input.evidenceType,
-          JSON.stringify(input.evidenceProof || {}),
-          now,
-          revokedAt,
-        ]);
-        const row = res.rows[0];
-        const record: ConsentRecordV1 = {
-          id: row.id,
-          tenantId: Number(row.tenant_id),
-          contactId: row.contact_id ? Number(row.contact_id) : null,
-          channelType: row.channel_type as ChannelKind,
-          destination: row.destination,
-          purpose: row.purpose as ConsentPurpose,
-          status: row.status as ConsentStatus,
-          evidenceType: row.evidence_type as ConsentEvidenceType,
-          evidenceProof: typeof row.evidence_proof === 'string' ? JSON.parse(row.evidence_proof) : row.evidence_proof,
-          optedInAt: new Date(row.opted_in_at).toISOString(),
-          revokedAt: row.revoked_at ? new Date(row.revoked_at).toISOString() : null,
-          createdAt: new Date(row.created_at).toISOString(),
-          updatedAt: new Date(row.updated_at).toISOString(),
-        };
-
-        this.memoryLedger.set(this.memoryKey(tenantId, record.channelType, record.destination, record.purpose), record);
-        return record;
-      });
-    } catch {
-      // Memory fallback for mock/synthetic tests without live Postgres
+    if (!this.uow) {
       const record: ConsentRecordV1 = {
         id,
         tenantId,
@@ -123,6 +71,63 @@ export class ConsentService {
       this.memoryLedger.set(this.memoryKey(tenantId, record.channelType, record.destination, record.purpose), record);
       return record;
     }
+
+    return await this.uow.run(tenantId, async (client) => {
+      if (input.contactId) {
+        const contact = await client.query('SELECT id FROM contacts WHERE company_id = $1 AND id = $2', [tenantId, input.contactId]);
+        if (!contact.rows.length) throw new CampaignRequestError(404, 'CONTACT_NOT_FOUND', 'Contacto no encontrado.');
+      }
+      const sql = `
+        INSERT INTO consent_records (
+          id, tenant_id, contact_id, channel_type, destination, purpose,
+          status, evidence_type, evidence_proof, opted_in_at, revoked_at,
+          created_at, updated_at
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, NOW(), NOW()
+        )
+        ON CONFLICT (tenant_id, channel_type, destination, purpose)
+        DO UPDATE SET
+          contact_id = COALESCE(EXCLUDED.contact_id, consent_records.contact_id),
+          status = EXCLUDED.status,
+          evidence_type = EXCLUDED.evidence_type,
+          evidence_proof = EXCLUDED.evidence_proof,
+          opted_in_at = CASE WHEN EXCLUDED.status = 'opted_in' THEN EXCLUDED.opted_in_at ELSE consent_records.opted_in_at END,
+          revoked_at = EXCLUDED.revoked_at,
+          updated_at = NOW()
+        RETURNING *;
+      `;
+      const res = await client.query(sql, [
+        id,
+        tenantId,
+        input.contactId || null,
+        input.channelType,
+        destination,
+        input.purpose,
+        input.status,
+        input.evidenceType,
+        JSON.stringify(input.evidenceProof || {}),
+        now,
+        revokedAt,
+      ]);
+      const row = res.rows[0];
+      const record: ConsentRecordV1 = {
+        id: row.id,
+        tenantId: Number(row.tenant_id),
+        contactId: row.contact_id ? Number(row.contact_id) : null,
+        channelType: row.channel_type as ChannelKind,
+        destination: row.destination,
+        purpose: row.purpose as ConsentPurpose,
+        status: row.status as ConsentStatus,
+        evidenceType: row.evidence_type as ConsentEvidenceType,
+        evidenceProof: typeof row.evidence_proof === 'string' ? JSON.parse(row.evidence_proof) : row.evidence_proof,
+        optedInAt: new Date(row.opted_in_at).toISOString(),
+        revokedAt: row.revoked_at ? new Date(row.revoked_at).toISOString() : null,
+        createdAt: new Date(row.created_at).toISOString(),
+        updatedAt: new Date(row.updated_at).toISOString(),
+      };
+
+      return record;
+    });
   }
 
   async recordOptIn(
@@ -151,74 +156,31 @@ export class ConsentService {
     purpose: ConsentPurpose = 'marketing'
   ): Promise<ConsentVerificationResultV1> {
     const normDest = destination.trim().toLowerCase();
+    if (!normDest) throw new CampaignRequestError(400, 'INVALID_DESTINATION', 'El destinatario es obligatorio.');
+    consentPurposeSchema.parse(purpose);
+    const records: Array<{ id: string; status: ConsentStatus }> = this.uow
+      ? await this.uow.run(tenantId, async (client) => {
+          const result = await client.query(
+            `SELECT id, status FROM consent_records
+             WHERE tenant_id = $1 AND channel_type = $2 AND LOWER(destination) = $3
+               AND purpose IN ($4, 'all')
+             ORDER BY CASE WHEN purpose = $4 THEN 0 ELSE 1 END, updated_at DESC`,
+            [tenantId, channel, normDest, purpose]
+          );
+          return result.rows;
+        })
+      : ['all', purpose].map((scope) => this.memoryLedger.get(this.memoryKey(tenantId, channel, normDest, scope)))
+          .filter((record): record is ConsentRecordV1 => Boolean(record));
 
-    // Check memory store
-    const exactKey = this.memoryKey(tenantId, channel, normDest, purpose);
-    const allKey = this.memoryKey(tenantId, channel, normDest, 'all');
-    const exactRecord = this.memoryLedger.get(exactKey);
-    const allRecord = this.memoryLedger.get(allKey);
-    const memRecords = [exactRecord, allRecord].filter((r): r is ConsentRecordV1 => Boolean(r));
-
-    try {
-      const dbRecord = await this.uow.run(tenantId, async (client) => {
-        const sql = `
-          SELECT * FROM consent_records
-          WHERE tenant_id = $1
-            AND channel_type = $2
-            AND LOWER(destination) = $3
-            AND (purpose = $4 OR purpose = 'all')
-          ORDER BY
-            CASE
-              WHEN status IN ('suppressed', 'opted_out') THEN 1
-              WHEN status = 'revoked' THEN 2
-              WHEN status = 'opted_in' AND purpose = $4 THEN 3
-              WHEN status = 'opted_in' AND purpose = 'all' THEN 4
-              ELSE 5
-            END,
-            updated_at DESC
-          LIMIT 1;
-        `;
-        const res = await client.query(sql, [tenantId, channel, normDest, purpose]);
-        return res.rows[0] || null;
-      });
-
-      if (dbRecord) {
-        const status = dbRecord.status as ConsentStatus;
-        if (status === 'suppressed' || status === 'opted_out') {
-          return { permitted: false, status, reason: 'SUPPRESSED', recordId: dbRecord.id };
-        }
-        if (status === 'revoked') {
-          return { permitted: false, status, reason: 'REVOKED', recordId: dbRecord.id };
-        }
-        if (status === 'opted_in') {
-          return { permitted: true, status: 'opted_in', reason: 'CONSENT_GRANTED', recordId: dbRecord.id };
-        }
-      }
-    } catch {
-      // Fall through to memory store evaluation
-    }
-
-    // Evaluate memory store with strict suppression priority:
-    // Any explicit suppression/opt-out across exact purpose or global 'all' overrides opt-ins
-    const memSuppressed = memRecords.find(r => r.status === 'suppressed' || r.status === 'opted_out');
-    if (memSuppressed) {
-      return { permitted: false, status: memSuppressed.status, reason: 'SUPPRESSED', recordId: memSuppressed.id };
-    }
-    const memRevoked = memRecords.find(r => r.status === 'revoked');
-    if (memRevoked) {
-      return { permitted: false, status: memRevoked.status, reason: 'REVOKED', recordId: memRevoked.id };
-    }
-    const memOptedIn = (exactRecord?.status === 'opted_in' ? exactRecord : null) || (allRecord?.status === 'opted_in' ? allRecord : null);
-    if (memOptedIn) {
-      return { permitted: true, status: 'opted_in', reason: 'CONSENT_GRANTED', recordId: memOptedIn.id };
-    }
-
-    // Fail-closed for marketing and broadcast purposes
-    if (purpose === 'marketing' || purpose === 'broadcast') {
+    const suppression = records.find(({ status }) => status === 'suppressed' || status === 'opted_out');
+    if (suppression) return { permitted: false, status: suppression.status, reason: 'SUPPRESSED', recordId: suppression.id };
+    const revocation = records.find(({ status }) => status === 'revoked');
+    if (revocation) return { permitted: false, status: 'revoked', reason: 'REVOKED', recordId: revocation.id };
+    const consent = records.find(({ status }) => status === 'opted_in');
+    if (consent) return { permitted: true, status: 'opted_in', reason: 'CONSENT_GRANTED', recordId: consent.id };
+    if (purpose === 'marketing' || purpose === 'broadcast' || purpose === 'all') {
       return { permitted: false, status: 'not_found', reason: 'NO_OPT_IN_RECORD' };
     }
-
-    // Transactional / support may be permitted if not explicitly opted out
     return { permitted: true, status: 'not_found', reason: 'CONSENT_GRANTED' };
   }
 
@@ -237,51 +199,46 @@ export class ConsentService {
     let anonymizedContact = false;
     const now = new Date().toISOString();
 
-    // 1. Purge RAG knowledge chunks
-    const ragPurge = await this.ragService.purgeKnowledge(tenantId, {
-      scope: 'customer',
-      targetId: customerId,
-      reason: 'GDPR Article 17 Right to be Forgotten',
-    });
-
-    try {
+    const id = /^\d+$/.test(customerId) ? Number(customerId) : null;
+    const contactId = id && id <= 2147483647 ? id : null;
+    if (this.uow) {
       await this.uow.run(tenantId, async (client) => {
         // Revoke consent records by contact_id or destination
         const revokeSql = `
           UPDATE consent_records
           SET status = 'revoked',
               evidence_type = 'right_to_be_forgotten',
-              evidence_proof = jsonb_build_object('customerId', $2, 'requestedAt', NOW()),
+              evidence_proof = jsonb_build_object('customerId', $4::text, 'requestedAt', NOW()),
               revoked_at = NOW(),
               updated_at = NOW()
           WHERE tenant_id = $1
             AND (
-              contact_id = NULLIF($2, '')::integer
+              contact_id = $2::integer
               OR ($3::text IS NOT NULL AND LOWER(destination) = LOWER($3))
             )
           RETURNING id;
         `;
-        const res = await client.query(revokeSql, [tenantId, customerId, destination || null]);
+        const res = await client.query(revokeSql, [tenantId, contactId, destination?.trim() || null, customerId]);
         purgedConsentCount = res.rowCount || 0;
 
         // Anonymize contact using company_id for operational core tenant isolation
         const anonSql = `
           UPDATE contacts
-          SET display_name = 'Anonymized Contact',
+          SET name = 'Anonymized Contact',
+              display_name = 'Anonymized Contact',
               profile_name = 'Anonymized Contact',
               metadata_json = '{}'::jsonb,
               updated_at = NOW()
           WHERE company_id = $1
             AND (
-              id = NULLIF($2, '')::integer
+              id = $2::integer
               OR ($3::text IS NOT NULL AND phone = $3)
             );
         `;
-        const anonRes = await client.query(anonSql, [tenantId, customerId, destination || null]);
+        const anonRes = await client.query(anonSql, [tenantId, contactId, destination?.trim() || null]);
         anonymizedContact = (anonRes.rowCount || 0) > 0;
       });
-    } catch {
-      // Memory fallback
+    } else {
       for (const [key, record] of this.memoryLedger.entries()) {
         const destMatch = destination && record.destination.toLowerCase() === destination.toLowerCase();
         const custMatch = record.contactId && String(record.contactId) === customerId;
@@ -293,7 +250,17 @@ export class ConsentService {
           purgedConsentCount++;
         }
       }
-      anonymizedContact = true;
+      anonymizedContact = purgedConsentCount > 0;
+    }
+
+    // Purge RAG knowledge after committing the consent revocation.
+    const ragPurge = await this.ragService.purgeKnowledge(tenantId, {
+      scope: 'customer',
+      targetId: customerId,
+      reason: 'GDPR Article 17 Right to be Forgotten',
+    });
+    if (!ragPurge.success) {
+      throw new CampaignRequestError(503, 'KNOWLEDGE_PURGE_UNCONFIRMED', 'No se pudo confirmar el borrado de conocimiento.');
     }
 
     return {
@@ -312,53 +279,7 @@ export class ConsentService {
     tenantId: number,
     filter: ConsentRecordFilter = {}
   ): Promise<ConsentRecordV1[]> {
-    try {
-      return await this.uow.run(tenantId, async (client) => {
-        let sql = `SELECT * FROM consent_records WHERE tenant_id = $1`;
-        const params: unknown[] = [tenantId];
-        let idx = 2;
-
-        if (filter.channelType) {
-          sql += ` AND channel_type = $${idx++}`;
-          params.push(filter.channelType);
-        }
-        if (filter.destination) {
-          sql += ` AND LOWER(destination) = LOWER($${idx++})`;
-          params.push(filter.destination);
-        }
-        if (filter.purpose) {
-          sql += ` AND purpose = $${idx++}`;
-          params.push(filter.purpose);
-        }
-        if (filter.status) {
-          sql += ` AND status = $${idx++}`;
-          params.push(filter.status);
-        }
-        if (filter.contactId) {
-          sql += ` AND contact_id = $${idx++}`;
-          params.push(filter.contactId);
-        }
-
-        sql += ` ORDER BY updated_at DESC LIMIT 100;`;
-        const res = await client.query(sql, params);
-        return res.rows.map((row) => ({
-          id: row.id,
-          tenantId: Number(row.tenant_id),
-          contactId: row.contact_id ? Number(row.contact_id) : null,
-          channelType: row.channel_type as ChannelKind,
-          destination: row.destination,
-          purpose: row.purpose as ConsentPurpose,
-          status: row.status as ConsentStatus,
-          evidenceType: row.evidence_type as ConsentEvidenceType,
-          evidenceProof: typeof row.evidence_proof === 'string' ? JSON.parse(row.evidence_proof) : row.evidence_proof,
-          optedInAt: new Date(row.opted_in_at).toISOString(),
-          revokedAt: row.revoked_at ? new Date(row.revoked_at).toISOString() : null,
-          createdAt: new Date(row.created_at).toISOString(),
-          updatedAt: new Date(row.updated_at).toISOString(),
-        }));
-      });
-    } catch {
-      // Memory store fallback
+    if (!this.uow) {
       const results: ConsentRecordV1[] = [];
       for (const record of this.memoryLedger.values()) {
         if (record.tenantId !== tenantId) continue;
@@ -371,6 +292,51 @@ export class ConsentService {
       }
       return results;
     }
+
+    return await this.uow.run(tenantId, async (client) => {
+      let sql = `SELECT * FROM consent_records WHERE tenant_id = $1`;
+      const params: unknown[] = [tenantId];
+      let idx = 2;
+
+      if (filter.channelType) {
+        sql += ` AND channel_type = $${idx++}`;
+        params.push(filter.channelType);
+      }
+      if (filter.destination) {
+        sql += ` AND LOWER(destination) = LOWER($${idx++})`;
+        params.push(filter.destination);
+      }
+      if (filter.purpose) {
+        sql += ` AND purpose = $${idx++}`;
+        params.push(filter.purpose);
+      }
+      if (filter.status) {
+        sql += ` AND status = $${idx++}`;
+        params.push(filter.status);
+      }
+      if (filter.contactId) {
+        sql += ` AND contact_id = $${idx++}`;
+        params.push(filter.contactId);
+      }
+
+      sql += ` ORDER BY updated_at DESC LIMIT 100;`;
+      const res = await client.query(sql, params);
+      return res.rows.map((row) => ({
+        id: row.id,
+        tenantId: Number(row.tenant_id),
+        contactId: row.contact_id ? Number(row.contact_id) : null,
+        channelType: row.channel_type as ChannelKind,
+        destination: row.destination,
+        purpose: row.purpose as ConsentPurpose,
+        status: row.status as ConsentStatus,
+        evidenceType: row.evidence_type as ConsentEvidenceType,
+        evidenceProof: typeof row.evidence_proof === 'string' ? JSON.parse(row.evidence_proof) : row.evidence_proof,
+        optedInAt: new Date(row.opted_in_at).toISOString(),
+        revokedAt: row.revoked_at ? new Date(row.revoked_at).toISOString() : null,
+        createdAt: new Date(row.created_at).toISOString(),
+        updatedAt: new Date(row.updated_at).toISOString(),
+      }));
+    });
   }
 }
 

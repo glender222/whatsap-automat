@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { requireJwt } from '../middleware/jwtAuth';
 import { tenantContext } from '../middleware/tenantContext';
+import { CampaignRequestError } from '../services/campaigns/CampaignRequestError';
 import {
   createCampaignCommandV1Schema,
   recordConsentInputV1Schema,
@@ -8,6 +9,8 @@ import {
   rightToBeForgottenCommandV1Schema,
   ChannelKind,
   ConsentPurpose,
+  channelKindSchema,
+  consentPurposeSchema,
 } from '@whatsap-automat/contracts';
 import {
   CampaignDispatcher,
@@ -23,14 +26,28 @@ import {
 } from '../services/campaigns/SegmentationService';
 
 function resolveTenantId(req: Request): number {
-  const id = req.tenantId ?? req.tenantContext?.tenantId ?? req.whatsappCompanyId ?? req.headers['x-tenant-id'];
-  if (!id || Number(id) <= 0) {
-    const err = new Error('Tenant context is required for campaign operations') as any;
-    err.statusCode = 401;
-    err.code = 'UNAUTHORIZED';
-    throw err;
+  const id = req.tenantId ?? req.tenantContext?.tenantId ?? req.whatsappCompanyId;
+  if (!Number.isSafeInteger(Number(id)) || Number(id) <= 0) {
+    throw new CampaignRequestError(401, 'UNAUTHORIZED', 'La operación requiere una empresa.');
   }
   return Number(id);
+}
+
+function respondError(res: Response, error: unknown) {
+  if (error instanceof CampaignRequestError) {
+    return res.status(error.statusCode).json({ success: false, error: error.code, message: error.message });
+  }
+  if (error instanceof Error && error.name === 'ZodError') {
+    return res.status(400).json({ success: false, error: 'VALIDATION_ERROR', message: 'Revisa los campos enviados.' });
+  }
+  if (typeof error === 'object' && error !== null && 'code' in error && error.code === '23505') {
+    return res.status(409).json({ success: false, error: 'ALREADY_EXISTS', message: 'Ya existe un registro con esos datos.' });
+  }
+  return res.status(503).json({
+    success: false,
+    error: 'CAMPAIGN_SERVICE_UNAVAILABLE',
+    message: 'La operación no pudo confirmarse. Vuelve a consultar antes de reintentar.',
+  });
 }
 
 export interface CampaignRoutesOptions {
@@ -50,12 +67,8 @@ export function createCampaignRoutes(options: CampaignRoutesOptions = {}): Route
       const parsed = createCampaignCommandV1Schema.parse(req.body);
       const campaign = await dispatcher.createCampaign(tenantId, parsed);
       res.status(201).json({ success: true, data: campaign });
-    } catch (err: any) {
-      res.status(err.statusCode || 400).json({
-        success: false,
-        error: err.code || 'VALIDATION_ERROR',
-        message: err.message,
-      });
+    } catch (error) {
+      respondError(res, error);
     }
   });
 
@@ -65,12 +78,8 @@ export function createCampaignRoutes(options: CampaignRoutesOptions = {}): Route
       const tenantId = resolveTenantId(req);
       const campaigns = await dispatcher.listCampaigns(tenantId);
       res.status(200).json({ success: true, data: campaigns });
-    } catch (err: any) {
-      res.status(err.statusCode || 500).json({
-        success: false,
-        error: err.code || 'INTERNAL_ERROR',
-        message: err.message,
-      });
+    } catch (error) {
+      respondError(res, error);
     }
   });
 
@@ -84,12 +93,8 @@ export function createCampaignRoutes(options: CampaignRoutesOptions = {}): Route
         return res.status(404).json({ success: false, error: 'NOT_FOUND', message: 'Campaign not found' });
       }
       res.status(200).json({ success: true, data: campaign });
-    } catch (err: any) {
-      res.status(err.statusCode || 500).json({
-        success: false,
-        error: err.code || 'INTERNAL_ERROR',
-        message: err.message,
-      });
+    } catch (error) {
+      respondError(res, error);
     }
   });
 
@@ -98,14 +103,10 @@ export function createCampaignRoutes(options: CampaignRoutesOptions = {}): Route
     try {
       const tenantId = resolveTenantId(req);
       const campaignId = String(req.params.id);
-      const campaign = await dispatcher.executeCampaign(tenantId, campaignId, req.body.recipients);
+      const campaign = await dispatcher.executeCampaign(tenantId, campaignId, req.body?.recipients);
       res.status(200).json({ success: true, data: campaign });
-    } catch (err: any) {
-      res.status(err.statusCode || 500).json({
-        success: false,
-        error: err.code || 'DISPATCH_ERROR',
-        message: err.message,
-      });
+    } catch (error) {
+      respondError(res, error);
     }
   });
 
@@ -120,12 +121,8 @@ export function createCampaignRoutes(options: CampaignRoutesOptions = {}): Route
       }
       const deliveries = await dispatcher.getDeliveries(campaignId, tenantId);
       res.status(200).json({ success: true, data: deliveries });
-    } catch (err: any) {
-      res.status(err.statusCode || 500).json({
-        success: false,
-        error: err.code || 'INTERNAL_ERROR',
-        message: err.message,
-      });
+    } catch (error) {
+      respondError(res, error);
     }
   });
 
@@ -143,12 +140,8 @@ export function createConsentRoutes(options: CampaignRoutesOptions = {}): Router
       const parsed = recordConsentInputV1Schema.parse(req.body);
       const record = await consent.recordConsent(tenantId, parsed);
       res.status(201).json({ success: true, data: record });
-    } catch (err: any) {
-      res.status(err.statusCode || 400).json({
-        success: false,
-        error: err.code || 'VALIDATION_ERROR',
-        message: err.message,
-      });
+    } catch (error) {
+      respondError(res, error);
     }
   });
 
@@ -162,12 +155,8 @@ export function createConsentRoutes(options: CampaignRoutesOptions = {}): Router
         purpose: req.query.purpose as ConsentPurpose,
       });
       res.status(200).json({ success: true, data: records });
-    } catch (err: any) {
-      res.status(err.statusCode || 500).json({
-        success: false,
-        error: err.code || 'INTERNAL_ERROR',
-        message: err.message,
-      });
+    } catch (error) {
+      respondError(res, error);
     }
   });
 
@@ -175,18 +164,14 @@ export function createConsentRoutes(options: CampaignRoutesOptions = {}): Router
   router.post('/verify', requireJwt, tenantContext(), async (req: Request, res: Response) => {
     try {
       const tenantId = resolveTenantId(req);
-      const { channel, destination, purpose } = req.body;
-      if (!channel || !destination) {
+      const { channel, destination, purpose = 'marketing' } = req.body ?? {};
+      if (!channel || typeof destination !== 'string' || !destination.trim()) {
         return res.status(400).json({ success: false, error: 'BAD_REQUEST', message: 'channel and destination are required' });
       }
-      const result = await consent.verifyConsent(tenantId, channel, destination, purpose || 'marketing');
+      const result = await consent.verifyConsent(tenantId, channelKindSchema.parse(channel), destination, consentPurposeSchema.parse(purpose));
       res.status(200).json({ success: true, data: result });
-    } catch (err: any) {
-      res.status(err.statusCode || 500).json({
-        success: false,
-        error: err.code || 'INTERNAL_ERROR',
-        message: err.message,
-      });
+    } catch (error) {
+      respondError(res, error);
     }
   });
 
@@ -197,12 +182,8 @@ export function createConsentRoutes(options: CampaignRoutesOptions = {}): Router
       const parsed = rightToBeForgottenCommandV1Schema.parse(req.body);
       const result = await consent.executeRightToBeForgotten(tenantId, parsed.customerId, parsed.destination);
       res.status(200).json({ success: true, data: result });
-    } catch (err: any) {
-      res.status(err.statusCode || 400).json({
-        success: false,
-        error: err.code || 'RTBF_ERROR',
-        message: err.message,
-      });
+    } catch (error) {
+      respondError(res, error);
     }
   });
 
@@ -220,12 +201,8 @@ export function createSegmentRoutes(options: CampaignRoutesOptions = {}): Router
       const parsed = createSegmentCommandV1Schema.parse(req.body);
       const segment = await segments.createSegment(tenantId, parsed);
       res.status(201).json({ success: true, data: segment });
-    } catch (err: any) {
-      res.status(err.statusCode || 400).json({
-        success: false,
-        error: err.code || 'VALIDATION_ERROR',
-        message: err.message,
-      });
+    } catch (error) {
+      respondError(res, error);
     }
   });
 
@@ -235,12 +212,8 @@ export function createSegmentRoutes(options: CampaignRoutesOptions = {}): Router
       const tenantId = resolveTenantId(req);
       const list = await segments.listSegments(tenantId);
       res.status(200).json({ success: true, data: list });
-    } catch (err: any) {
-      res.status(err.statusCode || 500).json({
-        success: false,
-        error: err.code || 'INTERNAL_ERROR',
-        message: err.message,
-      });
+    } catch (error) {
+      respondError(res, error);
     }
   });
 
@@ -254,12 +227,8 @@ export function createSegmentRoutes(options: CampaignRoutesOptions = {}): Router
         return res.status(404).json({ success: false, error: 'NOT_FOUND', message: 'Segment not found' });
       }
       res.status(200).json({ success: true, data: segment });
-    } catch (err: any) {
-      res.status(err.statusCode || 500).json({
-        success: false,
-        error: err.code || 'INTERNAL_ERROR',
-        message: err.message,
-      });
+    } catch (error) {
+      respondError(res, error);
     }
   });
 
@@ -270,12 +239,8 @@ export function createSegmentRoutes(options: CampaignRoutesOptions = {}): Router
       const segmentId = String(req.params.id);
       const count = await segments.evaluateSegmentCount(tenantId, segmentId);
       res.status(200).json({ success: true, data: { segmentId, count } });
-    } catch (err: any) {
-      res.status(err.statusCode || 500).json({
-        success: false,
-        error: err.code || 'INTERNAL_ERROR',
-        message: err.message,
-      });
+    } catch (error) {
+      respondError(res, error);
     }
   });
 
@@ -284,16 +249,15 @@ export function createSegmentRoutes(options: CampaignRoutesOptions = {}): Router
     try {
       const tenantId = resolveTenantId(req);
       const segmentId = String(req.params.id);
-      const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 100;
-      const offset = req.query.offset ? parseInt(req.query.offset as string, 10) : 0;
+      const limit = Number(req.query.limit ?? 100);
+      const offset = Number(req.query.offset ?? 0);
+      if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500 || !Number.isSafeInteger(offset) || offset < 0) {
+        throw new CampaignRequestError(400, 'INVALID_PAGINATION', 'La paginación solicitada no es válida.');
+      }
       const recipients = await segments.resolveRecipients(tenantId, segmentId, limit, offset);
       res.status(200).json({ success: true, data: recipients });
-    } catch (err: any) {
-      res.status(err.statusCode || 500).json({
-        success: false,
-        error: err.code || 'INTERNAL_ERROR',
-        message: err.message,
-      });
+    } catch (error) {
+      respondError(res, error);
     }
   });
 

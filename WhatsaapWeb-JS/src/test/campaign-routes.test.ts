@@ -7,6 +7,7 @@ import {
   createConsentRoutes,
   createSegmentRoutes,
 } from '../routes/campaigns.routes';
+import { EmailAdapter } from '../services/channels/EmailAdapter';
 import { CampaignDispatcher } from '../services/campaigns/CampaignDispatcher';
 import { ConsentService } from '../services/campaigns/ConsentService';
 import { SegmentationService } from '../services/campaigns/SegmentationService';
@@ -82,13 +83,27 @@ describe('PR-F6-06: Campaigns, Consent & Segments REST Endpoints Verification', 
 
   beforeEach(() => {
     validToken = createTenantAToken(tenantId);
-    consentService = new ConsentService(undefined as any);
-    segmentationService = new SegmentationService(undefined as any);
+    consentService = new ConsentService(null, {
+      purgeKnowledge: async (_tenantId, request) => ({
+        success: true,
+        scope: request.scope,
+        targetId: request.targetId,
+        purgedChunksCount: 0,
+        purgedCollectionsCount: 0,
+        purgedAt: new Date().toISOString(),
+      }),
+    });
+    segmentationService = new SegmentationService(null);
     campaignDispatcher = new CampaignDispatcher(
-      undefined as any,
+      null,
       consentService,
       segmentationService,
-      { skipPacingDelay: true }
+      {
+        skipPacingDelay: true,
+        channelAdapters: new Map([['email', new EmailAdapter({
+          customSmtpSender: async () => ({ providerMessageId: 'smtp-fixture', rawResponse: '250 fixture' }),
+        })]]),
+      }
     );
   });
 
@@ -208,7 +223,7 @@ describe('PR-F6-06: Campaigns, Consent & Segments REST Endpoints Verification', 
 
       assert.equal(rtbfRes.status, 200);
       assert.equal(rtbfRes.body.data.success, true);
-      assert.equal(rtbfRes.body.data.anonymizedContact, true);
+      assert.equal(rtbfRes.body.data.anonymizedContact, false);
     });
   });
 

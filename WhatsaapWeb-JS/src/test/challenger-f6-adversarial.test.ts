@@ -12,7 +12,7 @@ describe('CHALLENGER-F6: Adversarial Stress Test & Edge Cases', () => {
 
   describe('Challenge 1: Consent Hierarchy Suppression (Global Opt-Out vs Specific Opt-In)', () => {
     it('EMPIRICAL TEST: global opt-out (purpose=all) MUST suppress marketing messages even if older marketing opt-in exists', async () => {
-      const consentService = new ConsentService(undefined as any);
+      const consentService = new ConsentService(null);
       const tenantId = 501;
       const phone = '+573001234567';
 
@@ -63,9 +63,9 @@ describe('CHALLENGER-F6: Adversarial Stress Test & Edge Cases', () => {
       };
 
       const dispatcher = new CampaignDispatcher(
-        undefined as any,
-        new ConsentService(undefined as any),
-        new SegmentationService(undefined as any),
+        null,
+        new ConsentService(null),
+        new SegmentationService(null),
         { skipPacingDelay: true, channelAdapters: new Map([['email', mockAdapter]]) }
       );
 
@@ -73,7 +73,7 @@ describe('CHALLENGER-F6: Adversarial Stress Test & Edge Cases', () => {
       const tenant2 = 2002;
 
       // Tenant 1 creates and dispatches campaign with confidential customer recipient
-      const consent1 = new ConsentService(undefined as any);
+      const consent1 = new ConsentService(null);
       await consent1.recordOptIn(tenant1, {
         channelType: 'email',
         destination: 'confidential-customer@tenant1.com',
@@ -144,7 +144,7 @@ describe('CHALLENGER-F6: Adversarial Stress Test & Edge Cases', () => {
         health: async () => ({ configured: true, authorized: true, lastErrorCode: null, lastCheckedAt: new Date().toISOString() }),
       };
 
-      const consentService = new ConsentService(undefined as any);
+      const consentService = new ConsentService(null);
       const tenantId = 777;
 
       for (let i = 1; i <= 5; i++) {
@@ -157,9 +157,9 @@ describe('CHALLENGER-F6: Adversarial Stress Test & Edge Cases', () => {
       }
 
       const dispatcher = new CampaignDispatcher(
-        undefined as any,
+        null,
         consentService,
-        new SegmentationService(undefined as any),
+        new SegmentationService(null),
         { skipPacingDelay: true, channelAdapters: new Map([['whatsapp-cloud', failingAdapter]]) }
       );
 
@@ -211,7 +211,7 @@ describe('CHALLENGER-F6: Adversarial Stress Test & Edge Cases', () => {
         health: async () => ({ configured: true, authorized: true, lastErrorCode: null, lastCheckedAt: new Date().toISOString() }),
       };
 
-      const consentService = new ConsentService(undefined as any);
+      const consentService = new ConsentService(null);
       const tenantId = 888;
 
       const recipients: RecipientRecord[] = [];
@@ -227,9 +227,9 @@ describe('CHALLENGER-F6: Adversarial Stress Test & Edge Cases', () => {
       }
 
       const dispatcher = new CampaignDispatcher(
-        undefined as any,
+        null,
         consentService,
-        new SegmentationService(undefined as any),
+        new SegmentationService(null),
         { skipPacingDelay: true, channelAdapters: new Map([['whatsapp-cloud', flakyAdapter]]) }
       );
 
@@ -263,7 +263,7 @@ describe('CHALLENGER-F6: Adversarial Stress Test & Edge Cases', () => {
       // "SELECT c.id, c.phone, c.display_name, c.metadata_json FROM contacts c WHERE c.tenant_id = $1"
       // 1. Column name is c.tenant_id (which does not exist in contacts table - column is company_id)
       // 2. No criteria from segment.criteria is included in SQL query!
-      const segService = new SegmentationService(undefined as any);
+      const segService = new SegmentationService(null);
       // In memory fallback:
       segService.seedMemoryContact({
         id: 1,
@@ -313,7 +313,7 @@ describe('CHALLENGER-F6: Adversarial Stress Test & Edge Cases', () => {
         health: async () => ({ configured: true, authorized: true, lastErrorCode: null, lastCheckedAt: new Date().toISOString() }),
       };
 
-      const consentService = new ConsentService(undefined as any);
+      const consentService = new ConsentService(null);
       const tenantId = 919;
       // 5 recipients at 600 msgs/min -> 100ms delay between sends
       const recipients: RecipientRecord[] = [];
@@ -329,9 +329,9 @@ describe('CHALLENGER-F6: Adversarial Stress Test & Edge Cases', () => {
       }
 
       const dispatcher = new CampaignDispatcher(
-        undefined as any,
+        null,
         consentService,
-        new SegmentationService(undefined as any),
+        new SegmentationService(null),
         { channelAdapters: new Map([['email', dummyAdapter]]) } // Real pacing delay enabled
       );
 
