@@ -1,4 +1,5 @@
-import { Queryable } from '../../../../shared/UnitOfWorkPort';
+import type { Pool } from 'pg';
+import { queryInTenantScope, withTenantTransaction } from '../../../../db/TenantScopedUoW';
 import {
   ActionCardsStats,
   HeatmapByDateDay,
@@ -13,18 +14,19 @@ import {
 type Row = Record<string, any>;
 
 export class DashboardRepositoryPg {
-  constructor(private readonly pool: Queryable) {}
+  constructor(private readonly pool: Pool) {}
 
   async getCompanyTimezone(companyId: number): Promise<string> {
-    const result = await this.pool.query(
-      `SELECT timezone FROM company_settings WHERE company_id = $1`,
+    const result = await queryInTenantScope(this.pool, companyId,
+      `SELECT s.timezone FROM company_settings s
+       WHERE s.company_id = $1 AND EXISTS (SELECT 1 FROM pg_timezone_names WHERE name = s.timezone)`,
       [companyId]
     );
     return result.rows[0]?.timezone || 'America/Lima';
   }
 
   async getSlaThreshold(companyId: number): Promise<number> {
-    const result = await this.pool.query(
+    const result = await queryInTenantScope(this.pool, companyId,
       `SELECT sla_threshold_minutes FROM company_settings WHERE company_id = $1`,
       [companyId]
     );
@@ -33,155 +35,158 @@ export class DashboardRepositoryPg {
   }
 
   async getQuickStats(companyId: number, timezone: string): Promise<QuickStats> {
-    const [active, orders, response] = await Promise.all([
-      this.pool.query(
-        `SELECT COUNT(*)::int AS count
-         FROM conversations
-         WHERE company_id = $1
-           AND channel = 'whatsapp'
-           AND status = 'open'
-           AND archived_at IS NULL
-           AND last_message_at >= (CURRENT_DATE::timestamp AT TIME ZONE $2)`,
-        [companyId, timezone]
-      ),
-      this.pool.query(
-        `SELECT COUNT(*)::int AS count
-         FROM customer_orders
-         WHERE company_id = $1
-           AND occurred_at >= (CURRENT_DATE::timestamp AT TIME ZONE $2)
-           AND occurred_at < ((CURRENT_DATE + 1)::timestamp AT TIME ZONE $2)`,
-        [companyId, timezone]
-      ),
-      this.pool.query(
-        `WITH inbound AS (
-           SELECT m.conversation_id, m.occurred_at
-           FROM messages m
-           JOIN conversations c ON c.id = m.conversation_id
-           WHERE m.company_id = $1
-             AND c.channel = 'whatsapp'
-             AND m.direction = 'inbound'
-             AND m.occurred_at >= (CURRENT_DATE::timestamp AT TIME ZONE $2)
-             AND m.occurred_at < ((CURRENT_DATE + 1)::timestamp AT TIME ZONE $2)
-         )
-         SELECT COALESCE(
-           ROUND(AVG(EXTRACT(EPOCH FROM (response.occurred_at - inbound.occurred_at)) / 60)::numeric, 2),
-           0
-         ) AS minutes
-         FROM inbound
-         JOIN LATERAL (
-           SELECT m2.occurred_at
-           FROM messages m2
-           WHERE m2.conversation_id = inbound.conversation_id
-             AND m2.direction = 'outbound'
-             AND m2.occurred_at >= inbound.occurred_at
-           ORDER BY m2.occurred_at ASC, m2.id ASC
-           LIMIT 1
-         ) response ON TRUE`,
-        [companyId, timezone]
-      ),
-    ]);
+    return withTenantTransaction(companyId, async (client) => {
+      const [active, orders, response] = await Promise.all([
+        client.query(
+          `SELECT COUNT(*)::int AS count
+           FROM conversations
+           WHERE company_id = $1
+             AND channel = 'whatsapp'
+             AND status = 'open'
+             AND archived_at IS NULL
+             AND last_message_at >= (((NOW() AT TIME ZONE $2)::date)::timestamp AT TIME ZONE $2)
+             AND last_message_at < (((NOW() AT TIME ZONE $2)::date + 1)::timestamp AT TIME ZONE $2)`,
+          [companyId, timezone]
+        ),
+        client.query(
+          `SELECT COUNT(*)::int AS count
+           FROM customer_orders
+           WHERE company_id = $1
+             AND occurred_at >= (((NOW() AT TIME ZONE $2)::date)::timestamp AT TIME ZONE $2)
+             AND occurred_at < (((NOW() AT TIME ZONE $2)::date + 1)::timestamp AT TIME ZONE $2)`,
+          [companyId, timezone]
+        ),
+        client.query(
+          `WITH inbound AS (
+             SELECT m.conversation_id, m.occurred_at
+             FROM messages m
+             JOIN conversations c ON c.id = m.conversation_id AND c.company_id = m.company_id
+             WHERE m.company_id = $1
+               AND c.channel = 'whatsapp'
+               AND m.direction = 'inbound'
+               AND m.occurred_at >= (((NOW() AT TIME ZONE $2)::date)::timestamp AT TIME ZONE $2)
+               AND m.occurred_at < (((NOW() AT TIME ZONE $2)::date + 1)::timestamp AT TIME ZONE $2)
+           )
+           SELECT COALESCE(
+             ROUND(AVG(EXTRACT(EPOCH FROM (response.occurred_at - inbound.occurred_at)) / 60)::numeric, 2),
+             0
+           ) AS minutes
+           FROM inbound
+           JOIN LATERAL (
+             SELECT m2.occurred_at
+             FROM messages m2
+             WHERE m2.conversation_id = inbound.conversation_id
+               AND m2.company_id = $1 AND m2.direction = 'outbound'
+               AND m2.status IN ('accepted', 'provider_accepted', 'sent', 'delivered', 'read')
+               AND m2.occurred_at >= inbound.occurred_at
+             ORDER BY m2.occurred_at ASC, m2.id ASC
+             LIMIT 1
+           ) response ON TRUE`,
+          [companyId, timezone]
+        ),
+      ]);
 
-    return {
-      activeChatsCount: Number(active.rows[0]?.count || 0),
-      ordersTodayCount: Number(orders.rows[0]?.count || 0),
-      averageResponseTimeMin: Number(response.rows[0]?.minutes || 0),
-    };
+      return {
+        activeChatsCount: Number(active.rows[0]?.count || 0),
+        ordersTodayCount: Number(orders.rows[0]?.count || 0),
+        averageResponseTimeMin: Number(response.rows[0]?.minutes || 0),
+      };
+    }, this.pool);
   }
 
-  async getActionCards(companyId: number, timezone: string): Promise<ActionCardsStats> {
-    const [pending, payments, lowStock] = await Promise.all([
-      this.pool.query(
-        `SELECT COUNT(*)::int AS count
-         FROM conversations c
-         WHERE c.company_id = $1
-           AND c.channel = 'whatsapp'
-           AND c.status = 'open'
-           AND c.archived_at IS NULL
-           AND c.unread_count > 0
-           AND NOT EXISTS (
-             SELECT 1 FROM tag_chats tc
-             JOIN tags t ON t.id = tc.tag_id
-             JOIN tag_users tu ON tu.tag_id = t.id
-             WHERE tc.company_id = c.company_id
-               AND (tc.conversation_id = c.id OR tc.chat_id = c.external_conversation_id)
-           )`,
-        [companyId]
-      ),
-      this.pool.query(
-        `WITH payable_orders AS (
-           SELECT o.id
-           FROM customer_orders o
-           WHERE o.company_id = $1
-             AND o.order_type = 'commercial'
-             AND o.status IN ('draft','quoted','pending_handoff','pending_approval','confirmed')
-             AND EXISTS (
-               SELECT 1 FROM order_items oi
-               WHERE oi.company_id = o.company_id AND oi.order_id = o.id
-             )
+  async getActionCards(companyId: number): Promise<ActionCardsStats> {
+    return withTenantTransaction(companyId, async (client) => {
+      const [pending, payments, lowStock] = await Promise.all([
+        client.query(
+          `SELECT COUNT(*)::int AS count
+           FROM conversations c
+           WHERE c.company_id = $1
+             AND c.channel = 'whatsapp'
+             AND c.status = 'open'
+             AND c.archived_at IS NULL
+             AND c.unread_count > 0
+             AND c.assigned_user_id IS NULL
              AND NOT EXISTS (
-               SELECT 1 FROM payment_vouchers pv
-               WHERE pv.company_id = o.company_id
-                 AND pv.order_id = o.id
-                 AND pv.status = 'validated'
-             )
-         ),
-         orphan_pending_vouchers AS (
-           SELECT pv.id
-           FROM payment_vouchers pv
-           WHERE pv.company_id = $1
-             AND pv.order_id IS NULL
-             AND pv.status = 'pending'
-         )
-         SELECT (
-           (SELECT COUNT(*) FROM payable_orders) +
-           (SELECT COUNT(*) FROM orphan_pending_vouchers)
-         )::int AS count`,
-        [companyId]
-      ),
-      this.pool.query(
-        `SELECT COUNT(*)::int AS count
-         FROM products
-         WHERE company_id = $1
-           AND status = 'active'
-           AND min_stock > 0
-           AND stock_available <= min_stock`,
-        [companyId]
-      ),
-    ]);
+               SELECT 1 FROM tag_chats tc
+               JOIN tags t ON t.id = tc.tag_id
+               JOIN tag_users tu ON tu.tag_id = t.id
+               WHERE tc.company_id = c.company_id
+                 AND (tc.conversation_id = c.id OR tc.chat_id = c.external_conversation_id)
+             )`,
+          [companyId]
+        ),
+        client.query(
+          `WITH payable_orders AS (
+             SELECT o.id
+             FROM customer_orders o
+             WHERE o.company_id = $1
+               AND o.order_type = 'commercial'
+               AND o.status IN ('draft','quoted','pending_handoff','pending_approval','confirmed')
+               AND EXISTS (
+                 SELECT 1 FROM order_items oi
+                 WHERE oi.company_id = o.company_id AND oi.order_id = o.id
+               )
+               AND NOT EXISTS (
+                 SELECT 1 FROM payment_vouchers pv
+                 WHERE pv.company_id = o.company_id
+                   AND pv.order_id = o.id
+                   AND pv.status = 'validated'
+               )
+           ),
+           orphan_pending_vouchers AS (
+             SELECT pv.id
+             FROM payment_vouchers pv
+             WHERE pv.company_id = $1
+               AND pv.order_id IS NULL
+               AND pv.status = 'pending'
+           )
+           SELECT (
+             (SELECT COUNT(*) FROM payable_orders) +
+             (SELECT COUNT(*) FROM orphan_pending_vouchers)
+           )::int AS count`,
+          [companyId]
+        ),
+        client.query(
+          `SELECT COUNT(*)::int AS count
+           FROM products
+           WHERE company_id = $1
+             AND status = 'active'
+             AND min_stock > 0
+             AND stock_available <= min_stock`,
+          [companyId]
+        ),
+      ]);
 
-    return {
-      pendingChatsCount: Number(pending.rows[0]?.count || 0),
-      pendingPaymentsCount: Number(payments.rows[0]?.count || 0),
-      lowStockCount: Number(lowStock.rows[0]?.count || 0),
-    };
+      return {
+        pendingChatsCount: Number(pending.rows[0]?.count || 0),
+        pendingPaymentsCount: Number(payments.rows[0]?.count || 0),
+        lowStockCount: Number(lowStock.rows[0]?.count || 0),
+      };
+    }, this.pool);
   }
 
   async getHeatmapByDate(companyId: number, timezone: string, days: number): Promise<HeatmapByDateMatrix> {
     const safeDays = Math.min(Math.max(days, 1), 30);
-    const result = await this.pool.query(
-      `WITH range AS (
-         SELECT generate_series(
-           (CURRENT_DATE - ($2::int - 1))::timestamp AT TIME ZONE $3,
-           CURRENT_DATE::timestamp AT TIME ZONE $3,
-           interval '1 day'
-         ) AS day_start
+    const result = await queryInTenantScope(this.pool, companyId,
+      `WITH local_day AS (
+         SELECT (NOW() AT TIME ZONE $3)::date AS today
+       ), days AS (
+         SELECT generate_series((today - ($2::int - 1))::timestamp, today::timestamp, interval '1 day')::date AS day
+         FROM local_day
+       ), inbound AS (
+         SELECT (m.occurred_at AT TIME ZONE $3)::date AS day,
+                EXTRACT(HOUR FROM m.occurred_at AT TIME ZONE $3)::int AS hour,
+                COUNT(*)::int AS count
+         FROM messages m JOIN conversations c ON c.id = m.conversation_id AND c.company_id = m.company_id
+         CROSS JOIN local_day
+         WHERE m.company_id = $1 AND c.channel = 'whatsapp' AND c.archived_at IS NULL AND m.direction = 'inbound'
+           AND m.occurred_at >= ((today - ($2::int - 1))::timestamp AT TIME ZONE $3)
+           AND m.occurred_at < ((today + 1)::timestamp AT TIME ZONE $3)
+         GROUP BY 1, 2
        )
-       SELECT TO_CHAR(r.day_start AT TIME ZONE $3, 'YYYY-MM-DD') AS date,
-              EXTRACT(HOUR FROM m.occurred_at AT TIME ZONE $3)::int AS hour,
-              COUNT(*)::int AS count
-       FROM range r
-       LEFT JOIN conversations c
-         ON c.company_id = $1
-         AND c.channel = 'whatsapp'
-         AND c.archived_at IS NULL
-       LEFT JOIN messages m
-         ON m.conversation_id = c.id
-         AND m.company_id = $1
-         AND m.direction = 'inbound'
-         AND m.occurred_at >= r.day_start
-         AND m.occurred_at < r.day_start + interval '1 day'
-       GROUP BY r.day_start, 2
-       ORDER BY r.day_start ASC, 2 ASC`,
+       SELECT TO_CHAR(days.day, 'YYYY-MM-DD') AS date, inbound.hour, COALESCE(inbound.count, 0) AS count
+       FROM days LEFT JOIN inbound ON inbound.day = days.day
+       ORDER BY days.day, inbound.hour`,
       [companyId, safeDays, timezone]
     );
 
@@ -193,7 +198,7 @@ export class DashboardRepositoryPg {
       const date = row.date;
       if (!byDate.has(date)) byDate.set(date, new Array(24).fill(0));
       const hours = byDate.get(date)!;
-      const hour = Number(row.hour);
+      const hour = row.hour === null ? -1 : Number(row.hour);
       const count = Number(row.count || 0);
       if (hour >= 0 && hour < 24) hours[hour] = count;
       maxCount = Math.max(maxCount, count);
@@ -212,7 +217,7 @@ export class DashboardRepositoryPg {
 
   async getSlaAlerts(companyId: number, thresholdMinutes: number, limit: number): Promise<SlaAlertsResult> {
     const safeLimit = Math.min(Math.max(limit, 1), 50);
-    const result = await this.pool.query(
+    const result = await queryInTenantScope(this.pool, companyId,
       `SELECT c.id, c.external_conversation_id, c.unread_count, c.last_message_at,
               COALESCE(NULLIF(c.last_message_preview, ''), NULLIF(c.title, '')) AS last_preview,
               COALESCE(ct.display_name, ct.name, ct.profile_name, ct.phone, c.title, c.external_conversation_id) AS display_name,
@@ -223,13 +228,13 @@ export class DashboardRepositoryPg {
                   AND (pv.conversation_id = c.id OR pv.chat_id = c.external_conversation_id)
                   AND pv.status = 'pending'
               ) AS has_pending_payment,
-              EXISTS (
+              (c.assigned_user_id IS NOT NULL OR EXISTS (
                 SELECT 1 FROM tag_chats tc
                 JOIN tags t ON t.id = tc.tag_id
                 JOIN tag_users tu ON tu.tag_id = t.id
                 WHERE tc.company_id = c.company_id
                   AND (tc.conversation_id = c.id OR tc.chat_id = c.external_conversation_id)
-              ) AS has_assigned_user,
+              )) AS has_assigned_user,
               EXISTS (
                 SELECT 1 FROM ai_agents ai
                 WHERE ai.company_id = c.company_id
@@ -238,7 +243,7 @@ export class DashboardRepositoryPg {
               ) AS has_active_agent,
               EXTRACT(EPOCH FROM (NOW() - c.last_message_at)) / 60 AS waiting_min
        FROM conversations c
-       LEFT JOIN contacts ct ON ct.id = c.contact_id
+       LEFT JOIN contacts ct ON ct.id = c.contact_id AND ct.company_id = c.company_id
        WHERE c.company_id = $1
          AND c.channel = 'whatsapp'
          AND c.status = 'open'
@@ -278,7 +283,7 @@ export class DashboardRepositoryPg {
   async getLowStock(companyId: number, limit: number, offset: number): Promise<{ rows: LowStockItem[]; total: number }> {
     const safeLimit = Math.min(Math.max(limit, 1), 200);
     const safeOffset = Math.max(offset, 0);
-    const count = await this.pool.query(
+    const count = await queryInTenantScope(this.pool, companyId,
       `SELECT COUNT(*)::int AS count
        FROM products
        WHERE company_id = $1
@@ -287,7 +292,7 @@ export class DashboardRepositoryPg {
          AND stock_available <= min_stock`,
       [companyId]
     );
-    const rows = await this.pool.query(
+    const rows = await queryInTenantScope(this.pool, companyId,
       `SELECT id, name, sku, stock_available, stock_reserved, min_stock
        FROM products
        WHERE company_id = $1

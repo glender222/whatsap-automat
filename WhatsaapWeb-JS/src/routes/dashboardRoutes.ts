@@ -47,7 +47,7 @@ export default function createDashboardRoutes(): Router {
 
   router.get('/heatmap', async (req: JwtRequest, res: Response, next: NextFunction) => {
     try {
-      const days = Math.min(Math.max(Number(req.query.days || 7), 1), 30);
+      const days = Math.min(parsePositiveInt(req.query.days) ?? 7, 30);
       const data = await service.getHeatmap(resolveWhatsappCompanyId(req), days);
       res.json({ success: true, data });
     } catch (error) {

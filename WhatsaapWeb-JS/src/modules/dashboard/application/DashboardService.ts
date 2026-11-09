@@ -16,8 +16,7 @@ export class DashboardService {
   }
 
   async getActionCards(companyId: number): Promise<ActionCardsStats> {
-    const timezone = await this.repository.getCompanyTimezone(companyId);
-    return this.repository.getActionCards(companyId, timezone);
+    return this.repository.getActionCards(companyId);
   }
 
   async getHeatmap(companyId: number, days: number): Promise<HeatmapByDateMatrix> {

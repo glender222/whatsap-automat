@@ -100,6 +100,25 @@ test('real API isolates two companies through auth, signed ingress, inbox, socke
   assert.equal(chats[0].id, chatId);
   const messages = await api(`/api/chats/${chatId}/messages`, 200, owner.accessToken);
   assert.deepEqual(messages.map((message: { id: string }) => message.id), [messageId]);
+  const dashboard = '/api/dashboard';
+  const [stats, actionCards, heatmap, otherStats, otherHeatmap] = await Promise.all([
+    api(`${dashboard}/quick-stats`, 200, owner.accessToken),
+    api(`${dashboard}/action-cards`, 200, owner.accessToken),
+    api(`${dashboard}/heatmap?days=7`, 200, owner.accessToken),
+    api(`${dashboard}/quick-stats`, 200, other.accessToken),
+    api(`${dashboard}/heatmap?days=7`, 200, other.accessToken),
+  ]);
+  assert.equal(stats.activeChatsCount, 1);
+  assert.equal(stats.averageResponseTimeMin, 0);
+  assert.equal(actionCards.pendingChatsCount, 1);
+  assert.equal(heatmap.days.length, 7);
+  assert.equal(heatmap.totalMessages, 1);
+  assert.equal(heatmap.days.at(-1).total, 1);
+  assert.equal(heatmap.days.at(-1).label, 'Hoy');
+  assert.equal(heatmap.days.slice(0, -1).every((day: { total: number }) => day.total === 0), true);
+  assert.equal(otherStats.activeChatsCount, 0);
+  assert.equal(otherHeatmap.totalMessages, 0);
+  assert.equal(otherHeatmap.maxCount, 0);
   const canonicalPath = `/api/v1/conversations/${chats[0].conversationId}`;
   const canonicalList = await api('/api/v1/conversations?channel=whatsapp-cloud&limit=1', 200, owner.accessToken);
   assert.equal(canonicalList.items.length, 1);
@@ -164,6 +183,14 @@ test('real API isolates two companies through auth, signed ingress, inbox, socke
   assert.equal(claimed.assignedUserId, String(owner.user.id));
   assert.equal(claimed.aiPaused, true);
   assert.equal(claimed.stateVersion, resumed.stateVersion + 1);
+  assert.equal((await api(`${dashboard}/action-cards`, 200, owner.accessToken)).pendingChatsCount, 0);
+  await withTenantTransaction(owner.user.companyId, (db) => db.query(
+    `UPDATE conversations SET last_message_at = NOW() - INTERVAL '10 minutes' WHERE company_id = $1 AND id = $2`,
+    [owner.user.companyId, canonical.id]
+  ));
+  const alerts = await api(`${dashboard}/sla-alerts`, 200, owner.accessToken);
+  assert.deepEqual(alerts.alerts.map((alert: { chatId: string; statusTag: string }) => [alert.chatId, alert.statusTag]), [[chatId, 'attention']]);
+  assert.deepEqual((await api(`${dashboard}/sla-alerts`, 200, other.accessToken)).alerts, []);
 
   const pausedMessageId = `wamid.${randomUUID()}`;
   const pausedPayload = inbound(pausedMessageId, 'Mensaje durante toma de control');
