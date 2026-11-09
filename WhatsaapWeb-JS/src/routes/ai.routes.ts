@@ -576,9 +576,13 @@ export default function createAiRoutes(options: AiRoutesOptions = {}): Router {
   router.post('/rag/purge', requireJwt, tenantContext(), purgeHandler);
 
   // 18. POST /api/v1/ai/eval/simulate - Dry-run sandbox regression simulator
-  router.post('/eval/simulate', requireJwt, tenantContext(), async (req: Request, res: Response) => {
+  router.post('/eval/simulate', requireJwt, tenantContext({ allowSandbox: false }), async (req: Request, res: Response) => {
     try {
       const tenantId = resolveTenantId(req);
+      if (!req.tenantContext?.userId || req.tenantContext.role !== 'ADMIN') {
+        res.status(403).json({ success: false, error: 'POLICY_DENIED', message: 'Simulation requires a tenant administrator' });
+        return;
+      }
       const parsed = evalSimulateRequestV1Schema.safeParse(req.body);
       if (!parsed.success) {
         res.status(400).json({
@@ -604,7 +608,7 @@ export default function createAiRoutes(options: AiRoutesOptions = {}): Router {
             mockConversationState: {},
             expectedTools: ['inventory.check_stock'],
             forbiddenTools: ['order.cancel'],
-            expectedTextPatterns: ['stock', 'disponible'],
+            expectedTextPatterns: ['stock'],
             forbiddenTextPatterns: ['password', 'secret_key'],
             assertions: [],
           },

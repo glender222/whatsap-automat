@@ -278,5 +278,38 @@ describe('PR-F5-03: AgentEvalService Dry-Run Simulator & Regression Harness Test
       });
       assert.equal(res.status, 401);
     });
+
+    it('rejects operators, cross-tenant fixtures and oversized simulations', async () => {
+      const employee = generateAccessToken({ id: 2, tenantId: 1, companyId: 1, rol: 'EMPLEADO' });
+      const blocked = await invokeRoute(router, 'post', '/eval/simulate', { token: employee, body: { graph: sampleGraph } });
+      assert.equal(blocked.status, 403);
+      for (const graph of [
+        { ...sampleGraph, tenantId: '2' },
+        { ...sampleGraph, limits: { ...sampleGraph.limits, maxSteps: 129 } },
+      ]) {
+        const invalid = await invokeRoute(router, 'post', '/eval/simulate', { token, body: { graph } });
+        assert.equal(invalid.status, 400);
+      }
+    });
+
+    it('uses bounded matching and actually evaluates structured assertions', async () => {
+      const scenario = {
+        id: 'structured', name: 'Structured assertions', mockInput: `${'a'.repeat(1_500)}!`,
+        forbiddenTextPatterns: ['(a+)+$'],
+        assertions: [
+          { id: 'tool', type: 'expected_tool_called', target: 'inventory.check_stock' },
+          { id: 'steps', type: 'max_steps', expectedValue: 1 },
+        ],
+      };
+      const res = await invokeRoute(router, 'post', '/eval/simulate', { token, body: { graph: sampleGraph, scenarios: [scenario] } });
+      assert.equal(res.status, 200);
+      const [result] = res.body.data.scenarioResults;
+      assert.deepEqual(result.assertionsResults.map((entry: { passed: boolean }) => entry.passed), [true, true, false]);
+      assert.equal(result.passed, false);
+      const invalid = await invokeRoute(router, 'post', '/eval/simulate', {
+        token, body: { graph: sampleGraph, scenarios: [{ ...scenario, forbiddenTextPatterns: ['['] }] },
+      });
+      assert.equal(invalid.status, 400);
+    });
   });
 });
