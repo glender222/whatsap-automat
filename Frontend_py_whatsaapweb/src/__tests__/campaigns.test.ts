@@ -3,7 +3,9 @@ import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import type { InternalAxiosRequestConfig } from 'axios';
 import { api } from '../shared/axios/http';
-import { calculateSegment, createCampaignDraft, createSegment, listCampaigns } from '../components/campaigns/campaignApi';
+import {
+  calculateSegment, createCampaignDraft, createSegment, dispatchCampaign, listCampaigns, reviewCampaignDispatch,
+} from '../components/campaigns/campaignApi';
 
 Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: () => null } });
 
@@ -85,4 +87,32 @@ test('segments preserve server IDs and the count must correspond to the requeste
   assert.equal(await calculateSegment(segmentId), 12);
   calculation.segmentId = 'another';
   await assert.rejects(calculateSegment(segmentId), /no confirmó el recuento/);
+});
+
+test('dispatch uses the reviewed audience key and preserves the actual server outcome', async (context) => {
+  const campaignId = 'cmp/qa';
+  const reviewKey = 'a'.repeat(64);
+  const review = {
+    campaignId, campaignStatus: 'draft', segmentName: 'Lima', audienceCount: 2, unattemptedCount: 2,
+    audienceLimit: 1000, limitExceeded: false, reviewKey,
+  };
+  const campaign = { id: campaignId, status: 'queued' };
+  mockResponse(context, (request) => {
+    if (request.method === 'get') {
+      assert.equal(request.url, '/v1/campaigns/cmp%2Fqa/dispatch-review');
+      return { success: true, data: review };
+    }
+    assert.equal(request.url, '/v1/campaigns/cmp%2Fqa/dispatch');
+    assert.deepEqual(JSON.parse(request.data), { reviewKey });
+    return { success: true, data: campaign };
+  });
+  const signal = new AbortController().signal;
+  assert.deepEqual(await reviewCampaignDispatch(campaignId, signal), review);
+  assert.equal((await dispatchCampaign(campaignId, reviewKey)).status, 'queued');
+  campaign.status = 'failed';
+  assert.equal((await dispatchCampaign(campaignId, reviewKey)).status, 'failed');
+  campaign.status = 'draft';
+  await assert.rejects(dispatchCampaign(campaignId, reviewKey), /no confirmó el estado/);
+  review.unattemptedCount = 3;
+  await assert.rejects(reviewCampaignDispatch(campaignId, signal), /no confirmó la revisión/);
 });

@@ -43,6 +43,7 @@ export default function CampaignWizard() {
     const contentBody = String(values.get('contentBody') ?? '').trim();
     const contentSubject = String(values.get('contentSubject') ?? '').trim();
     const templateId = String(values.get('templateId') ?? '').trim();
+    const languageCode = String(values.get('templateLanguage') ?? '').trim() || 'es_CO';
     if (!name || (!contentBody && !templateId) || (channel === 'email' && !contentSubject)) {
       setError('Completa el nombre y el mensaje o la plantilla. El correo también requiere un asunto.');
       return;
@@ -59,6 +60,7 @@ export default function CampaignWizard() {
         contentBody: contentBody || undefined,
         contentSubject: contentSubject || undefined,
         templateId: templateId || undefined,
+        templateVariables: templateId ? { languageCode } : undefined,
         rateLimitPerMinute: Number(values.get('rateLimitPerMinute')),
         failurePauseThresholdPercent: Number(values.get('failurePauseThresholdPercent')),
       });
@@ -123,10 +125,16 @@ export default function CampaignWizard() {
           </label>
         )}
         {channel === 'whatsapp-cloud' && (
-          <label className="block space-y-1 text-sm font-medium">
-            <span>Nombre de la plantilla de WhatsApp (opcional)</span>
-            <input name="templateId" maxLength={255} className={inputClass} />
-          </label>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="block space-y-1 text-sm font-medium">
+              <span>Nombre de la plantilla de WhatsApp (opcional)</span>
+              <input name="templateId" maxLength={255} className={inputClass} />
+            </label>
+            <label className="block space-y-1 text-sm font-medium">
+              <span>Idioma de la plantilla</span>
+              <input name="templateLanguage" defaultValue="es_CO" maxLength={20} className={inputClass} />
+            </label>
+          </div>
         )}
         <label className="block space-y-1 text-sm font-medium">
           <span>Mensaje</span>

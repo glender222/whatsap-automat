@@ -12,16 +12,39 @@ export interface CampaignDraft {
   contentBody?: string;
   contentSubject?: string;
   templateId?: string;
+  templateVariables?: { languageCode: string };
   rateLimitPerMinute: number;
   failurePauseThresholdPercent: number;
 }
 
-interface CampaignSummary {
+export interface CampaignSummary {
   id: string;
   name: string;
   channel: string;
   status: string;
   segmentId?: string | null;
+  statsDispatched?: number;
+  statsFailed?: number;
+  statsSuppressed?: number;
+  pauseReason?: string | null;
+}
+
+export interface DispatchReview {
+  campaignId: string;
+  campaignStatus: string;
+  segmentName: string | null;
+  audienceCount: number;
+  unattemptedCount: number;
+  audienceLimit: number;
+  limitExceeded: boolean;
+  reviewKey: string;
+  contentBody?: string | null;
+  templateName?: string | null;
+  templateLanguage?: string | null;
+}
+
+export function isDispatchableStatus(status: string) {
+  return status === 'draft' || status === 'queued' || status === 'paused';
 }
 
 interface SegmentRule {
@@ -89,6 +112,35 @@ export async function createCampaignDraft(draft: CampaignDraft) {
   const { data } = await api.post<ApiResponse<CampaignSummary>>('/v1/campaigns', draft);
   const campaign = result(data);
   if (!campaign.id || campaign.status !== 'draft') throw new Error('El servidor no confirmó el borrador.');
+  return campaign;
+}
+
+export async function reviewCampaignDispatch(campaignId: string, signal: AbortSignal) {
+  const { data } = await api.get<ApiResponse<DispatchReview>>(
+    `/v1/campaigns/${encodeURIComponent(campaignId)}/dispatch-review`, { signal },
+  );
+  const review = result(data);
+  if (review.campaignId !== campaignId || typeof review.campaignStatus !== 'string' ||
+      (review.segmentName !== null && typeof review.segmentName !== 'string') ||
+      !Number.isSafeInteger(review.audienceCount) || review.audienceCount < 0 ||
+      !Number.isSafeInteger(review.unattemptedCount) || review.unattemptedCount < 0 ||
+      review.unattemptedCount > review.audienceCount ||
+      !Number.isSafeInteger(review.audienceLimit) || review.audienceLimit < 1 ||
+      review.limitExceeded !== (review.audienceCount > review.audienceLimit) ||
+      typeof review.reviewKey !== 'string' || !/^[a-f0-9]{64}$/.test(review.reviewKey)) {
+    throw new Error('El servidor no confirmó la revisión de la campaña.');
+  }
+  return review;
+}
+
+export async function dispatchCampaign(campaignId: string, reviewKey: string) {
+  const { data } = await api.post<ApiResponse<CampaignSummary>>(
+    `/v1/campaigns/${encodeURIComponent(campaignId)}/dispatch`, { reviewKey },
+  );
+  const campaign = result(data);
+  if (campaign.id !== campaignId || !['queued', 'dispatching', 'paused', 'completed', 'failed'].includes(campaign.status)) {
+    throw new Error('El servidor no confirmó el estado del despacho.');
+  }
   return campaign;
 }
 
