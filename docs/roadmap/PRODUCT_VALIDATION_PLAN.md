@@ -43,12 +43,14 @@ Los agentes trabajan en worktrees separados y entregan cambios acotados. QA rota
 | Recorrido | Evidencia | Pendiente para la release |
 | --- | --- | --- |
 | Instalación, sesión y bandeja | Backend compilado arrancado con una base PostgreSQL vacía y rol sin `BYPASSRLS`. Webhook firmado, historial, paginación v1, Socket.IO por empresa y toma de control comprobados. | Validar proveedor de prueba y recuperación de envíos inciertos. |
-| Operación web | Chromium en escritorio y pantalla estrecha. Bandeja, segmentos, confirmación de campañas y Marketplace con datos de prueba. | Revisión independiente del candidato y recorridos de automatización y configuración. |
-| Operación móvil | Expo 58, exportación Android, iOS y web, pruebas del cliente y APK de desarrollo ARM64. | APK de QA con JavaScript incluido, prueba en dispositivo y compilación nativa de iOS. |
-| Workflows | PostgreSQL y worker Temporal locales. Revisiones fijadas, duplicados concurrentes, rollback y recuperación tras pérdida del acuse comprobados. | Probar la consola web y definir operación de producción. |
+| Operación web | Chromium en escritorio y pantalla estrecha. Bandeja, confirmación de campañas, Marketplace, consola de workflows y edición de revisiones en Agent Studio con datos de prueba. | Revisión independiente de todos los recorridos del candidato. |
+| Operación móvil | Expo 58, exportación Android, iOS y web. Envío idempotente probado en Chromium. APK de QA ARM64 compilado en `6c52180` con Hermes integrado y firma de depuración verificada. | Prueba en dispositivo ARM64 y compilación nativa de iOS. |
+| Workflows | PostgreSQL, consola web y worker Temporal locales. Revisiones fijadas, duplicados concurrentes, rollback y recuperación tras pérdida del acuse comprobados. Relay y worker probados con certificados de cliente. | Validar el servicio de producción y su procedimiento de recuperación. |
 | Agentes y aprobaciones | Revisiones de Studio inmutables, trazas por empresa, pausa de IA y auditoría de decisiones verificadas con PostgreSQL. | Evaluación de publicación vinculada a la revisión ejecutada y validación del proveedor de IA. |
 | Campañas | Graph simulado y estado real en PostgreSQL. Se comprobó consentimiento, ventana de servicio, revisión de audiencia y acuse del proveedor. | Envío de prueba autorizado y soporte operativo para entrega incierta. |
 | Marketplace | Publicación por API, puntuaciones agregadas y edición de reseña comprobadas con RLS. | Instalación de extensiones y gestión de publicaciones desde la interfaz. |
+| Catálogo e inventario | 42 pruebas HTTP, PostgreSQL y compatibilidad. Roles, rollback, imágenes principales concurrentes y stock con operador registrado. | Validar los recorridos web y la transición de pedidos. |
+| Comprobantes, historial y reportes | Servidor compilado con dos empresas. Archivo protegido, decisión concurrente con una auditoría, historial con adjuntos y reportes filtrados con descargas CSV y Excel. | QA independiente de las pantallas y prueba con proveedor autorizado para adjuntos remotos. |
 | Documentación y release | Portal local y paquete de guías y contratos descargables verificados. | Publicar el portal y artefactos validados. GitHub exige el permiso `workflow` para aceptar los cambios de CI. |
 
 ## Criterio de refactor y retirada
