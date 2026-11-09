@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { isAxiosError } from 'axios';
 import { Link } from 'react-router-dom';
 import { CheckCircle2, ExternalLink, FileText, Image as ImageIcon, Loader2, XCircle } from 'lucide-react';
 import {
@@ -147,6 +148,7 @@ export default function PaymentsPage() {
   const [loadState, setLoadState] = useState<LoadState>('loading');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [actionInProgress, setActionInProgress] = useState<number | null>(null);
+  const [validationError, setValidationError] = useState<{ voucherId: number; message: string } | null>(null);
   const [rejecting, setRejecting] = useState<{ id: number; reason: string } | null>(null);
   const [selectedRow, setSelectedRow] = useState<PaymentProcessSummary | null>(null);
 
@@ -175,11 +177,20 @@ export default function PaymentsPage() {
 
   const handleValidate = async (id: number) => {
     setActionInProgress(id);
+    setValidationError(null);
     try {
       await paymentsService.validate(id);
       await load();
     } catch (error) {
-      console.error('Error validando comprobante:', error);
+      const message = isAxiosError<{ message?: unknown }>(error) && error.response?.status === 409
+        ? error.response.data?.message
+        : undefined;
+      setValidationError({
+        voucherId: id,
+        message: typeof message === 'string' && message.trim()
+          ? message
+          : 'No se pudo validar el comprobante. Actualiza los pagos antes de reintentar.',
+      });
     } finally {
       setActionInProgress(null);
     }
@@ -395,6 +406,11 @@ export default function PaymentsPage() {
                               {row.validatedAt ? formatDate(row.validatedAt) : '-'}
                             </span>
                           </div>
+                        )}
+                        {validationError && validationError.voucherId === row.voucherId && (
+                          <p role="alert" className="mt-2 max-w-56 text-right text-xs text-red-700">
+                            {validationError.message}
+                          </p>
                         )}
                       </td>
                     </tr>
