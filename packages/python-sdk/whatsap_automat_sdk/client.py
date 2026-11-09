@@ -218,7 +218,8 @@ class AgentsResource:
 
     def simulate(self, request: Dict[str, Any]) -> List[SimulatedNodeExecution]:
         data = self._client._request("POST", "/agent-runs/simulate", json_body=request)
-        return [SimulatedNodeExecution.model_validate(x) for x in data]
+        nodes = data if isinstance(data, list) else data["executedNodes"]
+        return [SimulatedNodeExecution.model_validate(node) for node in nodes]
 
     def get_trace(self, run_id: str) -> AgentRunTrace:
         data = self._client._request("GET", f"/agent-runs/{run_id}/trace")
@@ -566,7 +567,8 @@ class AsyncAgentsResource:
 
     async def simulate(self, request: Dict[str, Any]) -> List[SimulatedNodeExecution]:
         data = await self._client._request("POST", "/agent-runs/simulate", json_body=request)
-        return [SimulatedNodeExecution.model_validate(x) for x in data]
+        nodes = data if isinstance(data, list) else data["executedNodes"]
+        return [SimulatedNodeExecution.model_validate(node) for node in nodes]
 
     async def get_trace(self, run_id: str) -> AgentRunTrace:
         data = await self._client._request("GET", f"/agent-runs/{run_id}/trace")

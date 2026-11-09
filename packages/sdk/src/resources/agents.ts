@@ -2,6 +2,7 @@ import {
   AgentGraphVersionV1,
   AgentRunTraceV1,
   AgentSimulationRequestV1,
+  AgentSimulationResultV1,
   SimulatedNodeExecutionV1,
 } from '@whatsap-automat/contracts';
 import { HttpClient } from '../http';
@@ -27,7 +28,8 @@ export class AgentsResource {
   }
 
   async simulate(request: AgentSimulationRequestV1): Promise<SimulatedNodeExecutionV1[]> {
-    return this.http.post<SimulatedNodeExecutionV1[]>('/agent-runs/simulate', request);
+    const result = await this.http.post<AgentSimulationResultV1 | SimulatedNodeExecutionV1[]>('/agent-runs/simulate', request);
+    return Array.isArray(result) ? result : [...result.executedNodes];
   }
 
   async getTrace(runId: string): Promise<AgentRunTraceV1> {

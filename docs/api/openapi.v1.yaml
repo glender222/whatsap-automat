@@ -551,6 +551,38 @@ paths:
         '422':
           $ref: '#/components/responses/ValidationError'
 
+  /agent-graphs/{id}/simulate:
+    post:
+      summary: Simular una revisión guardada con fixtures
+      description: Requiere rol ADMIN. Sin una versión explícita, selecciona la revisión más reciente del tenant. Si el cuerpo incluye graphId debe coincidir con la ruta. Si se envían version y graphVersion deben coincidir.
+      operationId: simulateAgentGraph
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/AgentGraphId'
+        - $ref: '#/components/parameters/AgentGraphDraftVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentGraphSimulationRequest'
+      responses:
+        '200':
+          description: Resultado de la simulación con fixtures
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentSimulationResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Acceso reservado a administradores del tenant
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
   /agent-graphs/{id}/publish:
     post:
       summary: Consultar disponibilidad de publicación
@@ -591,11 +623,13 @@ paths:
 
   /agent-runs/simulate:
     post:
-      summary: Simular ejecución de grafo en sandbox
-      description: Ejecuta un dry-run determinista sin efectos colaterales de escritura ni envíos a canales externos.
+      summary: Simular una revisión por identificador de grafo
+      description: Requiere rol ADMIN. Ejecuta el mismo fixture que la ruta de simulación del grafo. graphId se recibe en el cuerpo y graphVersion o version seleccionan una revisión inmutable y deben coincidir si se envían ambos. Sin versión explícita, se usa la revisión más reciente.
       operationId: simulateAgentRun
       security:
         - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/AgentGraphDraftVersion'
       requestBody:
         required: true
         content:
@@ -611,6 +645,10 @@ paths:
                 $ref: '#/components/schemas/AgentSimulationResult'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Acceso reservado a administradores del tenant
+        '404':
+          $ref: '#/components/responses/NotFound'
         '422':
           $ref: '#/components/responses/ValidationError'
 
@@ -1523,22 +1561,87 @@ components:
                 type: string
 
     AgentSimulationRequest:
+      allOf:
+        - $ref: '#/components/schemas/AgentGraphSimulationRequest'
+        - required: [graphId]
+
+    AgentGraphSimulationRequest:
       type: object
-      required: [graphId, mockInput]
+      additionalProperties: false
+      required: [mockInput]
+      properties:
+        graphId:
+          type: string
+          pattern: '^[A-Za-z0-9_-]{1,128}$'
+        graphVersion:
+          type: integer
+          minimum: 1
+          maximum: 2147483647
+        mockInput:
+          type: string
+          minLength: 1
+          maxLength: 2048
+        mockConversationState:
+          type: object
+          description: Campo compatible con el contrato anterior. El fixture actual acepta el objeto y recorre el grafo sin usarlo para evaluar condiciones.
+        assertions:
+          type: array
+          maxItems: 16
+          items:
+            type: object
+            required: [id, type]
+            properties:
+              id:
+                type: string
+                minLength: 1
+                maxLength: 128
+              type:
+                type: string
+                enum: [expected_tool_called, forbidden_tool_not_called, expected_text_matched, forbidden_text_absent, max_steps, max_cost_micro_usd, max_latency_ms, approval_triggered]
+              target:
+                type: string
+                maxLength: 256
+                description: Nombre de herramienta, patrón RE2 o identificador del nodo de aprobación, según el tipo de aserción.
+              expectedValue:
+                description: Booleano para aprobación o entero no negativo para límites de pasos, costo y latencia del fixture.
+              description:
+                type: string
+
+    AgentSimulationResult:
+      type: object
+      description: Traza de un fixture sin escrituras, llamadas a proveedores ni envíos. Recorre la primera arista saliente y no evalúa condiciones. Los valores y aprobaciones simulados carecen de efectos operativos.
+      required: [executedNodes, simulatedMessages, approvalsTriggered, finalState, totalSteps, graphId, graphVersion, specHash, mode, publicationEvidence, assertionsResults, failureReasons]
       properties:
         graphId:
           type: string
         graphVersion:
           type: integer
-        mockInput:
+        specHash:
           type: string
-        mockConversationState:
-          type: object
-
-    AgentSimulationResult:
-      type: object
-      required: [executedNodes, simulatedMessages, approvalsTriggered, finalState, totalSteps]
-      properties:
+        mode:
+          const: fixture
+        publicationEvidence:
+          const: false
+        assertionsResults:
+          type: array
+          items:
+            type: object
+            required: [assertionId, type, passed, message]
+            properties:
+              assertionId:
+                type: string
+              type:
+                type: string
+              passed:
+                type: boolean
+              expected: {}
+              actual: {}
+              message:
+                type: string
+        failureReasons:
+          type: array
+          items:
+            type: string
         executedNodes:
           type: array
           items:

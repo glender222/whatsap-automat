@@ -32,8 +32,8 @@ Se ha aplicado un patrón estricto de **Arquitectura Hexagonal (Puertos y Adapta
 | **Diagnóstico de Canal** | N/A (propietario por ruta) | `POST /api/v1/channel-connections/{id}/validate` | Permite verificar estado y credenciales sin registrar mensajes ficticios en clientes reales. |
 | **Grafos de Agentes** | `POST /api/agents` | `POST /api/v1/agent-graphs` | Soporte para definición estructurada de nodos (`NodeKind`), aristas condicionales y límites operativos (`limits`). |
 | **Validación de Grafo** | N/A | `POST /api/v1/agent-graphs/{id}/validate` | Linter estático que detecta referencias huérfanas o loops sin límites de pasos antes de publicar. |
-| **Publicación Inmutable** | `PUT /api/agents/:id` | `POST /api/v1/agent-graphs/{id}/publish` | Genera `specHash` inmutable; los runs en curso no sufren mutaciones de versión en caliente. |
-| **Simulador Sandbox** | N/A | `POST /api/v1/agent-runs/simulate` | Dry-run hermético que ejecuta el flujo lógico sin mutaciones en base de datos ni llamadas salientes a APIs de mensajería. |
+| **Publicación Inmutable** | `PUT /api/agents/:id` | `POST /api/v1/agent-graphs/{id}/publish` | La revisión guardada tiene hash inmutable. Publicación deshabilitada hasta contar con evaluación real del servidor. |
+| **Simulador Sandbox** | N/A | `POST /api/v1/agent-graphs/{id}/simulate`, `POST /api/v1/agent-runs/simulate` | Recorrido con fixtures sobre una revisión guardada del tenant. Devuelve traza sin efectos ni evidencia de publicación. |
 | **Traza de Ejecución** | `/api/conversations/:id/timeline` | `GET /api/v1/agent-runs/{id}/trace` | Devuelve timeline auditado con `detailsRedacted` para cumplir estándares de privacidad. |
 | **Aprobaciones (Cola)** | N/A | `GET /api/v1/approvals` | Cola de acciones de alto riesgo pendientes de aprobación humana según roles de tenant. |
 | **Aprobaciones (Decisión)** | N/A | `POST /api/v1/approvals/{id}/decision` | Decisión atómica (approved/rejected) con `Idempotency-Key` y `expectedVersion`. |

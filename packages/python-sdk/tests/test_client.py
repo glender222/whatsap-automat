@@ -72,6 +72,19 @@ class TestAutomatClient(unittest.TestCase):
         self.assertIn("whatsap-automat-sdk/0.4.0", captured_headers.get("user-agent", ""))
         self.assertTrue(captured_url.endswith("/api/v1/conversations/conv_01"))
 
+    def test_simulation_projects_envelope_to_node_list(self) -> None:
+        nodes = [{"nodeId": "finish", "kind": "end", "output": {}, "durationMs": 1}]
+        payload = {"graphId": "demo", "graphVersion": 2, "mockInput": "fixture"}
+
+        for response in ({"executedNodes": nodes, "mode": "fixture"}, nodes):
+            def handler(request: httpx.Request) -> httpx.Response:
+                self.assertEqual(request.url.path, "/api/v1/agent-runs/simulate")
+                self.assertEqual(json.loads(request.content), payload)
+                return httpx.Response(200, json=response)
+
+            with AutomatClient(base_url="https://api.example.com", transport=httpx.MockTransport(handler)) as client:
+                self.assertEqual([node.node_id for node in client.agents.simulate(payload)], ["finish"])
+
     def test_optimistic_concurrency_takeover(self) -> None:
         captured_body: Dict[str, Any] = {}
         captured_method: str = ""
@@ -378,6 +391,17 @@ class TestAutomatClient(unittest.TestCase):
 
 class TestAsyncAutomatClient(unittest.IsolatedAsyncioTestCase):
     """Test suite for asynchronous AsyncAutomatClient."""
+
+    async def test_async_simulation_projects_envelope_to_node_list(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/v1/agent-runs/simulate")
+            return httpx.Response(200, json={"executedNodes": [
+                {"nodeId": "finish", "kind": "end", "output": {}, "durationMs": 1}
+            ]})
+
+        async with AsyncAutomatClient(base_url="https://api.example.com", transport=httpx.MockTransport(handler)) as client:
+            result = await client.agents.simulate({"graphId": "demo", "mockInput": "fixture"})
+            self.assertEqual([node.node_id for node in result], ["finish"])
 
     async def test_async_client_context_and_pagination(self) -> None:
         pages = {

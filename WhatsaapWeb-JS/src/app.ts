@@ -26,7 +26,7 @@ import createConversationV1Routes from './routes/conversationV1Routes';
 import createWorkspaceRoutes from './routes/workspaceRoutes';
 import createWorkflowRoutes from './routes/workflowRoutes';
 import createAiRoutes from './routes/ai.routes';
-import createAgentStudioRoutes from './routes/agentStudioRoutes';
+import createAgentStudioRoutes, { createAgentSimulationRoutes } from './routes/agentStudioRoutes';
 import createApprovalRoutes from './routes/approvalRoutes';
 import createChannelConnectionRoutes from './routes/channelConnectionRoutes';
 import createOperationExecutionRoutes from './routes/operationExecutionRoutes';
@@ -236,6 +236,7 @@ export class App {
     this.app.use('/api/v1/workflows', createWorkflowRoutes());
     this.app.use('/api/v1/ai', createAiRoutes());
     this.app.use('/api/v1/agent-graphs', createAgentStudioRoutes());
+    this.app.use('/api/v1/agent-runs', createAgentSimulationRoutes());
     this.app.use('/api/v1/approvals', createApprovalRoutes());
     this.app.use('/api/v1/channel-connections', createChannelConnectionRoutes());
     this.app.use('/api/v1/operations', createOperationExecutionRoutes());

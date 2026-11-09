@@ -1,7 +1,10 @@
 import {
   agentGraphVersionV1Schema,
+  agentSimulationRequestV1Schema,
+  evalScenarioV1Schema,
   createProblemDetails,
   type AgentGraphVersionV1,
+  type AgentSimulationResultV1,
   type InvalidParamDetail,
   type StandardErrorCode,
 } from '@whatsap-automat/contracts';
@@ -9,6 +12,7 @@ import { type NextFunction, type Request, type Response, Router } from 'express'
 import { TenantScopedUoW } from '../db/TenantScopedUoW';
 import { requireJwt } from '../middleware/jwtAuth';
 import { type TenantContext, tenantContext } from '../middleware/tenantContext';
+import { agentEvalService, SimulationInputError } from '../services/ai/eval/AgentEvalService';
 import {
   listDrafts,
   loadDraft,
@@ -30,6 +34,12 @@ const graphDraftSchema = agentGraphVersionV1Schema.pick({
   }),
 }).strict();
 const createGraphDraftSchema = graphDraftSchema.extend({ graphId: graphIdSchema });
+const simulationSchema = agentSimulationRequestV1Schema.extend({
+  graphId: graphIdSchema.optional(),
+  graphVersion: agentSimulationRequestV1Schema.shape.graphVersion.unwrap().max(2_147_483_647).optional(),
+  mockInput: agentSimulationRequestV1Schema.shape.mockInput.max(2048),
+  assertions: evalScenarioV1Schema.shape.assertions.removeDefault().max(16).optional(),
+}).strict();
 
 type StudioActor = TenantContext & { userId: number };
 type StudioHandler = (req: Request, res: Response, actor: StudioActor) => Promise<void>;
@@ -100,6 +110,72 @@ function withDraft(handler: (res: Response, draft: AgentGraphVersionV1) => void)
   });
 }
 
+const simulateDraft = guarded(async (req, res, actor) => {
+  const input = simulationSchema.safeParse(req.body);
+  if (!input.success) {
+    problem(res, 'VALIDATION_ERROR', 'Invalid agent simulation request.');
+    return;
+  }
+
+  const pathGraphId = req.params.id === undefined ? undefined : pathId(req, res);
+  if (pathGraphId === null) return;
+  const { graphId = pathGraphId, graphVersion, mockInput, mockConversationState, assertions } = input.data;
+  const queryVersion = readPositiveInt(req.query.version, 2_147_483_647);
+  if (!graphId || (pathGraphId !== undefined && graphId !== pathGraphId) ||
+      (req.query.version !== undefined && queryVersion === null) ||
+      (queryVersion !== null && graphVersion !== undefined && queryVersion !== graphVersion)) {
+    problem(res, 'VALIDATION_ERROR', 'Graph or revision identifiers are missing, invalid, or inconsistent.');
+    return;
+  }
+
+  const graph = await actor.runInScope((db) => loadDraft(db, actor.tenantId, graphId, queryVersion ?? graphVersion ?? null));
+  if (!graph) {
+    notFound(res);
+    return;
+  }
+  if (!validateDraft(graph).valid) {
+    problem(res, 'VALIDATION_ERROR', 'The stored revision has structural errors. Use the validate endpoint for details.');
+    return;
+  }
+
+  const scenario = evalScenarioV1Schema.parse({
+    id: 'fixture', name: 'Fixture simulation', mockInput, mockConversationState, assertions,
+  });
+  try {
+    const result = await agentEvalService.simulateScenario(actor.tenantId, graph, scenario);
+    const lastStep = result.traceSteps[result.traceSteps.length - 1];
+    const output: AgentSimulationResultV1 = {
+      executedNodes: result.traceSteps.map((step) => ({
+        nodeId: step.nodeId, kind: step.nodeKind, output: step.outputPayload ?? {}, durationMs: step.durationMs,
+      })),
+      simulatedMessages: result.traceSteps.flatMap((step) => {
+        const text = step.outputPayload?.text;
+        return step.nodeKind === 'agent' && typeof text === 'string' ? [{ kind: 'text', text }] : [];
+      }),
+      approvalsTriggered: result.traceSteps.filter((step) => step.nodeKind === 'approval').map((step) => ({
+        nodeId: step.nodeId, risk: 'unclassified', action: 'fixture_approval',
+      })),
+      finalState: !result.passed ? 'failed' :
+        lastStep?.nodeKind === 'handoff' ? 'handed_off' : 'completed',
+      totalSteps: result.traceSteps.length,
+    };
+    res.json({
+      ...output, graphId, graphVersion: graph.version, specHash: graph.specHash,
+      mode: 'fixture', publicationEvidence: false,
+      assertionsResults: result.assertionsResults, failureReasons: result.failureReasons,
+    });
+  } catch (error) {
+    if (!(error instanceof SimulationInputError)) throw error;
+    problem(res, 'VALIDATION_ERROR', error.message);
+  }
+});
+
+export function createAgentSimulationRoutes(uow?: TenantScopedUoW): Router {
+  const router = Router();
+  router.post('/simulate', requireJwt, tenantContext({ allowSandbox: false, uow }), simulateDraft);
+  return router;
+}
+
 export default function createAgentStudioRoutes(uow?: TenantScopedUoW): Router {
   const router = Router();
   router.use(requireJwt, tenantContext({ allowSandbox: false, uow }));
@@ -146,6 +222,8 @@ export default function createAgentStudioRoutes(uow?: TenantScopedUoW): Router {
     if (draft) res.status(201).json(draft);
     else notFound(res);
   }));
+
+  router.post('/:id/simulate', simulateDraft);
 
   router.post('/:id/validate', withDraft((res, draft) => { res.json(validateDraft(draft)); }));
 

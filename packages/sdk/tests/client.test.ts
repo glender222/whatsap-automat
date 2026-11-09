@@ -48,6 +48,22 @@ describe('@whatsap-automat/sdk: AutomatClient & HttpClient', () => {
     assert.equal(headers['X-Tenant-Id'], 'tenant-999');
   });
 
+  it('projects the simulation envelope to the existing node list', async () => {
+    const nodes = [{ nodeId: 'finish', kind: 'end', output: {}, durationMs: 1 }];
+    const request = { graphId: 'demo', graphVersion: 2, mockInput: 'fixture' };
+    for (const payload of [{ executedNodes: nodes, mode: 'fixture' }, nodes]) {
+      const client = AutomatClient.create({
+        baseUrl: 'https://api.example.com',
+        fetchFn: async (url, init) => {
+          assert.equal(url.toString(), 'https://api.example.com/api/v1/agent-runs/simulate');
+          assert.deepEqual(JSON.parse(init?.body as string), request);
+          return Response.json(payload);
+        },
+      });
+      assert.deepEqual(await client.agents.simulate(request), nodes);
+    }
+  });
+
   it('retries on 429 RateLimited and succeeds when downstream recovers', async () => {
     let attempts = 0;
 

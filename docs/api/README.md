@@ -83,8 +83,9 @@ Consulte los archivos de especificación formal:
 | `GET` | `/api/v1/agent-graphs/{id}` | Leer una revisión guardada | `Authorization`, rol `ADMIN` |
 | `POST` | `/api/v1/agent-graphs/{id}/revisions` | Guardar una nueva revisión inmutable | `Authorization`, rol `ADMIN` |
 | `POST` | `/api/v1/agent-graphs/{id}/validate` | Validar la estructura de una revisión guardada | `Authorization`, rol `ADMIN` |
+| `POST` | `/api/v1/agent-graphs/{id}/simulate` | Simular una revisión guardada con fixtures | `Authorization`, rol `ADMIN` |
 | `POST` | `/api/v1/agent-graphs/{id}/publish` | Publicación bloqueada (HTTP 501) | `Authorization`, rol `ADMIN` |
-| `POST` | `/api/v1/agent-runs/simulate` | Simulación en sandbox (dry-run) | `Authorization` |
+| `POST` | `/api/v1/agent-runs/simulate` | Simular el mismo fixture con identificador en el cuerpo | `Authorization`, rol `ADMIN` |
 | `GET` | `/api/v1/agent-runs/{id}/trace` | Traza auditada de ejecución | `Authorization` |
 | `POST` | `/api/v1/workflows/{id}/publish` | Activar una revisión identificada | `Authorization` |
 | `POST` | `/api/v1/workflows/{id}/rollback` | Restaurar una revisión publicada con motivo de auditoría | `Authorization` |

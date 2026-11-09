@@ -10,7 +10,7 @@ import type {
 } from '@whatsap-automat/contracts';
 import { RE2JS } from 're2js';
 
-class SimulationInputError extends Error {
+export class SimulationInputError extends Error {
   readonly statusCode = 400;
   readonly code = 'VALIDATION_ERROR';
 }
