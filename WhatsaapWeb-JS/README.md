@@ -46,7 +46,7 @@ Recorrido principal:
 Desde la raíz del repositorio backend (`WhatsaapWeb-JS`):
 
 ```bash
-npm install
+PUPPETEER_SKIP_DOWNLOAD=true npm ci
 cp .env.example .env
 ```
 
@@ -68,6 +68,8 @@ Obligatorias cuando `WHATSAPP_PROVIDER=meta-cloud`:
 - `META_TOKEN_ENCRYPTION_KEY`, independiente del JWT y con al menos 32 caracteres
 
 `META_WA_DISPLAY_PHONE_NUMBER` es descriptiva. `DEFAULT_COMPANY_ID` identifica la empresa donde se registra la cuenta configurada por entorno; no se utiliza como fallback para webhooks con un `phone_number_id` desconocido.
+
+Para producción, compila con las dependencias de desarrollo y prepara el entorno de ejecución con `npm ci --omit=dev`. Ejecuta `npm start` con `NODE_ENV=production` y `WHATSAPP_PROVIDER=meta-cloud`. El adaptador Web.js y el servidor legacy quedan disponibles en desarrollo. Si vas a probar la conexión legacy, instala sin `PUPPETEER_SKIP_DOWNLOAD` para incluir su navegador.
 
 Desde la raíz del repositorio frontend (`Frontend_py_whatsaapweb`), en otra terminal:
 

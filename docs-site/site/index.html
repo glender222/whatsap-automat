@@ -126,7 +126,7 @@ cd whatsap-automat</code></pre>
               <div class="code-header"><span>Desde la raíz</span><button type="button" data-copy="install-command" aria-describedby="install-title" hidden><svg aria-hidden="true"><use href="#i-copy"/></svg><span>Copiar</span></button></div>
               <pre><code id="install-command">npm --prefix packages/contracts ci
 npm --prefix packages/contracts run build
-npm --prefix WhatsaapWeb-JS ci
+PUPPETEER_SKIP_DOWNLOAD=true npm --prefix WhatsaapWeb-JS ci
 npm --prefix Frontend_py_whatsaapweb ci</code></pre>
             </div>
           </li>

@@ -81,7 +81,7 @@ La aplicación web estará disponible en `http://localhost:5173`.
 cd ../WhatsaapWeb-JS
 cp .env.example .env
 # Edita .env con las credenciales de tu base de datos local y puertos
-npm ci
+PUPPETEER_SKIP_DOWNLOAD=true npm ci
 npm run db:migrate
 npm run typecheck
 npm run build

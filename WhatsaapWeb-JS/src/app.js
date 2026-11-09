@@ -1,3 +1,8 @@
+require('dotenv').config();
+if (process.env.NODE_ENV?.trim() === 'production') {
+  throw new Error('El servidor legacy solo está disponible en desarrollo. Usa npm start en producción.');
+}
+
 const express = require("express");
 const cors = require("cors");
 const http = require("http");
@@ -6,7 +11,6 @@ const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const swaggerUi = require('swagger-ui-express');
 const swaggerSpec = require('./config/swagger');
-require('dotenv').config();
 
 const config = require("./config");
 const WhatsAppService = require("./services/whatsappService");

@@ -20,6 +20,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  PUPPETEER_SKIP_DOWNLOAD: 'true'
+
 jobs:
   backend-ci:
     name: Backend CI (Node ${{ matrix.node-version }})
@@ -50,6 +53,10 @@ jobs:
       - name: Instalar dependencias
         working-directory: WhatsaapWeb-JS
         run: npm ci
+
+      - name: Auditar dependencias de producción
+        working-directory: WhatsaapWeb-JS
+        run: npm audit --omit=dev --audit-level=high
 
       - name: Validación de tipos estáticos (typecheck)
         working-directory: WhatsaapWeb-JS

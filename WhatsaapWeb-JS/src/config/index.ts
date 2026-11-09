@@ -27,9 +27,13 @@ function requireEnvironmentValue(name: string, minimumLength = 1): string {
   return value;
 }
 
-const providerValue = envValue('WHATSAPP_PROVIDER') || 'webjs';
+const nodeEnvironment = envValue('NODE_ENV') || 'development';
+const providerValue = envValue('WHATSAPP_PROVIDER') || (nodeEnvironment === 'production' ? 'meta-cloud' : 'webjs');
 if (providerValue !== 'webjs' && providerValue !== 'meta-cloud') {
   throw new Error('WHATSAPP_PROVIDER debe ser webjs o meta-cloud');
+}
+if (nodeEnvironment === 'production' && providerValue === 'webjs') {
+  throw new Error('WHATSAPP_PROVIDER=webjs solo está disponible en desarrollo. Usa meta-cloud en producción.');
 }
 const whatsappProvider = providerValue as WhatsappProvider;
 
@@ -38,7 +42,6 @@ if (aiProviderValue !== 'opencode' && aiProviderValue !== 'openai') {
   throw new Error('AI_PROVIDER debe ser opencode o openai');
 }
 const aiProvider = aiProviderValue as AiProvider;
-const nodeEnvironment = envValue('NODE_ENV') || 'development';
 const metaTokenEncryptionKey = envValue('META_TOKEN_ENCRYPTION_KEY');
 
 if (metaTokenEncryptionKey && metaTokenEncryptionKey.length < 32) {
