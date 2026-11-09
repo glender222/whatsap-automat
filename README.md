@@ -138,6 +138,10 @@ Para comprender a fondo el diseño técnico, consulta los documentos de especifi
 
 - Consulta [CONTRIBUTING.md](CONTRIBUTING.md) para conocer las normas de contribución, convenciones de commit y uso de worktrees.
 - Consulta [SECURITY.md](SECURITY.md) para conocer nuestra política de seguridad y cómo reportar vulnerabilidades de forma privada.
+
+El [SBOM CycloneDX](sbom.json) inventaría las dependencias npm fijadas en los seis lockfiles de web, backend, móvil, contratos, SDK y CLI. Los componentes y sus dependencias conservan la ubicación en cada proyecto. El campo `scope` distingue dependencias de desarrollo (`excluded`), opcionales (`optional`) y de runtime (`required`). Las propiedades conservan los casos mixtos de npm, las restricciones de plataforma y los enlaces locales. Las licencias reflejan los metadatos disponibles en el lockfile.
+
+Regenera el archivo con `bash scripts/sbom-generate.sh` y verifica el resultado con `node --test scripts/sbom-generate.test.cjs`. La prueba genera dos copias idénticas sin instalar dependencias y las compara con el archivo versionado. Este inventario describe el código y sus lockfiles npm. Los artefactos compilados y las dependencias del sistema operativo se auditan por separado.
 - Consulta [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) para las pautas de convivencia comunitaria.
 
 ---
