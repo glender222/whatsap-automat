@@ -45,7 +45,10 @@ export interface MetaDownloadResult {
 export class MetaCloudClient {
   private readonly baseUrl: string;
 
-  constructor(private readonly config: MetaCloudConfig) {
+  constructor(
+    private readonly config: MetaCloudConfig,
+    private readonly fetchGraph?: typeof fetch,
+  ) {
     this.baseUrl = `https://graph.facebook.com/${this.config.graphVersion}`;
   }
 
@@ -180,7 +183,10 @@ export class MetaCloudClient {
     return error;
   }
 
-  private async request(path: string, options: { method?: string; body?: unknown; headers?: Record<string, string> } = {}): Promise<Record<string, any>> {
+  private async request(
+    path: string,
+    options: { method?: string; body?: unknown; headers?: Record<string, string>; redirect?: RequestRedirect } = {},
+  ): Promise<Record<string, any>> {
     if (!this.isConfigured()) {
       const error = new Error('Meta Cloud API is not configured') as Error & { statusCode?: number };
       error.statusCode = 503;
@@ -191,8 +197,9 @@ export class MetaCloudClient {
     const timeout = setTimeout(() => controller.abort(), this.config.requestTimeoutMs || 20000);
 
     try {
-      const response = await fetch(`${this.baseUrl}${path}`, {
+      const response = await (this.fetchGraph ?? fetch)(`${this.baseUrl}${path}`, {
         method: options.method || 'GET',
+        ...(options.redirect ? { redirect: options.redirect } : {}),
         signal: controller.signal,
         headers: {
           Authorization: `Bearer ${this.config.accessToken}`,
@@ -211,6 +218,13 @@ export class MetaCloudClient {
     } finally {
       clearTimeout(timeout);
     }
+  }
+
+  async verifyPhoneAccess(): Promise<boolean> {
+    const phoneId = this.config.phoneNumberId;
+    if (!/^\d+$/.test(phoneId) || !/^v\d+\.\d+$/.test(this.config.graphVersion)) return false;
+    const result = await this.request(`/${phoneId}?fields=id`, { redirect: 'error' });
+    return result?.id === phoneId && !result.error;
   }
 
   async sendText(to: string, body: string): Promise<MetaSendResult> {

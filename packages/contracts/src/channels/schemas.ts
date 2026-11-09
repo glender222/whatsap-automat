@@ -110,7 +110,7 @@ export const channelConnectionHealthV1Schema = z.object({
   configured: z.boolean(),
   authorized: z.boolean(),
   lastErrorCode: z.string().nullable(),
-  lastCheckedAt: z.string().datetime(),
+  lastCheckedAt: z.string().datetime().nullable(),
 });
 
 export const channelConnectionV1Schema = z.object({

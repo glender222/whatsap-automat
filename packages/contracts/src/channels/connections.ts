@@ -4,7 +4,7 @@ export interface ChannelConnectionHealthV1 {
   readonly configured: boolean;
   readonly authorized: boolean;
   readonly lastErrorCode: string | null;
-  readonly lastCheckedAt: string;
+  readonly lastCheckedAt: string | null;
 }
 
 export const CONNECTION_STATUSES = [
