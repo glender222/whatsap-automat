@@ -35,12 +35,12 @@ Para generar un proyecto Android de desarrollo y compilarlo, usa Java 17, Androi
 
 ### APK Android ARM64 para QA
 
-Usa Linux con Node.js 22.13 o posterior dentro de la serie 22, Java 17 y `ANDROID_HOME` apuntando a un SDK con Platform 37.0, Build Tools 37.0.0, NDK 27.1.12297006 y CMake 3.22.1. Ejecuta desde la raíz del repositorio. `QA_GIT_REF` selecciona el commit y `QA_APK_DIR` permite elegir una carpeta de salida absoluta.
+Usa Linux con Node.js 22.13 o posterior dentro de la serie 22, JDK 17 y `ANDROID_HOME` apuntando a un SDK con Platform 37.0, Build Tools 37.0.0, NDK 27.1.12297006 y CMake 3.22.1. Ejecuta desde la raíz del repositorio. `QA_GIT_REF` selecciona el commit y `QA_APK_DIR` permite elegir una carpeta de salida absoluta.
 
 `EXPO_PUBLIC_API_URL` queda visible dentro del APK. Usa únicamente el origen HTTPS de un servidor de pruebas. El valor predeterminado `https://127.0.0.1:3000` apunta al propio dispositivo y el operador puede cambiarlo al iniciar sesión.
 
 ```bash
-set -eu
+set -euo pipefail
 qa_ref="${QA_GIT_REF:-HEAD}"
 qa_commit="$(git rev-parse --short "$qa_ref")"
 qa_tree="$(mktemp -d)"
@@ -96,7 +96,7 @@ cp android/app/build/outputs/apk/release/app-release.apk "$qa_apk"
 qa_tools="$ANDROID_HOME/build-tools/37.0.0"
 "$qa_tools/apksigner" verify --print-certs "$qa_apk"
 "$qa_tools/aapt" dump badging "$qa_apk" | sed -n '/^package:/p; /^application-label:/p; /^native-code:/p'
-unzip -l "$qa_apk" 'assets/index.android.bundle'
+jar tf "$qa_apk" | grep -Fx 'assets/index.android.bundle'
 sha256sum "$qa_apk"
 ```
 
