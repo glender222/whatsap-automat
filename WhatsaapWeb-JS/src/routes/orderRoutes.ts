@@ -1,27 +1,38 @@
 import { NextFunction, Response, Router } from 'express';
+import type { Pool } from 'pg';
 import pool from '../config/database';
-import { JwtRequest, resolveWhatsappCompanyId } from '../middleware/jwtAuth';
-import { CommercialOrderStatus, OrderRepositoryPg, OrderService } from '../modules/orders';
+import { JwtRequest, resolveWhatsappCompanyId, toPositiveInt } from '../middleware/jwtAuth';
+import { CommercialOrderStatus, OrderError, OrderRepositoryPg, OrderService } from '../modules/orders';
 import { emitDashboard } from '../sockets/socketEmitter';
 
 function parsePositiveInt(value: unknown): number | null {
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+  const parsed = toPositiveInt(value);
+  return Number.isSafeInteger(parsed) ? parsed : null;
 }
 
-function getUserId(req: JwtRequest): number | null {
-  const value = Number(req.user?.userId || req.user?.id);
-  return Number.isInteger(value) && value > 0 ? value : null;
+function getUserId(req: JwtRequest): number {
+  const id = parsePositiveInt(req.user?.userId ?? req.user?.id ?? req.user?.sub);
+  if (!id || !['ADMIN', 'EMPLEADO', 'SUPERADMIN'].includes(String(req.user?.rol ?? req.user?.role))) {
+    throw new OrderError(403, 'ORDER_OPERATOR_REQUIRED', 'Se requiere un operador autenticado');
+  }
+  return id;
 }
 
-export default function createOrderRoutes(): Router {
+function optionalReference(value: unknown): number | null {
+  if (value == null) return null;
+  const id = parsePositiveInt(value);
+  if (!id) throw new OrderError(400, 'VALIDATION_ERROR', 'Referencia de pedido invalida');
+  return id;
+}
+
+export default function createOrderRoutes(database: Pool = pool): Router {
   const router = Router();
-  const service = new OrderService(new OrderRepositoryPg(pool));
+  const service = new OrderService(new OrderRepositoryPg(database));
 
   router.get('/', async (req: JwtRequest, res: Response, next: NextFunction) => {
     try {
       const limit = Math.min(parsePositiveInt(req.query.limit) || 50, 200);
-      const offset = Math.max(Number(req.query.offset || 0) || 0, 0);
+      const offset = parsePositiveInt(req.query.offset) ?? 0;
       const data = await service.list(resolveWhatsappCompanyId(req), limit, offset);
       res.json({ success: true, data });
     } catch (error) {
@@ -45,9 +56,10 @@ export default function createOrderRoutes(): Router {
     try {
       const data = await service.createDetected({
         companyId: resolveWhatsappCompanyId(req),
-        chatId: String(req.body?.chatId || ''),
+        chatId: req.body?.chatId,
         userId: getUserId(req),
-        agentId: req.body?.agentId ? Number(req.body.agentId) : null,
+        agentId: optionalReference(req.body?.agentId),
+        sourceMessageId: optionalReference(req.body?.sourceMessageId),
         items: req.body?.items || [],
         status: req.body?.status,
         notes: req.body?.notes || null,
