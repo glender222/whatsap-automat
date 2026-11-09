@@ -484,23 +484,23 @@ test('real API isolates two companies through auth, signed ingress, inbox, socke
   assert.ok(olderPage.items.every(({ id }: { id: string }) => id !== pagedDocument.id));
 
   const files = `${canonicalPath}/messages/${documentId}/attachments`;
-  const download = (url: string, token?: string, range?: string) => fetch(`${base}${url}`, {
+  const downloadAttachment = (url: string, token?: string, range?: string) => fetch(`${base}${url}`, {
     headers: { ...(token && { Authorization: `Bearer ${token}` }), ...(range && { Range: range }) },
   });
   for (const [attachmentId, expected, mimetype] of [[primaryId, primaryBytes, 'application/pdf'], [secondaryId, secondaryBytes, 'image/png']] as const) {
-    const file = await download(`${files}/${attachmentId}`, owner.accessToken);
+    const file = await downloadAttachment(`${files}/${attachmentId}`, owner.accessToken);
     assert.equal(file.status, 200);
     assert.equal(file.headers.get('cache-control'), 'private, no-store');
     assert.equal(file.headers.get('content-type'), mimetype);
     assert.match(file.headers.get('content-disposition') || '', /^attachment;/);
     assert.deepEqual(Buffer.from(await file.arrayBuffer()), expected);
   }
-  const partial = await download(`${files}/${primaryId}`, owner.accessToken, 'bytes=0-4');
+  const partial = await downloadAttachment(`${files}/${primaryId}`, owner.accessToken, 'bytes=0-4');
   assert.equal(partial.status, 206);
   assert.equal(partial.headers.get('cache-control'), 'private, no-store');
   assert.equal(partial.headers.get('content-range'), `bytes 0-4/${primaryBytes.length}`);
   assert.deepEqual(Buffer.from(await partial.arrayBuffer()), primaryBytes.subarray(0, 5));
-  const invalidRange = await download(`${files}/${primaryId}`, owner.accessToken, 'bytes=9999-');
+  const invalidRange = await downloadAttachment(`${files}/${primaryId}`, owner.accessToken, 'bytes=9999-');
   assert.equal(invalidRange.status, 416);
   assert.equal(invalidRange.headers.get('content-range'), `bytes */${primaryBytes.length}`);
   await api(`${files}/${primaryId}`, 401);
