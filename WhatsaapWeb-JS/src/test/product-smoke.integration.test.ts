@@ -455,7 +455,8 @@ test('real API isolates two companies through auth, signed ingress, inbox, socke
   assert.equal(fromMessage.mimeType, 'application/pdf');
 
   const documentId = uploadedMessage.rows[0].id;
-  const tenantMedia = path.join(config.whatsapp.uploadDir, 'tenants', String(owner.user.companyId), 'meta-cloud');
+  const uploadDir = process.env.PRODUCT_SMOKE_UPLOAD_DIR ?? config.whatsapp.uploadDir;
+  const tenantMedia = path.join(uploadDir, 'tenants', String(owner.user.companyId), 'meta-cloud');
   const primaryPath = path.join(tenantMedia, `${randomUUID()}.pdf`);
   const secondaryPath = path.join(tenantMedia, `${randomUUID()}.png`);
   const primaryBytes = Buffer.from('%PDF-1.4\nfixture first attachment\n%%EOF\n');
