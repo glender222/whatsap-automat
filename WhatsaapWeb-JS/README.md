@@ -74,6 +74,8 @@ Obligatorias cuando `WHATSAPP_PROVIDER=meta-cloud`:
 
 En desarrollo sin clave de cifrado, el token de entorno se usa para el número configurado mientras su cuenta de arranque esté habilitada. La desconexión se guarda en PostgreSQL y sigue vigente después de reiniciar. Para reconectar, un administrador guarda un token en la configuración de WhatsApp Business con `META_TOKEN_ENCRYPTION_KEY` activa.
 
+Cuando se pierde el acuse de WhatsApp de una campaña, el intento queda pendiente y el despacho se pausa. Los intentos creados desde la migración 045 pueden conciliarse por el webhook firmado de Meta, con una referencia opaca y los datos de la línea y del destinatario del intento. La API acepta estos recibos durante 30 días y tolera hasta cinco minutos de desfase en su marca temporal. Una vez conciliado, el administrador revisa la audiencia y reanuda el despacho para los destinatarios aún pendientes de intentar. Las entregas históricas sin referencia requieren revisión operativa. Una interrupción del proceso de despacho puede requerir recuperación operativa aunque el webhook ya haya registrado la entrega.
+
 Para producción, compila con las dependencias de desarrollo y prepara el entorno de ejecución con `npm ci --omit=dev`. Ejecuta `npm start` con `NODE_ENV=production` y `WHATSAPP_PROVIDER=meta-cloud`. El adaptador Web.js y el servidor legacy quedan disponibles en desarrollo. Si vas a probar la conexión legacy, instala sin `PUPPETEER_SKIP_DOWNLOAD` para incluir su navegador.
 
 Desde la raíz del repositorio frontend (`Frontend_py_whatsaapweb`), en otra terminal:
