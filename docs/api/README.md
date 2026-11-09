@@ -85,8 +85,10 @@ Consulte los archivos de especificación formal:
 | `POST` | `/api/v1/agent-graphs/{id}/publish` | Publicación bloqueada (HTTP 501) | `Authorization`, rol `ADMIN` |
 | `POST` | `/api/v1/agent-runs/simulate` | Simulación en sandbox (dry-run) | `Authorization` |
 | `GET` | `/api/v1/agent-runs/{id}/trace` | Traza auditada de ejecución | `Authorization` |
-| `POST` | `/api/v1/automation-definitions/{id}/publish` | Publicar regla de workflow | `Authorization` |
+| `POST` | `/api/v1/workflows/{id}/publish` | Activar una revisión identificada | `Authorization` |
+| `POST` | `/api/v1/workflows/{id}/rollback` | Restaurar una revisión publicada con motivo de auditoría | `Authorization` |
 | `GET` | `/api/v1/approvals` | Cola de aprobaciones pendientes | `Authorization` |
+| `GET` | `/api/v1/approvals/{id}` | Estado y parámetros redactados | `Authorization` |
 | `POST` | `/api/v1/approvals/{id}/decision` | Decisión de aprobación (CAS) | `Authorization`, `Idempotency-Key` |
 | `GET` | `/api/v1/operations/executions` | Historial de soporte y reintentos | `Authorization` |
 

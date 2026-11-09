@@ -38,6 +38,19 @@ Los agentes trabajan en worktrees separados y entregan cambios acotados. QA rota
 | SDK, CLI y extensiones | Instalar desde el artefacto, ejecutar un ejemplo sobre la API y verificar contratos, permisos y checksum. Las mutaciones del catálogo exigen identidad y autorización. |
 | Web, móvil y documentación | Revisar los recorridos anteriores desde interfaces reales. Probar teclado, navegación estrecha, recuperación de sesión y descargas con sus permisos efectivos. |
 
+## Evidencia de integración local
+
+| Recorrido | Evidencia | Pendiente para la release |
+| --- | --- | --- |
+| Instalación, sesión y bandeja | Backend compilado arrancado con una base PostgreSQL vacía y rol sin `BYPASSRLS`. Webhook firmado, historial, paginación v1, Socket.IO por empresa y toma de control comprobados. | Validar proveedor de prueba y recuperación de envíos inciertos. |
+| Operación web | Chromium en escritorio y pantalla estrecha. Bandeja, segmentos, confirmación de campañas y Marketplace con datos de prueba. | Revisión independiente del candidato y recorridos de automatización y configuración. |
+| Operación móvil | Expo 58, exportación Android, iOS y web, pruebas del cliente y APK de desarrollo ARM64. | APK de QA con JavaScript incluido, prueba en dispositivo y compilación nativa de iOS. |
+| Workflows | PostgreSQL y worker Temporal locales. Revisiones fijadas, duplicados concurrentes, rollback y recuperación tras pérdida del acuse comprobados. | Probar la consola web y definir operación de producción. |
+| Agentes y aprobaciones | Revisiones de Studio inmutables, trazas por empresa, pausa de IA y auditoría de decisiones verificadas con PostgreSQL. | Evaluación de publicación vinculada a la revisión ejecutada y validación del proveedor de IA. |
+| Campañas | Graph simulado y estado real en PostgreSQL. Se comprobó consentimiento, ventana de servicio, revisión de audiencia y acuse del proveedor. | Envío de prueba autorizado y soporte operativo para entrega incierta. |
+| Marketplace | Publicación por API, puntuaciones agregadas y edición de reseña comprobadas con RLS. | Instalación de extensiones y gestión de publicaciones desde la interfaz. |
+| Documentación y release | Portal local y paquete de guías y contratos descargables verificados. | Publicar el portal y artefactos validados. GitHub exige el permiso `workflow` para aceptar los cambios de CI. |
+
 ## Criterio de refactor y retirada
 
 - **Corregir** una función alcanzable desde la aplicación o requerida para un recorrido. Primero reproducir el defecto y conservar los contratos que usen clientes existentes.

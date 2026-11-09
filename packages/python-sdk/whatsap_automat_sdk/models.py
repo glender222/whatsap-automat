@@ -180,7 +180,7 @@ class ChannelConnectionHealth(AutomatBaseModel):
     configured: bool
     authorized: bool
     last_error_code: Optional[str] = Field(default=None, alias="lastErrorCode")
-    last_checked_at: Union[datetime, str] = Field(alias="lastCheckedAt")
+    last_checked_at: Optional[Union[datetime, str]] = Field(alias="lastCheckedAt")
 
 
 class ChannelConnection(AutomatBaseModel):

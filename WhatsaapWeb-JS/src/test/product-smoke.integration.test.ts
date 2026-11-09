@@ -222,6 +222,22 @@ test('real API isolates two companies through auth, signed ingress, inbox, socke
   const otherWorkspaceBody = await otherWorkspace.json();
   assert.equal(otherWorkspaceBody.tenantId, String(other.user.companyId));
   assert.notEqual(otherWorkspaceBody.workspaceId, ownerWorkspace.workspaceId);
+  const graphs = '/api/v1/agent-graphs';
+  await api(graphs, 403, employeeToken);
+  const graphId = `qa-${randomUUID()}`;
+  const draft = await api(graphs, 201, owner.accessToken, {
+    graphId, entryNodeId: 'entry',
+    nodes: [{ id: 'entry', kind: 'router', config: {} }, { id: 'end', kind: 'end', config: {} }],
+    edges: [{ id: 'flow', from: 'entry', to: 'end' }], policyRef: 'qa',
+    limits: { maxSteps: 10, maxDelegations: 0, maxParallelNodes: 1, maxDurationSeconds: 10, maxModelTokens: 100, maxCostMicroUsd: 100 },
+  });
+  assert.equal(draft.status, 'draft');
+  await api(`${graphs}/${graphId}`, 404, other.accessToken);
+  const validation = await api(`${graphs}/${graphId}/validate`, 200, owner.accessToken, {});
+  assert.equal(validation.specHash, draft.specHash);
+  assert.equal(validation.publicationEvidence, false);
+  await api(`${graphs}/${graphId}/publish`, 501, owner.accessToken, {});
+
   await api('/api/v1/admin/health/diagnostics', 403, employeeToken);
   const createApproval = (expiresInSeconds: number) => hitlApprovalService.createApprovalRequest({
     tenantId: owner.user.companyId, runId: randomUUID(), toolName: 'test-review', risk: 'financial',
@@ -251,4 +267,27 @@ test('real API isolates two companies through auth, signed ingress, inbox, socke
     [owner.user.companyId, approval.id]
   ));
   assert.deepEqual(auditRows.rows.map((row) => String(row.actor_user_id)), [String(owner.user.id)]);
+
+  const retryApproval = await createApproval(60);
+  const canonicalApprovals = '/api/v1/approvals';
+  assert.deepEqual(await client.approvals.list({ risk: 'financial' }), [retryApproval]);
+  assert.deepEqual(await client.approvals.get(retryApproval.id), retryApproval);
+  assert.equal((await client.approvals.get(expired.id)).status, 'expired');
+  await api(`${canonicalApprovals}/${retryApproval.id}`, 404, other.accessToken);
+  await api(`${canonicalApprovals}/${retryApproval.id}`, 403, employeeToken);
+  await api(`${canonicalApprovals}/${retryApproval.id}/decision`, 422, owner.accessToken, decision);
+  const retryKey = randomUUID();
+  const approve = { decision: 'approved' as const, expectedVersion: 1 };
+  const [firstDecision, replay] = await Promise.all([
+    client.approvals.decide(retryApproval.id, approve, retryKey),
+    client.approvals.decide(retryApproval.id, approve, retryKey),
+  ]);
+  assert.deepEqual(firstDecision, replay);
+  await assert.rejects(client.approvals.decide(retryApproval.id, { ...approve, decision: 'rejected' }, retryKey), { status: 409 });
+  await assert.rejects(client.approvals.decide(retryApproval.id, approve), { status: 409 });
+  const replayAudit = await withTenantTransaction(owner.user.companyId, (db) => db.query(
+    `SELECT id FROM operational_actions WHERE action_type = 'approval_decision' AND metadata_json->>'approvalId' = $1`,
+    [retryApproval.id]
+  ));
+  assert.equal(replayAudit.rowCount, 1);
 });

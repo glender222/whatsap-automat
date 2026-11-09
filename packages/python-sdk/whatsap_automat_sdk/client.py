@@ -8,8 +8,9 @@ from __future__ import annotations
 import asyncio
 import random
 import time
+from uuid import uuid4
 from dataclasses import dataclass
-from typing import Any, Dict, List, Mapping, Optional, TypeVar, Union
+from typing import Any, Dict, List, Literal, Mapping, Optional, TypeVar, Union
 import httpx
 
 from .exceptions import (
@@ -208,14 +209,17 @@ class WorkflowsResource:
     def __init__(self, client: AutomatClient):
         self._client = client
 
-    def publish(self, workflow_id: str) -> Dict[str, Any]:
-        return self._client._request("POST", f"/automation-definitions/{workflow_id}/publish")
+    def publish(self, workflow_id: str, revision_id: str) -> Dict[str, Any]:
+        response = self._client._request(
+            "POST", f"/workflows/{workflow_id}/publish", json_body={"revisionId": revision_id},
+        )
+        return response["data"]
 
-    def rollback(self, workflow_id: str, target_revision_number: int) -> Dict[str, Any]:
+    def rollback(self, workflow_id: str, target_revision_number: int, reason: str) -> Dict[str, Any]:
         return self._client._request(
             "POST",
             f"/workflows/{workflow_id}/rollback",
-            json_body={"targetRevisionNumber": target_revision_number},
+            json_body={"targetRevisionNumber": target_revision_number, "reason": reason},
         )
 
 
@@ -241,6 +245,7 @@ class ApprovalsResource:
         decision: Literal["approved", "rejected"],
         expected_version: int,
         reason: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
     ) -> ApprovalDecisionResult:
         cmd = ApprovalDecisionRequest(
             decision=decision,
@@ -251,6 +256,7 @@ class ApprovalsResource:
             "POST",
             f"/approvals/{approval_id}/decision",
             json_body=cmd.model_dump(by_alias=True, exclude_none=True),
+            headers={"Idempotency-Key": idempotency_key if idempotency_key is not None else uuid4().hex},
         )
         return ApprovalDecisionResult.model_validate(data)
 
@@ -324,6 +330,7 @@ class AutomatClient:
         path: str,
         params: Optional[Mapping[str, Any]] = None,
         json_body: Optional[Any] = None,
+        headers: Optional[Mapping[str, str]] = None,
     ) -> Any:
         clean_path = path if path.startswith("/") else f"/{path}"
         attempt = 0
@@ -336,6 +343,7 @@ class AutomatClient:
                     url=clean_path,
                     params=params,
                     json=json_body,
+                    headers=headers,
                 )
 
                 if response.is_success:
@@ -531,14 +539,17 @@ class AsyncWorkflowsResource:
     def __init__(self, client: AsyncAutomatClient):
         self._client = client
 
-    async def publish(self, workflow_id: str) -> Dict[str, Any]:
-        return await self._client._request("POST", f"/automation-definitions/{workflow_id}/publish")
+    async def publish(self, workflow_id: str, revision_id: str) -> Dict[str, Any]:
+        response = await self._client._request(
+            "POST", f"/workflows/{workflow_id}/publish", json_body={"revisionId": revision_id},
+        )
+        return response["data"]
 
-    async def rollback(self, workflow_id: str, target_revision_number: int) -> Dict[str, Any]:
+    async def rollback(self, workflow_id: str, target_revision_number: int, reason: str) -> Dict[str, Any]:
         return await self._client._request(
             "POST",
             f"/workflows/{workflow_id}/rollback",
-            json_body={"targetRevisionNumber": target_revision_number},
+            json_body={"targetRevisionNumber": target_revision_number, "reason": reason},
         )
 
 
@@ -564,6 +575,7 @@ class AsyncApprovalsResource:
         decision: Literal["approved", "rejected"],
         expected_version: int,
         reason: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
     ) -> ApprovalDecisionResult:
         cmd = ApprovalDecisionRequest(
             decision=decision,
@@ -574,6 +586,7 @@ class AsyncApprovalsResource:
             "POST",
             f"/approvals/{approval_id}/decision",
             json_body=cmd.model_dump(by_alias=True, exclude_none=True),
+            headers={"Idempotency-Key": idempotency_key if idempotency_key is not None else uuid4().hex},
         )
         return ApprovalDecisionResult.model_validate(data)
 
@@ -647,6 +660,7 @@ class AsyncAutomatClient:
         path: str,
         params: Optional[Mapping[str, Any]] = None,
         json_body: Optional[Any] = None,
+        headers: Optional[Mapping[str, str]] = None,
     ) -> Any:
         clean_path = path if path.startswith("/") else f"/{path}"
         attempt = 0
@@ -659,6 +673,7 @@ class AsyncAutomatClient:
                     url=clean_path,
                     params=params,
                     json=json_body,
+                    headers=headers,
                 )
 
                 if response.is_success:

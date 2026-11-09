@@ -578,11 +578,11 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /automation-definitions/{id}/publish:
+  /workflows/{id}/publish:
     post:
-      summary: Publicar regla o automatización
-      description: Versiona y activa una definición de automatización vinculada a un grafo.
-      operationId: publishAutomationDefinition
+      summary: Publicar una revisión de workflow
+      description: Un administrador selecciona la revisión exacta que usarán las nuevas ejecuciones.
+      operationId: publishWorkflowRevision
       security:
         - BearerAuth: []
       parameters:
@@ -591,20 +591,120 @@ paths:
           required: true
           schema:
             type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [revisionId]
+              properties:
+                revisionId:
+                  type: string
       responses:
         '200':
-          description: Automatización publicada
+          description: Revisión activa
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AutomationDefinition'
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    const: true
+                  data:
+                    type: object
+                    required: [workflowId, publishedRevisionId, status]
+                    properties:
+                      workflowId:
+                        type: string
+                      publishedRevisionId:
+                        type: string
+                      status:
+                        const: published
+        '400':
+          $ref: '#/components/responses/ValidationError'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /workflows/{id}/rollback:
+    post:
+      summary: Restaurar una revisión publicada
+      description: Cambia la revisión para futuras ejecuciones y registra el motivo del administrador.
+      operationId: rollbackWorkflowRevision
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              anyOf:
+                - required: [targetRevisionNumber]
+                - required: [targetRevisionId]
+              properties:
+                reason:
+                  type: string
+                  minLength: 5
+                  maxLength: 500
+                targetRevisionNumber:
+                  type: integer
+                  minimum: 1
+                targetRevisionId:
+                  type: string
+      responses:
+        '200':
+          description: Revisión restaurada
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, workflowId, previousRevisionId, publishedRevisionId, targetRevisionNumber, latencyMs, updatedAt]
+                properties:
+                  success:
+                    const: true
+                  workflowId:
+                    type: string
+                  previousRevisionId:
+                    type: [string, 'null']
+                  publishedRevisionId:
+                    type: string
+                  targetRevisionNumber:
+                    type: integer
+                  latencyMs:
+                    type: number
+                  updatedAt:
+                    type: string
+                    format: date-time
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
 
   /approvals:
     get:
       summary: Consultar cola de aprobaciones pendientes
-      description: Lista las solicitudes de aprobación que requieren revisión humana según el rol.
+      description: Lista las solicitudes vigentes y pendientes para administradores con membresía activa.
       operationId: listApprovals
       security:
         - BearerAuth: []
@@ -613,12 +713,27 @@ paths:
           in: query
           required: false
           schema:
-            $ref: '#/components/schemas/ApprovalStatus'
+            type: string
+            const: pending
         - name: risk
           in: query
           required: false
           schema:
-            $ref: '#/components/schemas/RiskLevel'
+            $ref: '#/components/schemas/ApprovalRiskLevel'
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 10000
+            default: 0
       responses:
         '200':
           description: Lista de aprobaciones
@@ -632,11 +747,40 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /approvals/{id}:
+    get:
+      summary: Consultar el estado de una aprobación
+      description: Devuelve el estado y los parámetros redactados dentro de la empresa del administrador.
+      operationId: getApproval
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Estado de la aprobación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /approvals/{id}/decision:
     post:
       summary: Aprobar o rechazar solicitud
-      description: Registra la decisión humana sobre una acción sensible garantizando idempotencia.
+      description: Registra la decisión y su auditoría en una transacción. Repetir la misma solicitud con la misma clave devuelve la decisión original.
       operationId: decideApproval
       security:
         - BearerAuth: []
@@ -672,6 +816,14 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '410':
+          description: Solicitud vencida
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          $ref: '#/components/responses/ValidationError'
 
   /operations/executions:
     get:
@@ -1423,6 +1575,10 @@ components:
           type: string
           format: date-time
 
+    ApprovalRiskLevel:
+      type: string
+      enum: [low, medium, high, read, write, send, financial, destructive]
+
     ApprovalRequest:
       type: object
       required:
@@ -1451,9 +1607,10 @@ components:
         proposedActionHash:
           type: string
         policyVersion:
+          description: Versión actual para el control de concurrencia de la decisión.
           type: integer
         risk:
-          $ref: '#/components/schemas/RiskLevel'
+          $ref: '#/components/schemas/ApprovalRiskLevel'
         status:
           $ref: '#/components/schemas/ApprovalStatus'
         expiresAt:
@@ -1488,8 +1645,10 @@ components:
           enum: [approved, rejected]
         reason:
           type: string
+          maxLength: 1000
         expectedVersion:
           type: integer
+          minimum: 1
 
     ApprovalDecisionResult:
       type: object

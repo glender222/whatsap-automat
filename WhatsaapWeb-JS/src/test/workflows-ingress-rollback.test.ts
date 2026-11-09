@@ -8,6 +8,7 @@ import { after, before, describe, test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { Client, Connection } from '@temporalio/client';
 import express from 'express';
+import { AutomatClient } from '../../../packages/sdk/src';
 import { Pool } from 'pg';
 import { WorkflowController } from '../controllers/WorkflowController';
 import { TenantScopedUoW } from '../db/TenantScopedUoW';
@@ -119,6 +120,7 @@ describe('Durable workflow HTTP, PostgreSQL and Temporal integration', {
     const baseUrl = `http://127.0.0.1:${address.port}/api/v1/workflows`;
     const adminA = token(tenantA);
     const adminB = token(tenantB);
+    const sdk = new AutomatClient({ baseUrl: `http://127.0.0.1:${address.port}/api/v1`, token: adminA });
 
     async function post(url: string, data: unknown, jwtToken?: string, headers: Record<string, string> = {}) {
       const response = await fetch(`${baseUrl}${url}`, {
@@ -147,7 +149,7 @@ describe('Durable workflow HTTP, PostgreSQL and Temporal integration', {
     assert.match(specHash, /^[a-f0-9]{64}$/);
     assert.equal((await post(`/${workflowId}/triggers/webhook`, {}, adminA)).status, 409);
     assert.equal((await post(`/${workflowId}/publish`, { revisionId: revisionOne }, adminB)).status, 404);
-    assert.equal((await post(`/${workflowId}/publish`, { revisionId: revisionOne }, adminA)).status, 200);
+    assert.deepEqual(await sdk.workflows.publish(workflowId, revisionOne), { workflowId, publishedRevisionId: revisionOne, status: 'published' });
 
     const firstTrigger = await post(`/${workflowId}/triggers/webhook`, {}, adminA);
     const secondTrigger = await post(`/${workflowId}/triggers/webhook`, {}, adminA);
@@ -203,11 +205,13 @@ describe('Durable workflow HTTP, PostgreSQL and Temporal integration', {
     assert.equal(versionTwo.status, 201);
     const revisionTwo = versionTwo.body.data.id;
     assert.equal((await post(`/${workflowId}/rollback`, { targetRevisionId: revisionTwo, reason: 'Draft is not ready' }, adminA)).status, 404);
-    assert.equal((await post(`/${workflowId}/publish`, { revisionId: revisionTwo }, adminA)).status, 200);
+    assert.equal((await sdk.workflows.publish(workflowId, revisionTwo)).publishedRevisionId, revisionTwo);
     const newRun = await post(webhookPath, { total: 20 }, webhookToken, { 'idempotency-key': 'next-event' });
     assert.equal(newRun.status, 202);
     assert.equal(newRun.body.revisionId, revisionTwo);
-    assert.equal((await post(`/${workflowId}/rollback`, { targetRevisionId: revisionOne, reason: 'Restore original behavior' }, adminA)).status, 200);
+    const rollback = await sdk.workflows.rollback(workflowId, 1, 'Restore original behavior');
+    assert.equal(rollback.publishedRevisionId, revisionOne);
+    assert.equal(rollback.previousRevisionId, revisionTwo);
     const forbiddenRun = await fetch(`${baseUrl}/runs/${runId}`, { headers: { authorization: `Bearer ${adminB}` } });
     assert.equal(forbiddenRun.status, 404);
 

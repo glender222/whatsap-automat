@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { TenantScopedUoW, tenantScopedUoW } from '../../../db/TenantScopedUoW';
 import {
   ApprovalRequestV1,
@@ -40,6 +40,13 @@ export class ApprovalExpiredError extends Error {
   constructor(id: string) {
     super(`Approval request '${id}' has expired`);
     this.name = 'ApprovalExpiredError';
+  }
+}
+
+export class ApprovalIdempotencyConflictError extends Error {
+  constructor() {
+    super('Idempotency-Key is already associated with another approval decision');
+    this.name = 'ApprovalIdempotencyConflictError';
   }
 }
 
@@ -105,7 +112,7 @@ export class HitlApprovalService {
 
   async listPendingApprovals(
     tenantId: number,
-    options: { limit?: number; offset?: number } = {}
+    options: { limit?: number; offset?: number; risk?: string } = {}
   ): Promise<ApprovalRequestV1[]> {
     const limit = Math.min(Math.max(1, options.limit || 50), 100);
     const offset = Math.max(0, options.offset || 0);
@@ -114,9 +121,10 @@ export class HitlApprovalService {
       const res = await client.query(
         `SELECT * FROM approval_requests
          WHERE tenant_id = $1 AND status = 'pending' AND expires_at > NOW()
-         ORDER BY created_at DESC
+           AND ($4::text IS NULL OR risk = $4)
+         ORDER BY created_at DESC, id DESC
          LIMIT $2 OFFSET $3`,
-        [tenantId, limit, offset]
+        [tenantId, limit, offset, options.risk ?? null]
       );
       return res.rows.map((r) => this.mapRowToContract(r));
     });
@@ -160,12 +168,34 @@ export class HitlApprovalService {
     actorId: string;
     actorRole: string;
     reason?: string;
+    idempotencyKey?: string;
   }): Promise<ApprovalDecisionResultV1> {
     if (params.expectedVersion === undefined || params.expectedVersion < 1) {
       throw new Error(`Invalid expectedVersion: ${params.expectedVersion}. Version must be positive integer.`);
     }
 
-    const result = await this.uow.run(params.tenantId, async (client) => {
+    const key = params.idempotencyKey ? `approval-decision:${params.idempotencyKey}` : null;
+    const requestHash = key ? createHash('sha256').update(JSON.stringify([
+      params.approvalId, params.actorId, params.decision, params.expectedVersion, params.reason ?? null,
+    ])).digest('hex') : null;
+    const { result, replayed } = await this.uow.run(params.tenantId, async (client) => {
+      if (key) {
+        const claim = await client.query(
+          `INSERT INTO idempotency_ledger (tenant_id, idempotency_key, source, request_hash)
+           VALUES ($1, $2, 'approval_decision', $3) ON CONFLICT (tenant_id, idempotency_key) DO NOTHING`,
+          [params.tenantId, key, requestHash]
+        );
+        if (!claim.rowCount) {
+          const { rows: [cached] } = await client.query(
+            `SELECT request_hash, response_body FROM idempotency_ledger
+             WHERE tenant_id = $1 AND idempotency_key = $2 AND source = 'approval_decision'`,
+            [params.tenantId, key]
+          );
+          if (cached?.request_hash !== requestHash || !cached.response_body) throw new ApprovalIdempotencyConflictError();
+          return { result: cached.response_body as ApprovalDecisionResultV1, replayed: true };
+        }
+      }
+
       // CAS Atomic Update
       const updateRes = await client.query(
         `UPDATE approval_requests
@@ -201,12 +231,12 @@ export class HitlApprovalService {
         }
 
         const current = checkRes.rows[0];
-        if (current.expired) {
-          throw new ApprovalExpiredError(params.approvalId);
-        }
-
         if (current.status !== 'pending') {
           throw new ApprovalAlreadyDecidedError(params.approvalId, current.status);
+        }
+
+        if (current.expired) {
+          throw new ApprovalExpiredError(params.approvalId);
         }
 
         if (Number(current.version) !== params.expectedVersion) {
@@ -240,14 +270,22 @@ export class HitlApprovalService {
         ]
       );
 
-      return {
+      const result: ApprovalDecisionResultV1 = {
         approvalId: row.id,
         status: params.decision,
         decidedAt: new Date(row.decided_at).toISOString(),
         decidedBy: row.decided_by,
       };
+      if (key) {
+        await client.query(
+          `UPDATE idempotency_ledger SET response_status = 200, response_body = $3::jsonb
+           WHERE tenant_id = $1 AND idempotency_key = $2`,
+          [params.tenantId, key, JSON.stringify(result)]
+        );
+      }
+      return { result, replayed: false };
     });
-    emitToTenant(params.tenantId, 'approval.decided', {
+    if (!replayed) emitToTenant(params.tenantId, 'approval.decided', {
       approvalId: result.approvalId,
       decision: result.status,
       decidedBy: result.decidedBy,
@@ -291,8 +329,8 @@ export class HitlApprovalService {
           : row.redacted_details || {},
       },
       createdAt: new Date(row.created_at).toISOString(),
-      decidedAt: row.decided_at ? new Date(row.decided_at).toISOString() : undefined,
-      decidedBy: row.decided_by || undefined,
+      ...(row.decided_at && { decidedAt: new Date(row.decided_at).toISOString() }),
+      ...(row.decided_by && { decidedBy: row.decided_by }),
     };
   }
 }

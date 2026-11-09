@@ -69,7 +69,7 @@ jobs:
 
       - name: Autorización de herramientas, aprobaciones y marketplace
         working-directory: WhatsaapWeb-JS
-        run: node --import tsx --test src/test/ai-tool-routes.test.ts src/test/publication-gate.test.ts src/test/tool-broker.test.ts src/test/rag-knowledge-base.test.ts src/test/m3-rag-adversarial-challenge.test.ts src/test/marketplace-registry.test.ts src/test/workflows-ingress-rollback.test.ts
+        run: node --import tsx --test src/test/ai-tool-routes.test.ts src/test/publication-gate.test.ts src/test/agent-eval-simulator.test.ts src/test/tool-broker.test.ts src/test/rag-knowledge-base.test.ts src/test/m3-rag-adversarial-challenge.test.ts src/test/marketplace-registry.test.ts src/test/workflows-ingress-rollback.test.ts
 
   product-smoke:
     name: Flujo de producto con PostgreSQL y Socket.IO
@@ -142,11 +142,12 @@ jobs:
             cat "$RUNNER_TEMP/product-smoke.log"
             exit 1
           fi
-      - name: Probar campañas y marketplace contra PostgreSQL
+      - name: Probar campañas, marketplace y Studio contra PostgreSQL
         env:
           CAMPAIGN_SMOKE: '1'
           MARKETPLACE_TEST_DATABASE_URL: postgres://whatsap_smoke:ci-runtime-only@127.0.0.1:5432/whatsap_automat_smoke
-        run: node --import tsx --test src/test/campaign-persistence.integration.test.ts src/test/marketplace-postgres.test.ts
+          AGENT_STUDIO_TEST_DATABASE_URL: postgres://whatsap_smoke:ci-runtime-only@127.0.0.1:5432/whatsap_automat_smoke
+        run: node --import tsx --test src/test/campaign-persistence.integration.test.ts src/test/marketplace-postgres.test.ts src/test/agent-studio-postgres.test.ts
 
   contracts-ci:
     name: Shared Contracts CI (Node ${{ matrix.node-version }})
