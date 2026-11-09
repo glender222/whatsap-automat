@@ -41,6 +41,7 @@ const WorkflowDetailPage = lazy(() => import("../components/workflows/WorkflowDe
 const WorkflowEditorPage = lazy(() => import("../components/workflows/WorkflowEditorPage"));
 const AuditEventsPage = lazy(() => import("../pages/Admin/AuditEventsPage"));
 const SystemHealthPage = lazy(() => import("../pages/Admin/SystemHealthPage"));
+const OperationExecutionsPage = lazy(() => import("../pages/Admin/OperationExecutionsPage"));
 
 function PrivateRoute({ children, adminOnly = false }: { children: ReactNode; adminOnly?: boolean }) {
   const isAuth = authService.isAuthenticated();
@@ -104,6 +105,7 @@ function AppRoutesInner() {
           } />
           <Route path="admin/auditoria" element={<PrivateRoute adminOnly><AuditEventsPage /></PrivateRoute>} />
           <Route path="admin/salud" element={<PrivateRoute adminOnly><SystemHealthPage /></PrivateRoute>} />
+          <Route path="admin/ejecuciones" element={<PrivateRoute adminOnly><OperationExecutionsPage /></PrivateRoute>} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Route>
 
