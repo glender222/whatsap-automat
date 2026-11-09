@@ -1,8 +1,4 @@
-// Test environment variables before config load
-process.env.JWT_SECRET = 'test-only-jwt-secret-with-at-least-32-characters-for-testing';
-process.env.DB_PASSWORD = 'test-only-database-password';
-process.env.META_TOKEN_ENCRYPTION_KEY = 'test-encryption-key-with-at-least-32-chars-for-aes256';
-
+import './fixtures/testEnv';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { AgentEvalService } from '../services/ai/eval/AgentEvalService';
@@ -269,6 +265,8 @@ describe('PR-F5-03: AgentEvalService Dry-Run Simulator & Regression Harness Test
 
       assert.equal(res.status, 200);
       assert.equal(res.body.success, true);
+      assert.equal(res.body.mode, 'simulation');
+      assert.equal(res.body.publicationEvidence, false);
       assert.equal(res.body.data.agentGraphId, 'graph_support_agent');
       assert.equal(typeof res.body.data.passRatePercent, 'number');
       assert.ok(Array.isArray(res.body.data.scenarioResults));

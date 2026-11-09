@@ -77,9 +77,12 @@ Consulte los archivos de especificación formal:
 | `POST` | `/api/v1/conversations/{id}/resume-ai` | Reanudar IA conversacional (CAS) | `Authorization` |
 | `GET` | `/api/v1/channel-connections` | Conexiones y salud | `Authorization` |
 | `POST` | `/api/v1/channel-connections/{id}/validate` | Diagnóstico sin secretos | `Authorization` |
-| `POST` | `/api/v1/agent-graphs` | Crear borrador de grafo | `Authorization` |
-| `POST` | `/api/v1/agent-graphs/{id}/validate` | Lint y análisis estático | `Authorization` |
-| `POST` | `/api/v1/agent-graphs/{id}/publish` | Publicar versión inmutable | `Authorization`, `If-Match` |
+| `GET` | `/api/v1/agent-graphs` | Listar borradores por tenant | `Authorization`, rol `ADMIN` |
+| `POST` | `/api/v1/agent-graphs` | Crear borrador de grafo | `Authorization`, rol `ADMIN` |
+| `GET` | `/api/v1/agent-graphs/{id}` | Leer una revisión guardada | `Authorization`, rol `ADMIN` |
+| `POST` | `/api/v1/agent-graphs/{id}/revisions` | Guardar una nueva revisión inmutable | `Authorization`, rol `ADMIN` |
+| `POST` | `/api/v1/agent-graphs/{id}/validate` | Validar la estructura de una revisión guardada | `Authorization`, rol `ADMIN` |
+| `POST` | `/api/v1/agent-graphs/{id}/publish` | Publicación bloqueada (HTTP 501) | `Authorization`, rol `ADMIN` |
 | `POST` | `/api/v1/agent-runs/simulate` | Simulación en sandbox (dry-run) | `Authorization` |
 | `GET` | `/api/v1/agent-runs/{id}/trace` | Traza auditada de ejecución | `Authorization` |
 | `POST` | `/api/v1/automation-definitions/{id}/publish` | Publicar regla de workflow | `Authorization` |
@@ -88,6 +91,8 @@ Consulte los archivos de especificación formal:
 | `GET` | `/api/v1/operations/executions` | Historial de soporte y reintentos | `Authorization` |
 
 El contrato incluye operaciones previstas. En la API v1 de conversaciones se pueden consultar la lista, el detalle y el historial, además de tomar el control, pausar o reanudar la IA. Los cambios CAS identifican al operador con su sesión. La lista y el historial devuelven primero los registros de mayor identificador. En conversaciones migradas del esquema anterior, `connectionId` usa una referencia de compatibilidad `legacy:<tenant>:<canal>`.
+
+Agent Studio conserva cada borrador como una revisión numerada e inmutable. Para leer o validar una revisión anterior, indica `?version=N`. La validación comprueba la estructura sin ejecutar el grafo y devuelve `publicationEvidence: false`. El simulador de regresión de `/api/v1/ai/eval/simulate` devuelve resultados sintéticos. La publicación requiere ejecutar una evaluación de servidor con un conjunto de pruebas autorizado, asociar su evidencia al tenant, la revisión y su hash, y usar esa revisión exacta en el runtime.
 
 ## 4. Marketplace comunitario
 

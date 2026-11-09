@@ -530,9 +530,78 @@
       }
     },
     "/agent-graphs": {
+      "get": {
+        "summary": "Listar borradores de grafos de agentes",
+        "description": "Requiere rol ADMIN. Devuelve la revisión más reciente de cada grafo del tenant.",
+        "operationId": "listAgentGraphDrafts",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "after",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Cursor nextAfter de la página anterior."
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Página de borradores",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "items",
+                    "nextAfter"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AgentGraphVersion"
+                      }
+                    },
+                    "nextAfter": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Acceso reservado a administradores del tenant"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      },
       "post": {
         "summary": "Crear borrador de grafo de agentes",
-        "description": "Registra una nueva definición en estado draft para el tenant.",
+        "description": "Requiere rol ADMIN. Crea la primera revisión inmutable del borrador para el tenant autenticado.",
         "operationId": "createAgentGraphDraft",
         "security": [
           {
@@ -563,45 +632,11 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
-          "422": {
-            "$ref": "#/components/responses/ValidationError"
-          }
-        }
-      }
-    },
-    "/agent-graphs/{id}/validate": {
-      "post": {
-        "summary": "Validar grafo de agentes (Lint & Políticas)",
-        "description": "Compila y valida loops, dependencias de nodos, presupuestos y límites sin efectos externos.",
-        "operationId": "validateAgentGraph",
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Grafo válido",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GraphValidationResult"
-                }
-              }
-            }
+          "403": {
+            "description": "Acceso reservado a administradores del tenant"
           },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
+          "409": {
+            "description": "El tenant ya tiene un grafo con ese identificador"
           },
           "422": {
             "$ref": "#/components/responses/ValidationError"
@@ -609,11 +644,11 @@
         }
       }
     },
-    "/agent-graphs/{id}/publish": {
-      "post": {
-        "summary": "Publicar versión inmutable de grafo",
-        "description": "Congela la definición con specHash y publica la versión activa para ejecución.",
-        "operationId": "publishAgentGraph",
+    "/agent-graphs/{id}": {
+      "get": {
+        "summary": "Leer una revisión de grafo",
+        "description": "Requiere rol ADMIN. Sin version se consulta la revisión más reciente.",
+        "operationId": "getAgentGraphDraft",
         "security": [
           {
             "BearerAuth": []
@@ -621,25 +656,15 @@
         ],
         "parameters": [
           {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/AgentGraphId"
           },
           {
-            "name": "If-Match",
-            "in": "header",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/AgentGraphDraftVersion"
           }
         ],
         "responses": {
           "200": {
-            "description": "Versión inmutable publicada",
+            "description": "Revisión de borrador",
             "content": {
               "application/json": {
                 "schema": {
@@ -651,8 +676,177 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
+          "403": {
+            "description": "Acceso reservado a administradores del tenant"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      }
+    },
+    "/agent-graphs/{id}/revisions": {
+      "post": {
+        "summary": "Agregar una revisión de borrador",
+        "description": "Requiere rol ADMIN. Guarda una nueva revisión inmutable del grafo del tenant.",
+        "operationId": "createAgentGraphDraftRevision",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AgentGraphId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentGraphDraftSpec"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Revisión de borrador guardada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentGraphVersion"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Acceso reservado a administradores del tenant"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      }
+    },
+    "/agent-graphs/{id}/validate": {
+      "post": {
+        "summary": "Validar la estructura de una revisión de grafo",
+        "description": "Requiere rol ADMIN. Comprueba referencias, conectividad, ciclos y hash de la revisión guardada. Devuelve problemas estructurales sin ejecutar el grafo.",
+        "operationId": "validateAgentGraph",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AgentGraphId"
+          },
+          {
+            "$ref": "#/components/parameters/AgentGraphDraftVersion"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Resultado de la validación estructural",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GraphValidationResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Acceso reservado a administradores del tenant"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      }
+    },
+    "/agent-graphs/{id}/publish": {
+      "post": {
+        "summary": "Consultar disponibilidad de publicación",
+        "description": "Requiere rol ADMIN. La publicación está bloqueada hasta que haya una evaluación real del servidor vinculada a la revisión y al hash inmutables.",
+        "operationId": "publishAgentGraph",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AgentGraphId"
+          },
+          {
+            "$ref": "#/components/parameters/AgentGraphDraftVersion"
+          }
+        ],
+        "responses": {
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Acceso reservado a administradores del tenant"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "501": {
+            "description": "Publicación no disponible",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "detail",
+                    "graphId",
+                    "version",
+                    "specHash"
+                  ],
+                  "properties": {
+                    "code": {
+                      "const": "PUBLICATION_UNAVAILABLE"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "graphId": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "integer"
+                    },
+                    "specHash": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -942,6 +1136,27 @@
     }
   },
   "components": {
+    "parameters": {
+      "AgentGraphId": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,128}$"
+        }
+      },
+      "AgentGraphDraftVersion": {
+        "name": "version",
+        "in": "query",
+        "description": "Número de la revisión guardada. Si se omite, se selecciona la más reciente.",
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        }
+      }
+    },
     "securitySchemes": {
       "BearerAuth": {
         "type": "http",
@@ -1800,9 +2015,28 @@
         }
       },
       "CreateAgentGraphRequest": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/AgentGraphDraftSpec"
+          },
+          {
+            "type": "object",
+            "required": [
+              "graphId"
+            ],
+            "properties": {
+              "graphId": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_-]{1,128}$"
+              }
+            }
+          }
+        ],
+        "unevaluatedProperties": false
+      },
+      "AgentGraphDraftSpec": {
         "type": "object",
         "required": [
-          "graphId",
           "entryNodeId",
           "nodes",
           "edges",
@@ -1810,71 +2044,69 @@
           "limits"
         ],
         "properties": {
-          "graphId": {
-            "type": "string"
-          },
           "entryNodeId": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
           },
           "nodes": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "required": [
-                "id",
-                "kind",
-                "config"
-              ],
-              "properties": {
-                "id": {
-                  "type": "string"
-                },
-                "kind": {
-                  "type": "string"
-                },
-                "config": {
-                  "type": "object"
-                }
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AgentGraphVersion/properties/nodes"
+              },
+              {
+                "minItems": 1,
+                "maxItems": 128
               }
-            }
+            ]
           },
           "edges": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "required": [
-                "id",
-                "from",
-                "to"
-              ],
-              "properties": {
-                "id": {
-                  "type": "string"
-                },
-                "from": {
-                  "type": "string"
-                },
-                "to": {
-                  "type": "string"
-                }
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AgentGraphVersion/properties/edges"
+              },
+              {
+                "maxItems": 512
               }
-            }
+            ]
           },
           "policyRef": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
           },
           "limits": {
-            "type": "object"
+            "$ref": "#/components/schemas/AgentGraphVersion/properties/limits"
           }
         }
       },
       "GraphValidationResult": {
         "type": "object",
         "required": [
+          "graphId",
+          "version",
+          "specHash",
+          "scope",
+          "publicationEvidence",
           "valid",
           "issues"
         ],
         "properties": {
+          "graphId": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer"
+          },
+          "specHash": {
+            "type": "string"
+          },
+          "scope": {
+            "const": "structural"
+          },
+          "publicationEvidence": {
+            "const": false
+          },
           "valid": {
             "type": "boolean"
           },
@@ -1884,15 +2116,15 @@
               "type": "object",
               "required": [
                 "severity",
+                "code",
                 "message"
               ],
               "properties": {
                 "severity": {
-                  "type": "string",
-                  "enum": [
-                    "error",
-                    "warning"
-                  ]
+                  "const": "error"
+                },
+                "code": {
+                  "type": "string"
                 },
                 "message": {
                   "type": "string"

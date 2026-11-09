@@ -614,7 +614,7 @@ export default function createAiRoutes(options: AiRoutesOptions = {}): Router {
       };
 
       const scorecard = await evalService.simulateSuite(tenantId, graph, targetSuite);
-      res.status(200).json({ success: true, data: scorecard });
+      res.status(200).json({ success: true, mode: 'simulation', publicationEvidence: false, data: scorecard });
     } catch (err: any) {
       res.status(err.statusCode || 500).json({
         success: false,
