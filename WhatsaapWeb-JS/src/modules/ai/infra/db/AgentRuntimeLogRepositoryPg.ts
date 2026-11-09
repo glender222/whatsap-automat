@@ -1,3 +1,4 @@
+import { queryInTenantScope } from '../../../../db/TenantScopedUoW';
 import { Queryable } from '../../../../shared/UnitOfWorkPort';
 import type { AgentAction, AgentRuntimeLogEntry, AgentRuntimeLogInput } from '../../domain/runtime.types';
 
@@ -9,7 +10,7 @@ export class AgentRuntimeLogRepositoryPg {
   constructor(private readonly pool: Queryable) {}
 
   async log(input: AgentRuntimeLogInput): Promise<void> {
-    await this.pool.query(
+    await queryInTenantScope(this.pool, input.companyId,
       `INSERT INTO agent_runtime_logs (
          company_id, agent_id, provider, chat_id,
          inbound_provider_message_id, outbound_provider_message_id,
@@ -55,7 +56,7 @@ export class AgentRuntimeLogRepositoryPg {
       agentId?: number | null;
     }
   ): Promise<AgentRuntimeLogEntry[]> {
-    const limit = Math.max(1, Math.min(Number(input.limit || 100), 300));
+    const limit = input.limit && Number.isSafeInteger(input.limit) ? Math.max(1, Math.min(input.limit, 300)) : 100;
     const params: unknown[] = [companyId];
     const clauses: string[] = ['l.company_id = $1'];
 
@@ -86,7 +87,7 @@ export class AgentRuntimeLogRepositoryPg {
     }
 
     params.push(limit);
-    const result = await this.pool.query(
+    const result = await queryInTenantScope(this.pool, companyId,
       `SELECT l.id, l.company_id, l.agent_id, a.name AS agent_name, l.provider,
               l.chat_id, l.inbound_provider_message_id, l.outbound_provider_message_id,
               l.stage, l.level, l.status, l.summary, l.error_code, l.error_message,

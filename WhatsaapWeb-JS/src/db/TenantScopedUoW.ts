@@ -144,3 +144,10 @@ export async function withTenantTransaction<T>(
   const uow = pool === defaultPool ? tenantScopedUoW : new TenantScopedUoW(pool);
   return uow.run(tenantId, work);
 }
+
+export function queryInTenantScope(database: Queryable, tenantId: number, sql: string, params: unknown[]) {
+  if (database instanceof Pool) {
+    return withTenantTransaction(tenantId, (client) => client.query(sql, params), database);
+  }
+  return database.query(sql, params);
+}

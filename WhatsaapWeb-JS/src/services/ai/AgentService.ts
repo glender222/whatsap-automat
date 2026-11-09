@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import pool from '../../config/database';
+import { queryInTenantScope } from '../../db/TenantScopedUoW';
 import config from '../../config/index';
 import {
   AgentDecisionEngine,
@@ -350,7 +351,7 @@ export class AgentService {
     if (!normalizedChatId) return [];
     const limit = clampContextMessages(options.limit);
     const windowHours = options.windowHours ? Math.max(1, Math.min(Number(options.windowHours), 24 * 30)) : null;
-    const result = await pool.query(
+    const result = await queryInTenantScope(pool, companyId,
       `SELECT m.direction, m.body, m.message_type, m.occurred_at
        FROM conversations c
        JOIN messages m ON m.conversation_id = c.id
@@ -645,7 +646,6 @@ export class AgentService {
   }
 
   async isConversationPaused(companyId: number, chatId: string): Promise<boolean> {
-    await this.pauseService.purgeExpired(companyId);
     return this.pauseService.isPaused(companyId, chatId);
   }
 

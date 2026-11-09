@@ -1,3 +1,4 @@
+import { queryInTenantScope } from '../../../../db/TenantScopedUoW';
 import { Queryable } from '../../../../shared/UnitOfWorkPort';
 
 export type AiSessionStatus = 'active' | 'paused' | 'handoff' | 'closed';
@@ -211,7 +212,7 @@ export class AiSessionRepositoryPg {
   }
 
   async updateSessionsByConversation(companyId: number, conversationId: number, status: AiSessionStatus): Promise<AiChatSessionRecord[]> {
-    const result = await this.pool.query(
+    const result = await queryInTenantScope(this.pool, companyId,
       `UPDATE ai_chat_sessions
        SET status = $3, last_activity_at = NOW(), updated_at = NOW()
        WHERE company_id = $1 AND conversation_id = $2

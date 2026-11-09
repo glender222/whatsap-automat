@@ -1,3 +1,4 @@
+import { queryInTenantScope } from '../../../db/TenantScopedUoW';
 import { Queryable } from '../../../shared/UnitOfWorkPort';
 import { AgentRepositoryPg } from '../infra/db/AgentRepositoryPg';
 import { AgentRuntimeLogRepositoryPg } from '../infra/db/AgentRuntimeLogRepositoryPg';
@@ -192,7 +193,7 @@ export class AgentRouterService {
   }
 
   private async findActiveRouter(companyId: number): Promise<AiAgent | null> {
-    const result = await this.pool.query(
+    const result = await queryInTenantScope(this.pool, companyId,
       `SELECT id FROM ai_agents
        WHERE company_id = $1 AND purpose = 'router' AND status = 'active' AND mode <> 'disabled'
        ORDER BY is_default DESC, updated_at DESC, id DESC

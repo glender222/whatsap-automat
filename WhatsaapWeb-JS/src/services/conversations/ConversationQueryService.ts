@@ -18,7 +18,8 @@ const whatsappAliases = ['whatsapp', 'whatsapp-cloud', 'whatsapp-web'];
 const supportedChannels = [...CHANNEL_KINDS, ...whatsappAliases];
 const statusExpression = `CASE WHEN archived_at IS NOT NULL THEN 'archived' ELSE status END`;
 const conversationColumns = `id, company_id, channel, external_conversation_id, contact_id, title,
-  ${statusExpression} AS status, commercial_stage, version, ia_paused, ia_resume_at,
+  ${statusExpression} AS status, commercial_stage, version,
+  ia_paused AND (ia_resume_at IS NULL OR ia_resume_at > NOW()) AS ia_paused, ia_resume_at,
   assigned_user_id, owner_type, owner_id, last_message_at, service_window_expires_at, created_at, updated_at`;
 
 function encodeCursor(direction: Cursor['direction'], id: number): string {

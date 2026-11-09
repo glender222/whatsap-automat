@@ -655,7 +655,7 @@ export class WhatsAppService {
         return;
       }
 
-      const isPaused = await this.agentService.isConversationPaused(companyId, to).catch(() => false);
+      const isPaused = await this.agentService.isConversationPaused(companyId, to);
       if (isPaused) {
         await this.logAgentRuntime({
           companyId,
@@ -720,6 +720,14 @@ export class WhatsAppService {
       });
 
       if (result.action === 'auto_reply' && result.reply) {
+        if (await this.agentService.isConversationPaused(companyId, to)) {
+          await this.logAgentRuntime({
+            companyId, agentId, chatId: to, inboundProviderMessageId,
+            stage: 'agent_skipped_paused', status: 'skipped',
+            summary: 'La IA se pausó antes de enviar la respuesta automática.',
+          });
+          return;
+        }
         await this.sendAgentReply(companyId, agentId, to, inboundProviderMessageId, {
           reply: result.reply,
           action: result.action,

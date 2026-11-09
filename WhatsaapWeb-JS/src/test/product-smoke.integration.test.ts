@@ -154,6 +154,32 @@ test('real API isolates two companies through auth, signed ingress, inbox, socke
   assert.equal(claimed.aiPaused, true);
   assert.equal(claimed.stateVersion, resumed.stateVersion + 1);
 
+  const pausedMessageId = `wamid.${randomUUID()}`;
+  const pausedPayload = inbound(pausedMessageId, 'Mensaje durante toma de control');
+  assert.equal((await webhook(sign(pausedPayload), 200, pausedPayload)).results[0].duplicate, false);
+  const logPath = `/api/agents/runtime-logs?chatId=${chatId}`;
+  const runtimeLogs = await api(logPath, 200, owner.accessToken);
+  const stagesFor = (id: string) => runtimeLogs.filter((entry: { inboundProviderMessageId: string }) =>
+    entry.inboundProviderMessageId === id).map((entry: { stage: string }) => entry.stage);
+  assert.ok(stagesFor(messageId).includes('router_missing'));
+  assert.ok(stagesFor(messageId).includes('agent_runtime_completed'));
+  assert.ok(stagesFor(pausedMessageId).includes('agent_skipped_paused'));
+  assert.ok(!stagesFor(pausedMessageId).includes('agent_runtime_started'));
+  assert.deepEqual(await api(logPath, 200, other.accessToken), []);
+
+  const legacyPausePath = `/api/chats/ia/${chatId}`;
+  await api(`${legacyPausePath}/status`, 404, other.accessToken);
+  assert.equal((await api(`${legacyPausePath}/status`, 200, owner.accessToken)).paused, true);
+  await api(`${legacyPausePath}/resume`, 200, owner.accessToken, {});
+  assert.equal((await api(canonicalPath, 200, owner.accessToken)).stateVersion, claimed.stateVersion + 1);
+  const timed = await client.conversations.pauseAi(canonical.id, { expectedVersion: claimed.stateVersion + 1, durationSeconds: 1 });
+  assert.equal(timed.aiPaused, true);
+  await delay(1100);
+  assert.equal((await client.conversations.get(canonical.id)).aiPaused, false);
+  assert.equal((await api(`${legacyPausePath}/status`, 200, owner.accessToken)).paused, false);
+  await api(`${legacyPausePath}/pause`, 200, owner.accessToken, { reason: 'Pausa humana' });
+  assert.equal((await api(`${legacyPausePath}/status`, 200, owner.accessToken)).reason, 'Pausa humana');
+
   const event = await auditLogger.log({ tenantId: owner.user.companyId, action: 'SMOKE_CHECK', resourceType: 'conversation' });
   const audit = await fetch(`${base}/api/v1/admin/audit-events?search=SMOKE_CHECK`, {
     headers: { Authorization: `Bearer ${owner.accessToken}` },

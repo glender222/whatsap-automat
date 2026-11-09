@@ -547,7 +547,8 @@ export class ConversationCasService {
       validTenantId,
       async (client) => {
         const querySql = `
-          SELECT id, ownership_epoch, owner_type, ia_paused
+          SELECT id, ownership_epoch, owner_type,
+                 ia_paused AND (ia_resume_at IS NULL OR ia_resume_at > NOW()) AS ia_paused
           FROM conversations
           WHERE id = $1 AND company_id = $2
           LIMIT 1;
@@ -591,7 +592,8 @@ export class ConversationCasService {
       validTenantId,
       async (client) => {
         const querySql = `
-          SELECT id, version, ownership_epoch, owner_type, owner_id, ia_paused
+          SELECT id, version, ownership_epoch, owner_type, owner_id,
+                 ia_paused AND (ia_resume_at IS NULL OR ia_resume_at > NOW()) AS ia_paused
           FROM conversations
           WHERE id = $1 AND company_id = $2
           LIMIT 1;

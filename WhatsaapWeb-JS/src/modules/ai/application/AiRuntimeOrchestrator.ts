@@ -1,3 +1,4 @@
+import { queryInTenantScope } from '../../../db/TenantScopedUoW';
 import { Queryable } from '../../../shared/UnitOfWorkPort';
 import { AgentRepositoryPg } from '../infra/db/AgentRepositoryPg';
 import { AgentRuntimeLogRepositoryPg } from '../infra/db/AgentRuntimeLogRepositoryPg';
@@ -9,7 +10,7 @@ import { AgentToolRuntimeLoop } from './AgentToolRuntimeLoop';
 import { AiChatSessionService } from './AiChatSessionService';
 import { AiSessionEventService } from './AiSessionEventService';
 import type { ProductCardSender } from './tools';
-import { emitDashboard, emitToRoom } from '../../../sockets/socketEmitter';
+import { emitDashboard } from '../../../sockets/socketEmitter';
 import type { AgentToolContext } from '../domain/tool.types';
 import type { AiAgent, AiDomainKey, AutomatorMode } from '../domain/agent.types';
 import { AiSessionRepositoryPg } from '../infra/db/AiSessionRepositoryPg';
@@ -208,14 +209,6 @@ export class AiRuntimeOrchestrator {
     }
 
     if (resolvedAction === 'suggest' && chatId) {
-      emitToRoom(chatId, 'agent:suggestion', {
-        chatId,
-        agentId: agent.id,
-        reply: resolvedReply,
-        confidence: final.confidence,
-        action: resolvedAction,
-        reason: resolvedReason,
-      });
       emitDashboard('agent:suggestion', { companyId, chatId, agentId: agent.id, reply: resolvedReply, confidence: final.confidence, action: resolvedAction, reason: resolvedReason });
     }
 
@@ -335,7 +328,7 @@ export class AiRuntimeOrchestrator {
   private async resolveConversationId(companyId: number, chatId: string): Promise<number | null> {
     const normalized = String(chatId).replace('@c.us', '').replace('@s.whatsapp.net', '').replace(/[^\d]/g, '');
     if (!normalized) return null;
-    const result = await this.pool.query(
+    const result = await queryInTenantScope(this.pool, companyId,
       `SELECT id FROM conversations
        WHERE company_id = $1 AND channel = 'whatsapp'
          AND external_conversation_id = ANY($2::varchar[])

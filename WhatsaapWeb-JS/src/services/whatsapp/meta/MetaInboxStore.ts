@@ -108,7 +108,7 @@ export class MetaInboxStore {
          c.id AS conversation_id,
          c.version AS state_version,
          c.assigned_user_id,
-         c.ia_paused,
+         c.ia_paused AND (c.ia_resume_at IS NULL OR c.ia_resume_at > NOW()) AS ia_paused,
          COALESCE(c.title, ct.display_name, ct.name, ct.profile_name, ct.phone, c.external_conversation_id) AS name,
          c.last_message_at,
          c.unread_count,
@@ -190,7 +190,7 @@ export class MetaInboxStore {
          id,
          version,
          assigned_user_id,
-         ia_paused,
+         ia_paused AND (ia_resume_at IS NULL OR ia_resume_at > NOW()) AS ia_paused,
          service_window_expires_at,
          last_customer_message_at,
          status

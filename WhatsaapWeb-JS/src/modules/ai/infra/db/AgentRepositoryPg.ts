@@ -1,3 +1,4 @@
+import { queryInTenantScope } from '../../../../db/TenantScopedUoW';
 import { Queryable } from '../../../../shared/UnitOfWorkPort';
 import config from '../../../../config/index';
 import { ProductRepositoryPg } from '../../../inventory';
@@ -719,7 +720,7 @@ export class AgentRepositoryPg {
   }
 
   async getAutomatorMode(companyId: number): Promise<'normal' | 'mixed' | 'automator'> {
-    const result = await this.pool.query(
+    const result = await queryInTenantScope(this.pool, companyId,
       `SELECT automator_mode FROM company_settings WHERE company_id = $1`,
       [companyId]
     );

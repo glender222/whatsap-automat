@@ -1,14 +1,10 @@
 import { NextFunction, Response, Router } from 'express';
 import pool from '../config/database';
+import { withTenantTransaction } from '../db/TenantScopedUoW';
+import { normalizeChatIdCandidates } from '../middleware/resourceAuth';
 import { JwtRequest, resolveWhatsappCompanyId } from '../middleware/jwtAuth';
 import { AgentPauseService, IaPauseOverrideRepositoryPg } from '../modules/ai';
 import AgentService from '../services/ai/AgentService';
-
-function toInt(value: unknown): number {
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed <= 0) throw new Error('ID invalido');
-  return parsed;
-}
 
 function getUserId(req: JwtRequest): number | null {
   const value = Number(req.user?.userId || req.user?.id);
@@ -16,14 +12,13 @@ function getUserId(req: JwtRequest): number | null {
 }
 
 async function resolveConversationId(chatId: string, companyId: number): Promise<number> {
-  const normalized = String(chatId || '').replace('@c.us', '').replace('@s.whatsapp.net', '').replace(/[^\d]/g, '');
-  const result = await pool.query(
+  const result = await withTenantTransaction(companyId, (client) => client.query(
     `SELECT id FROM conversations
      WHERE company_id = $1 AND channel = 'whatsapp'
        AND external_conversation_id = ANY($2::varchar[])
      ORDER BY last_message_at DESC NULLS LAST, id DESC LIMIT 1`,
-    [companyId, [chatId, normalized, `${normalized}@c.us`, `${normalized}@s.whatsapp.net`].filter(Boolean)]
-  );
+    [companyId, normalizeChatIdCandidates(chatId)]
+  ));
   if (!result.rows[0]?.id) {
     const error = new Error('Conversacion no encontrada') as Error & { statusCode?: number };
     error.statusCode = 404;
