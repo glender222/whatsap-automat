@@ -12,7 +12,8 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ArrowLeft, Send } from 'lucide-react-native';
+import ArrowLeft from 'lucide-react-native/icons/arrow-left';
+import Send from 'lucide-react-native/icons/send';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { apiClient, MobileApiError, type MobileChatOwnership, type MobileMessage } from '../services/apiClient';
 import { useSession } from '../services/sessionContext';
@@ -202,7 +203,7 @@ export function ChatDetailScreen({ route, navigation }: Props) {
             <Pressable accessibilityRole="button" style={styles.loadOlder} onPress={() => void loadOlder()} disabled={loadingOlder}>
               <Text style={styles.action}>{loadingOlder ? 'Cargando…' : 'Cargar mensajes anteriores'}</Text>
             </Pressable>
-          ) : null}
+          ) : undefined}
           ListEmptyComponent={
             <View style={styles.empty}>
               {loading ? <ActivityIndicator color={colors.accent} /> : null}

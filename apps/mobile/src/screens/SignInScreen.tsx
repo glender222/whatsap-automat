@@ -11,7 +11,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { MessagesSquare } from 'lucide-react-native';
+import MessagesSquare from 'lucide-react-native/icons/messages-square';
 import { apiClient, MobileApiError } from '../services/apiClient';
 import type { AuthSession } from '../services/authStorage';
 import { DARK_THEME as colors } from '../types/navigation';

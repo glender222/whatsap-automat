@@ -4,10 +4,11 @@ Cliente Expo para consultar la bandeja de WhatsApp, responder con texto durante 
 
 ## Desarrollo
 
-Usa Node.js 22 y un servidor de Whatsap Automat accesible desde el dispositivo.
+Usa Node.js 22.13 o posterior dentro de la serie 22, y un servidor de Whatsap Automat accesible desde el dispositivo. La aplicación usa Expo SDK 58.
 
 ```bash
 npm ci
+npx expo-doctor
 npm run typecheck
 npm test
 npm start
@@ -27,3 +28,5 @@ Las credenciales nativas se guardan en Expo SecureStore. La vista web conserva l
 ## Distribución
 
 Una exportación de Expo verifica los paquetes JavaScript para Android, iOS y web. Los instaladores nativos requieren un proyecto de compilación configurado, credenciales de firma y validación en un dispositivo.
+
+Para generar un proyecto Android de desarrollo y compilarlo, usa Java 17, Android SDK Platform 37.0 y el NDK 27.1.12297006. Ejecuta `npx expo run:android` con un emulador o un dispositivo conectado. Los proyectos Android e iOS se regeneran a partir de la configuración de Expo.

@@ -10,7 +10,9 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { LogOut, MessageSquare, Search } from 'lucide-react-native';
+import LogOut from 'lucide-react-native/icons/log-out';
+import MessageSquare from 'lucide-react-native/icons/message-square';
+import Search from 'lucide-react-native/icons/search';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { apiClient, type MobileConversation } from '../services/apiClient';
 import { useSession } from '../services/sessionContext';
@@ -195,12 +197,12 @@ export function InboxScreen({ navigation }: Props) {
                 {search || filter !== 'all' ? 'Prueba otro filtro o término de búsqueda.' : 'Los mensajes nuevos aparecerán aquí.'}
               </Text>
             </View>
-          ) : null}
+          ) : undefined}
           ListFooterComponent={canLoadMore ? (
             <Pressable style={styles.more} accessibilityRole="button" disabled={loadingMore} onPress={() => void loadMore()}>
               <Text style={styles.action}>{loadingMore ? 'Cargando…' : 'Cargar más conversaciones'}</Text>
             </Pressable>
-          ) : null}
+          ) : undefined}
         />
       )}
     </SafeAreaView>
