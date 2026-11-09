@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight, CheckCircle2, CircleAlert, GitBranch, LockKeyhole } from 'lucide-react';
 import { Link, useLocation, useParams, useSearchParams } from 'react-router-dom';
+import AgentGraphFixturePanel from './AgentGraphFixturePanel';
 import GraphProblemNotice from './GraphProblemNotice';
 import {
   draftSpec, getGraphDraft, graphPath, graphProblem, nodeKinds, readVersion, studioPath,
@@ -124,7 +125,7 @@ function RevisionChecks({ draft }: { draft: GraphDraft }) {
       <section className="space-y-2 rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-900" aria-labelledby="graph-publication-title">
         <h2 id="graph-publication-title" className="flex items-center gap-2 text-lg font-semibold"><LockKeyhole size={18} aria-hidden="true" /> Publicación</h2>
         <p className="text-sm font-medium">Publicación no disponible</p>
-        <p className="text-sm text-gray-600 dark:text-gray-300">El servidor requiere evidencia de ejecución verificada para publicar. La validación de este espacio comprueba la estructura.</p>
+        <p className="text-sm text-gray-600 dark:text-gray-300">El servidor requiere evidencia de ejecución verificada para publicar. En este espacio puedes comprobar la estructura y ejecutar pruebas.</p>
       </section>
     </div>
   );
@@ -202,7 +203,10 @@ function GraphDetails({ graphId }: { graphId: string }) {
           </section>
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
             <RevisionChecks key={draft.specHash + '/' + draft.version} draft={draft} />
-            <GraphMap draft={draft} />
+            <div className="min-w-0 space-y-4">
+              <AgentGraphFixturePanel key={draft.specHash + '/' + draft.version} draft={draft} />
+              <GraphMap draft={draft} />
+            </div>
           </div>
         </>
       )}

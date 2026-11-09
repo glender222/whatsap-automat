@@ -9,6 +9,8 @@ const pageSize = 12;
 const graphEndpoint = (id: string) => `${base}/${encodeURIComponent(id)}`;
 
 export const graphIdPattern = String.raw`[A-Za-z0-9_\-]{1,128}`;
+export const fixtureInputLimit = 2048;
+export const fixtureStepLimit = 128;
 export const nodeKinds = {
   agent: 'Agente', router: 'Enrutador', condition: 'Condición', tool: 'Herramienta', approval: 'Aprobación',
   subgraph: 'Subgrafo', parallel: 'Paralelo', join: 'Unión', handoff: 'Derivación', end: 'Fin',
@@ -50,6 +52,20 @@ export interface GraphValidation {
   publicationEvidence: false;
   valid: boolean;
   issues: GraphIssue[];
+}
+
+export interface GraphFixtureResult {
+  graphId: string;
+  graphVersion: number;
+  specHash: string;
+  mode: 'fixture';
+  publicationEvidence: false;
+  finalState: 'completed' | 'handed_off' | 'failed';
+  totalSteps: number;
+  executedNodes: { nodeId: string; kind: NodeKind; output: Record<string, unknown>; durationMs: number }[];
+  simulatedMessages: { kind: 'text'; text: string }[];
+  approvalsTriggered: { nodeId: string }[];
+  failureReasons: string[];
 }
 
 export interface GraphProblem {
@@ -143,4 +159,32 @@ export async function validateGraphDraft(draft: GraphDraft, signal: AbortSignal)
     throw new Error('El servidor no confirmó una validación estructural para esta revisión.');
   }
   return data;
+}
+
+export async function simulateGraphDraft(draft: GraphDraft, mockInput: string, signal: AbortSignal) {
+  const { data } = await api.post<GraphFixtureResult>(
+    graphEndpoint(draft.graphId) + '/simulate', { graphVersion: draft.version, mockInput }, { signal },
+  );
+  if (data?.graphId !== draft.graphId || data.graphVersion !== draft.version || data.specHash !== draft.specHash ||
+      data.mode !== 'fixture' || data.publicationEvidence !== false ||
+      !['completed', 'handed_off', 'failed'].includes(data.finalState) ||
+      !Array.isArray(data.executedNodes) || data.totalSteps !== data.executedNodes.length ||
+      data.totalSteps > Math.min(draft.limits.maxSteps, fixtureStepLimit) ||
+      !data.executedNodes.every((step) => step && draft.nodes.some((node) => node.id === step.nodeId && node.kind === step.kind) &&
+        step.output && typeof step.output === 'object' && !Array.isArray(step.output)) ||
+      !Array.isArray(data.simulatedMessages) || !data.simulatedMessages.every((message) => message?.kind === 'text' && typeof message.text === 'string') ||
+      !Array.isArray(data.approvalsTriggered) || !data.approvalsTriggered.every((approval) => approval &&
+        data.executedNodes.some((step) => step.nodeId === approval.nodeId && step.kind === 'approval')) ||
+      !Array.isArray(data.failureReasons) || !data.failureReasons.every((reason) => typeof reason === 'string')) {
+    throw new Error('El servidor no confirmó una simulación de prueba para esta revisión.');
+  }
+  return data;
+}
+
+export function graphFixtureProblem(cause: unknown): GraphProblem {
+  if (isAxiosError(cause) && cause.response?.status === 422 &&
+      cause.response.data?.detail === 'The stored revision has structural errors. Use the validate endpoint for details.') {
+    return { message: 'La revisión tiene errores estructurales. Usa Validar esta revisión para verlos.', fields: [] };
+  }
+  return graphProblem(cause, 'No pudimos ejecutar la simulación de esta revisión.');
 }

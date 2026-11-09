@@ -3,8 +3,8 @@ import { test, type TestContext } from 'node:test';
 import { AxiosError, type InternalAxiosRequestConfig } from 'axios';
 import { api } from '../shared/axios/http';
 import {
-  draftSpec, exampleGraph, getGraphDraft, graphPath, graphProblem, listGraphDrafts, saveGraphDraft, validateGraphDraft,
-  type GraphDraft, type GraphValidation,
+  draftSpec, exampleGraph, getGraphDraft, graphFixtureProblem, graphPath, graphProblem, listGraphDrafts, saveGraphDraft,
+  simulateGraphDraft, validateGraphDraft, type GraphDraft, type GraphFixtureResult, type GraphValidation,
 } from '../components/agent-studio/canonical/agentGraphApi';
 
 Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: () => null } });
@@ -84,6 +84,50 @@ test('a 422 response exposes field names and explanations from the canonical val
       message: 'El servidor rechazó campos del borrador.',
       fields: [{ name: 'limits.maxSteps', reason: 'Must be positive' }],
     });
+    return true;
+  });
+});
+
+test('simulation posts the saved revision and test input and confirms its immutable fixture identity', async (context) => {
+  const signal = new AbortController().signal;
+  const fixture: GraphFixtureResult = {
+    graphId: draft.graphId, graphVersion: draft.version, specHash: draft.specHash, mode: 'fixture',
+    publicationEvidence: false, finalState: 'completed', totalSteps: 2,
+    executedNodes: [
+      { nodeId: 'inicio', kind: 'agent', output: { text: 'Prueba' }, durationMs: 1 },
+      { nodeId: 'fin', kind: 'end', output: { state: 'completed' }, durationMs: 1 },
+    ],
+    simulatedMessages: [{ kind: 'text', text: 'Prueba' }], approvalsTriggered: [], failureReasons: [],
+  };
+  let response: unknown = fixture;
+  mockResponse(context, (request) => {
+    assert.equal(request.method, 'post');
+    assert.equal(request.url, '/v1/agent-graphs/nuevo/simulate');
+    assert.equal(request.signal, signal);
+    assert.deepEqual(JSON.parse(request.data), { graphVersion: 1, mockInput: 'Mensaje de prueba' });
+    return response;
+  });
+  assert.deepEqual(await simulateGraphDraft(draft, 'Mensaje de prueba', signal), fixture);
+  for (const invalid of [
+    { graphVersion: 2 }, { specHash: 'b'.repeat(64) }, { publicationEvidence: true },
+    { totalSteps: 3 }, { executedNodes: [{ ...fixture.executedNodes[0], nodeId: 'desconocido' }, fixture.executedNodes[1]] },
+  ]) {
+    response = { ...fixture, ...invalid };
+    await assert.rejects(simulateGraphDraft(draft, 'Mensaje de prueba', signal), /no confirmó una simulación de prueba/);
+  }
+});
+
+test('structurally invalid revisions point the operator to the saved revision validator', async (context) => {
+  const original = api.defaults.adapter;
+  api.defaults.adapter = async (request) => {
+    throw new AxiosError('Validation failed', undefined, request, undefined, {
+      status: 422, statusText: 'Unprocessable Content', config: request, headers: {},
+      data: { detail: 'The stored revision has structural errors. Use the validate endpoint for details.' },
+    });
+  };
+  context.after(() => { api.defaults.adapter = original; });
+  await assert.rejects(simulateGraphDraft(draft, 'Mensaje de prueba', new AbortController().signal), (cause) => {
+    assert.match(graphFixtureProblem(cause).message, /errores estructurales.*Validar esta revisión/);
     return true;
   });
 });
