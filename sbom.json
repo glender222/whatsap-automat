@@ -21,7 +21,7 @@
       },
       {
         "name": "whatsap:lock-sha256:apps/mobile",
-        "value": "05124df95a6dfa776efc30de8cdfa241ac7608b33920cd72c668e26ce6c7e8f2"
+        "value": "18cd11e990289ee28c75b51fb492c613f632d8c5493030d4305d7b747da286ea"
       },
       {
         "name": "whatsap:lock-sha256:packages/cli",
@@ -36896,6 +36896,35 @@
       ]
     },
     {
+      "bom-ref": "whatsap:apps/mobile#node_modules/expo-image",
+      "type": "library",
+      "name": "expo-image",
+      "version": "58.0.18",
+      "purl": "pkg:npm/expo-image@58.0.18",
+      "scope": "required",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "whatsap:workspace",
+          "value": "apps/mobile"
+        },
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/expo-image"
+        },
+        {
+          "name": "whatsap:npm:scope",
+          "value": "runtime"
+        }
+      ]
+    },
+    {
       "bom-ref": "whatsap:apps/mobile#node_modules/expo-keep-awake",
       "type": "library",
       "name": "expo-keep-awake",
@@ -55187,7 +55216,10 @@
         "whatsap:apps/mobile#node_modules/@react-navigation/native-stack",
         "whatsap:apps/mobile#node_modules/@types/node",
         "whatsap:apps/mobile#node_modules/@types/react",
+        "whatsap:apps/mobile#node_modules/base64-js",
         "whatsap:apps/mobile#node_modules/expo",
+        "whatsap:apps/mobile#node_modules/expo-file-system",
+        "whatsap:apps/mobile#node_modules/expo-image",
         "whatsap:apps/mobile#node_modules/expo-secure-store",
         "whatsap:apps/mobile#node_modules/expo-splash-screen",
         "whatsap:apps/mobile#node_modules/expo-status-bar",
@@ -57079,6 +57111,16 @@
         "whatsap:apps/mobile#node_modules/expo",
         "whatsap:apps/mobile#node_modules/react",
         "whatsap:apps/mobile#node_modules/react-native"
+      ]
+    },
+    {
+      "ref": "whatsap:apps/mobile#node_modules/expo-image",
+      "dependsOn": [
+        "whatsap:apps/mobile#node_modules/expo",
+        "whatsap:apps/mobile#node_modules/react",
+        "whatsap:apps/mobile#node_modules/react-native",
+        "whatsap:apps/mobile#node_modules/react-native-web",
+        "whatsap:apps/mobile#node_modules/sf-symbols-typescript"
       ]
     },
     {
