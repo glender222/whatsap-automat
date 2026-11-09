@@ -5,6 +5,7 @@
 - Una cuenta con acceso de lectura a `glender222/whatsap-automat` en GitHub.
 - Git, Node.js 22 con npm y PostgreSQL 16 para el entorno de desarrollo.
 - Docker con Compose para la demo de Temporal y Python 3.10 o posterior para el SDK de Python.
+- FFmpeg y ffprobe en el servidor para inspeccionar y convertir videos de WhatsApp Cloud.
 
 ## Instalar
 
