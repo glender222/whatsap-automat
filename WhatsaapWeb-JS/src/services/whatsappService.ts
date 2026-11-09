@@ -376,7 +376,7 @@ export class WhatsAppService {
             return sent;
           };
           result = mediaType === 'video'
-            ? await withCompatibleVideo(media, sendMedia)
+            ? await withCompatibleVideo(media, sendMedia, { inspectMp4: true })
             : await sendMedia(media);
         } finally {
           await removeTemporaryUpload(media.path);

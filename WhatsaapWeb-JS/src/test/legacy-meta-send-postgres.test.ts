@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { randomInt } from 'node:crypto';
 import { once } from 'node:events';
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { createServer, request as httpRequest, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -339,13 +339,54 @@ test('legacy HTTP routes never send or persist free-form Meta text and preserve 
       });
       await assertCleanUploadDir();
     }
+    const sourceDir = await mkdtemp(join(tmpdir(), 'whatsap-video-fixture-'));
+    t.after(() => rm(sourceDir, { recursive: true, force: true }));
+    async function makeMp4(encoder: string) {
+      const output = join(sourceDir, encoder + '.mp4');
+      execFileSync('ffmpeg', [
+        '-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=64x64:rate=12',
+        '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000', '-t', '0.5',
+        '-c:v', encoder, '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-movflags', '+faststart', output,
+      ], { timeout: 10_000 });
+      return readFile(output);
+    }
+    const compatibleMp4 = await makeMp4('libx264');
+    const vp9Mp4 = await makeMp4('libvpx-vp9');
+    assert.deepEqual(probe(vp9Mp4).streams.map((stream) => stream.codec_name), ['vp9', 'aac']);
+    const declaredMp4 = (bytes: Buffer) =>
+      multipart({ chatId: phone }, 'video/mp4', 'declared.mp4', new Uint8Array(bytes));
+    for (const input of [compatibleMp4, vp9Mp4, source]) {
+      const start = attempts.length;
+      assert.equal((await send(chat, declaredMp4(input))).status, 200);
+      const actual = attempts[start].media;
+      assert.equal(actual?.mimeType, 'video/mp4');
+      assert.deepEqual(probe(actual!.bytes).streams.map((stream) => stream.codec_name), ['h264', 'aac']);
+      if (input === compatibleMp4) assert.deepEqual(actual!.bytes, input);
+      else assert.notDeepEqual(actual!.bytes, input);
+      await assertCleanUploadDir();
+    }
     const after = await counts();
-    assert.equal(after.messages, beforeA.messages + 2);
+    assert.equal(after.messages, beforeA.messages + 5);
 
     const beforeBadInput = attempts.length;
     const corrupt = await send(chat, video({ chatId: phone }, Buffer.from('corrupt webm')));
     assert.equal(corrupt.status, 422);
     assert.equal(corrupt.body.error, 'VIDEO_CONVERSION_FAILED');
+    for (const input of [Buffer.from('not an mp4'), compatibleMp4.subarray(0, -1000)]) {
+      const damaged = await send(chat, declaredMp4(input));
+      assert.equal(damaged.status, 422);
+      assert.equal(damaged.body.error, 'INVALID_VIDEO');
+    }
+    const previousProbe = process.env.FFPROBE_PATH;
+    try {
+      process.env.FFPROBE_PATH = join(sourceDir, 'unavailable-ffprobe');
+      const unavailable = await send(chat, declaredMp4(compatibleMp4));
+      assert.equal(unavailable.status, 503);
+      assert.equal(unavailable.body.error, 'VIDEO_INSPECTION_UNAVAILABLE');
+    } finally {
+      if (previousProbe === undefined) delete process.env.FFPROBE_PATH;
+      else process.env.FFPROBE_PATH = previousProbe;
+    }
     assert.equal(attempts.length, beforeBadInput);
     await assertCleanUploadDir();
 
