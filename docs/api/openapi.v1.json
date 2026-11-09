@@ -1435,8 +1435,8 @@
     },
     "/operations/executions": {
       "get": {
-        "summary": "Consultar ejecuciones operacionales y reintentos",
-        "description": "Lista ejecuciones de workflows y actividades duraderas para auditoría de soporte.",
+        "summary": "Consultar ejecuciones y estado de despacho",
+        "description": "Requiere rol ADMIN. Devuelve ejecuciones persistidas del tenant y el estado de su registro de despacho asociado. La consulta es de solo lectura.",
         "operationId": "listOperationExecutions",
         "security": [
           {
@@ -1447,30 +1447,45 @@
           {
             "name": "workflowId",
             "in": "query",
-            "required": false,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,255}$"
             }
           },
           {
             "name": "status",
             "in": "query",
-            "required": false,
+            "description": "Filtra el estado persistido de ejecución.",
             "schema": {
               "$ref": "#/components/schemas/ExecutionStatus"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Cursor nextCursor de la página anterior. Las ejecuciones más recientes aparecen primero.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
             }
           }
         ],
         "responses": {
           "200": {
-            "description": "Registros operacionales",
+            "description": "Página de ejecuciones operacionales",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/ExecutionRecord"
-                  }
+                  "$ref": "#/components/schemas/PaginatedOperationExecutions"
                 }
               }
             }
@@ -1480,6 +1495,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
           }
         }
       }
@@ -1665,6 +1683,8 @@
         "enum": [
           "queued",
           "running",
+          "waiting_timer",
+          "waiting_approval",
           "completed",
           "failed",
           "cancelled"
@@ -2860,10 +2880,15 @@
           "tenantId",
           "workflowId",
           "workflowRunId",
-          "correlationId",
+          "revisionId",
+          "triggerType",
           "status",
-          "startedAt",
-          "retryCount"
+          "recordedAt",
+          "completedAt",
+          "stepCount",
+          "failureCode",
+          "dispatchEvidence",
+          "dispatch"
         ],
         "properties": {
           "id": {
@@ -2878,28 +2903,153 @@
           "workflowRunId": {
             "type": "string"
           },
-          "correlationId": {
+          "revisionId": {
             "type": "string"
+          },
+          "triggerType": {
+            "type": "string",
+            "enum": [
+              "webhook",
+              "schedule",
+              "event",
+              "manual",
+              "channel.message"
+            ]
           },
           "status": {
             "$ref": "#/components/schemas/ExecutionStatus"
           },
-          "startedAt": {
+          "recordedAt": {
             "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "description": "Hora de registro de la ejecución. Para ingress webhook coincide con la aceptación, aunque el trabajador aún no haya iniciado."
           },
           "completedAt": {
-            "type": "string",
-            "format": "date-time"
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Hora del último estado terminal registrado. Un despacho sin confirmar también puede cerrar un registro."
           },
-          "retryCount": {
+          "stepCount": {
             "type": "integer"
           },
-          "lastErrorCode": {
-            "type": "string"
+          "failureCode": {
+            "enum": [
+              "TEMPORAL_DISPATCH_UNCONFIRMED",
+              "LOOP_LIMIT_EXCEEDED",
+              "WORKFLOW_FAILED",
+              null
+            ]
           },
-          "lastErrorMessage": {
-            "type": "string"
+          "dispatchEvidence": {
+            "type": "string",
+            "enum": [
+              "recorded",
+              "missing",
+              "ambiguous"
+            ]
+          },
+          "dispatch": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExecutionDispatch"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "ExecutionDispatch": {
+        "type": "object",
+        "required": [
+          "status",
+          "retryCount",
+          "maxRetries",
+          "nextRetryAt",
+          "leaseExpiresAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "processing",
+              "dispatched",
+              "completed",
+              "failed",
+              "delivery_unknown",
+              "dead_letter"
+            ],
+            "description": "Estado del registro de despacho. delivery_unknown indica que el inicio en Temporal aún carece de confirmación."
+          },
+          "retryCount": {
+            "type": "integer",
+            "description": "Cantidad de fallos de despacho registrados por el relay."
+          },
+          "maxRetries": {
+            "type": "integer"
+          },
+          "nextRetryAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "leaseExpiresAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Vencimiento registrado de la reserva del relay para un despacho en procesamiento."
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "PaginatedOperationExecutions": {
+        "type": "object",
+        "required": [
+          "items",
+          "nextCursor",
+          "pageSummary"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExecutionRecord"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "pageSummary": {
+            "type": "object",
+            "description": "Conteos sobre los registros de despacho identificados en esta página.",
+            "required": [
+              "retryCount",
+              "deliveryUnknownCount"
+            ],
+            "properties": {
+              "retryCount": {
+                "type": "integer"
+              },
+              "deliveryUnknownCount": {
+                "type": "integer"
+              }
+            }
           }
         }
       }
