@@ -33,6 +33,9 @@ const CampaignWizard = lazy(() => import("../components/campaigns/CampaignWizard
 const SegmentsManager = lazy(() => import("../components/campaigns/SegmentsManager"));
 const MarketplacePage = lazy(() => import("../components/marketplace/MarketplacePage"));
 const MarketplaceDetailPage = lazy(() => import("../components/marketplace/MarketplaceDetailPage"));
+const WorkflowListPage = lazy(() => import("../components/workflows/WorkflowListPage"));
+const WorkflowDetailPage = lazy(() => import("../components/workflows/WorkflowDetailPage"));
+const WorkflowEditorPage = lazy(() => import("../components/workflows/WorkflowEditorPage"));
 const AuditEventsPage = lazy(() => import("../pages/Admin/AuditEventsPage"));
 const SystemHealthPage = lazy(() => import("../pages/Admin/SystemHealthPage"));
 
@@ -82,6 +85,10 @@ function AppRoutesInner() {
           <Route path="segmentos" element={<SegmentsManager />} />
           <Route path="marketplace" element={<MarketplacePage />} />
           <Route path="marketplace/:extensionId" element={<MarketplaceDetailPage />} />
+          <Route path="workflows" element={<WorkflowListPage />} />
+          <Route path="workflows/nuevo" element={<PrivateRoute adminOnly><WorkflowEditorPage /></PrivateRoute>} />
+          <Route path="workflows/:workflowId" element={<WorkflowDetailPage />} />
+          <Route path="workflows/:workflowId/revisiones/nueva" element={<PrivateRoute adminOnly><WorkflowEditorPage /></PrivateRoute>} />
           <Route path="canales/email" element={
             <section className="mx-auto max-w-3xl space-y-2 p-6">
               <h1 className="text-2xl font-semibold">Canal de correo electrónico</h1>

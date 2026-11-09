@@ -11,6 +11,10 @@ export default function createWorkflowRoutes(
 
   router.post('/triggers/webhook/:endpointKey', controller.handleWebhookTrigger);
   router.get('/runs/:runId', ...authenticatedTenant, controller.getRun);
+  router.get('/', ...authenticatedTenant, controller.listWorkflows);
+  router.get('/:id', ...authenticatedTenant, controller.getWorkflow);
+  router.get('/:id/revisions/:revisionId', ...authenticatedTenant, controller.getRevision);
+  router.post('/validate', ...authenticatedTenant, controller.validateGraph);
   router.post('/', ...authenticatedTenant, controller.createWorkflow);
   router.post('/:id/revisions', ...authenticatedTenant, controller.createRevision);
   router.post('/:id/publish', ...authenticatedTenant, controller.publishWorkflow);

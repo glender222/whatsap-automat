@@ -15,6 +15,7 @@ import {
   ShieldCheck,
   Sparkles,
   Users,
+  Workflow,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
@@ -48,6 +49,7 @@ export const workspaceSections: WorkspaceSection[] = [
       { to: '/dashboard/ia/dominios', label: 'Dominios de IA', icon: Layers3, adminOnly: true },
       { to: '/dashboard/campanas', label: 'Campañas', icon: Send },
       { to: '/dashboard/segmentos', label: 'Segmentos', icon: Users },
+      { to: '/dashboard/workflows', label: 'Workflows', icon: Workflow },
       { to: '/dashboard/marketplace', label: 'Marketplace', icon: Puzzle },
     ],
   },

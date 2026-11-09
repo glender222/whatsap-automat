@@ -11,12 +11,13 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "npm run test:tokens && npm run test:campaigns && npm run test:extensions && npm run test:admin && npm run test:marketplace",
+    "test": "npm run test:tokens && npm run test:campaigns && npm run test:extensions && npm run test:admin && npm run test:marketplace && npm run test:workflows",
     "test:tokens": "node --import tsx --test src/styles/tokens.test.ts",
     "test:campaigns": "node --import tsx --test src/__tests__/campaigns.test.ts",
     "test:extensions": "node --import tsx --test src/__tests__/SandboxedExtensionIframe.test.ts",
     "test:admin": "node --import tsx --test src/__tests__/admin-pages.test.ts",
-    "test:marketplace": "node --import tsx --test src/__tests__/marketplace.test.ts"
+    "test:marketplace": "node --import tsx --test src/__tests__/marketplace.test.ts",
+    "test:workflows": "node --import tsx --test src/__tests__/workflows.test.ts"
   },
   "dependencies": {
     "@emoji-mart/data": "^1.2.1",

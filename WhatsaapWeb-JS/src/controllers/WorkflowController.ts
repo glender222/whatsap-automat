@@ -3,6 +3,8 @@ import { createProblemDetails, StandardErrorCode } from '@whatsap-automat/contra
 import { extractBearerToken, toPositiveInt } from '../middleware/jwtAuth';
 import { workflowTriggerService, WorkflowTriggerService } from '../services/workflows/WorkflowTriggerService';
 import { workflowRevisionService, WorkflowRevisionService } from '../services/workflows/WorkflowRevisionService';
+import { workflowConsoleService, WorkflowConsoleService } from '../services/workflows/WorkflowConsoleService';
+import { validateWorkflowRevision } from '../services/workflows/validateWorkflowRevision';
 import {
   RevisionNotFoundError,
   TriggerInactiveError,
@@ -73,8 +75,61 @@ function sendFailure(error: unknown, req: Request, res: Response, next: NextFunc
 export class WorkflowController {
   constructor(
     private readonly triggerService: WorkflowTriggerService = workflowTriggerService,
-    private readonly revisionService: WorkflowRevisionService = workflowRevisionService
+    private readonly revisionService: WorkflowRevisionService = workflowRevisionService,
+    private readonly consoleService: WorkflowConsoleService = workflowConsoleService,
   ) {}
+
+  listWorkflows = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const { tenantId } = getActor(req, false);
+      const offset = req.query.offset === undefined ? 0 : Number(req.query.offset);
+      const limit = req.query.limit === undefined ? 20 : Number(req.query.limit);
+      if (!Number.isSafeInteger(offset) || offset < 0 || offset > 100000 ||
+          !Number.isSafeInteger(limit) || limit < 1 || limit > 50) {
+        throw new WorkflowInputError('Invalid workflow pagination.');
+      }
+      const page = await this.consoleService.list(tenantId, offset, limit);
+      res.setHeader('Cache-Control', 'private, no-store');
+      res.json({ success: true, data: page });
+    } catch (error) {
+      sendFailure(error, req, res, next);
+    }
+  };
+
+  getWorkflow = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const { tenantId, role } = getActor(req, false);
+      const workflowId = readId(req.params.id, 'workflow ID');
+      const detail = await this.consoleService.getDetail(tenantId, workflowId, role === 'ADMIN');
+      res.setHeader('Cache-Control', 'private, no-store');
+      res.json({ success: true, data: detail });
+    } catch (error) {
+      sendFailure(error, req, res, next);
+    }
+  };
+
+  getRevision = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const { tenantId } = getActor(req);
+      const workflowId = readId(req.params.id, 'workflow ID');
+      const revisionId = readId(req.params.revisionId, 'revision ID');
+      const revision = await this.consoleService.getRevision(tenantId, workflowId, revisionId);
+      res.setHeader('Cache-Control', 'private, no-store');
+      res.json({ success: true, data: revision });
+    } catch (error) {
+      sendFailure(error, req, res, next);
+    }
+  };
+
+  validateGraph = (req: Request, res: Response, next: NextFunction): void => {
+    try {
+      getActor(req);
+      const { dagGraph, limits } = validateWorkflowRevision(req.body?.dagGraph, req.body?.limits);
+      res.json({ success: true, data: { nodeCount: dagGraph.nodes.length, edgeCount: dagGraph.edges.length, limits } });
+    } catch (error) {
+      sendFailure(error, req, res, next);
+    }
+  };
 
   handleWebhookTrigger = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
