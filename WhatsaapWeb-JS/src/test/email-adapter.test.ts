@@ -187,6 +187,7 @@ describe('PR-F6-05: EmailAdapter SMTP, IMAP MIME Parsing & Threading Verificatio
         message: {
           kind: 'text',
           text: 'Thank you for contacting us. We have received your request.',
+          parameters: { recipientEmail: 'customer@customer.org' },
         },
         expectedConversationVersion: 2,
         causedBy: { type: 'human', id: 'agent_42' },
@@ -321,7 +322,7 @@ describe('PR-F6-05 Remediation: EmailAdapter Adversarial Hardening Suites', () =
   });
 
   describe('Suite 6: RFC 5321 Outbound Addressing & Transport Resilience', () => {
-    it('normalizes Message-ID conversationId to valid SMTP recipient without double brackets', async () => {
+    it('uses the explicit SMTP recipient and retains the Message-ID only for threading', async () => {
       let capturedTo = '';
       let capturedMime = '';
 
@@ -340,14 +341,37 @@ describe('PR-F6-05 Remediation: EmailAdapter Adversarial Hardening Suites', () =
         connectionId: 'conn_default',
         conversationId: threadMessageId,
         effectKey: 'eff_addr_001',
-        message: { kind: 'text', text: 'Acknowledged' },
+        message: { kind: 'text', text: 'Acknowledged', parameters: { recipientEmail: '<client@domain.org>' } },
         expectedConversationVersion: 1,
         causedBy: { type: 'human', id: 'agent_1' },
       });
 
-      assert.equal(capturedTo, 'msg_incoming_client@domain.org');
-      assert.ok(capturedMime.includes('To: <msg_incoming_client@domain.org>'));
+      assert.equal(capturedTo, 'client@domain.org');
+      assert.ok(capturedMime.includes('To: <client@domain.org>'));
+      assert.ok(capturedMime.includes(`In-Reply-To: ${threadMessageId}`));
       assert.equal(capturedMime.includes('<<'), false);
+    });
+
+    it('fails without SMTP transport, a destination or a positive SMTP acknowledgement', async () => {
+      const message: SendMessageCommandV1 = {
+        schemaVersion: 1, tenantId: '1', connectionId: 'conn_default', conversationId: 'customer@domain.org',
+        effectKey: 'failure-check', message: { kind: 'text', text: 'QA only' }, expectedConversationVersion: 1,
+        causedBy: { type: 'human', id: 'operator' },
+      };
+      assert.deepEqual(await new EmailAdapter().send(message), {
+        providerMessageId: null, accepted: false, rawStatus: 'SMTP_TRANSPORT_UNAVAILABLE', deliveryState: 'failed',
+      });
+      let attempts = 0;
+      const adapter = new EmailAdapter({ customSmtpSender: async () => {
+        attempts += 1;
+        return { providerMessageId: 'fixture-only', rawResponse: '550 Mailbox unavailable' };
+      } });
+      assert.equal((await adapter.send({ ...message, conversationId: '<reply@domain.org>' })).rawStatus, 'INVALID_EMAIL_DESTINATION');
+      assert.equal(attempts, 0);
+      assert.deepEqual(await adapter.send(message), {
+        providerMessageId: null, accepted: false, rawStatus: '550 Mailbox unavailable', deliveryState: 'failed',
+      });
+      assert.equal(attempts, 1);
     });
 
     it('gracefully catches network disconnects and returns SendMessageResultV1 with accepted: false', async () => {

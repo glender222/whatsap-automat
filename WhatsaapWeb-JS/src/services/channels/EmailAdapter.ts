@@ -420,22 +420,21 @@ export class EmailAdapter implements ChannelAdapterV1 {
    * Catches transport failures gracefully, returning SendMessageResultV1 with accepted=false.
    */
   async send(cmd: SendMessageCommandV1): Promise<SendMessageResultV1> {
+    const sendSmtp = this.defaultOptions?.customSmtpSender;
+    if (!sendSmtp) {
+      return { providerMessageId: null, accepted: false, rawStatus: 'SMTP_TRANSPORT_UNAVAILABLE', deliveryState: 'failed' };
+    }
     try {
       const config = this.getConnectionConfig(cmd.connectionId);
       const fromAddress = config?.fromAddress || 'noreply@whatsap-automat.internal';
 
-      // Decouple recipient address from conversationId
-      let rawTo = (cmd.message.parameters?.recipientEmail ||
-        cmd.message.parameters?.to ||
-        cmd.message.parameters?.email ||
-        this.conversationToRecipientMap.get(cmd.conversationId) ||
-        cmd.conversationId) as string;
-
-      let cleanTo = rawTo.replace(/^[<"'\s]+|[>"'\s]+$/g, '').trim();
-      if (!cleanTo.includes('@')) {
-        cleanTo = `${cleanTo}@example.com`;
+      const directAddress = cmd.conversationId.startsWith('<') ? undefined : cmd.conversationId;
+      const rawTo = cmd.message.parameters?.recipientEmail || cmd.message.parameters?.to ||
+        cmd.message.parameters?.email || this.conversationToRecipientMap.get(cmd.conversationId) || directAddress;
+      const toAddress = typeof rawTo === 'string' ? rawTo.replace(/^[<>"'\s]+|[<>"'\s]+$/g, '') : '';
+      if (!/^[^@\s<>]+@[^@\s<>]+$/.test(toAddress)) {
+        return { providerMessageId: null, accepted: false, rawStatus: 'INVALID_EMAIL_DESTINATION', deliveryState: 'failed' };
       }
-      const toAddress = cleanTo;
 
       const messageId = `<msg_${Date.now()}_${crypto.randomBytes(4).toString('hex')}@${config?.dkimDomain || 'whatsap-automat.internal'}>`;
       const dateStr = new Date().toUTCString();
@@ -543,21 +542,15 @@ export class EmailAdapter implements ChannelAdapterV1 {
         }
       }
 
-      // Dispatch via custom sender or mock/socket
-      if (this.defaultOptions?.customSmtpSender) {
-        const res = await this.defaultOptions.customSmtpSender(mimeContent, toAddress, fromAddress);
-        return {
-          providerMessageId: res.providerMessageId || messageId,
-          accepted: true,
-          rawStatus: res.rawResponse || '250 OK',
-          deliveryState: 'provider_accepted',
-        };
+      const response = await sendSmtp(mimeContent, toAddress, fromAddress);
+      const rawStatus = typeof response?.rawResponse === 'string' ? response.rawResponse : '';
+      if (!/^2\d{2}(?:[ -]|$)/.test(rawStatus)) {
+        return { providerMessageId: null, accepted: false, rawStatus: rawStatus || 'SMTP_ACK_MISSING', deliveryState: 'failed' };
       }
-
       return {
-        providerMessageId: messageId,
+        providerMessageId: response.providerMessageId || messageId,
         accepted: true,
-        rawStatus: '250 OK',
+        rawStatus,
         deliveryState: 'provider_accepted',
       };
     } catch (err: any) {
