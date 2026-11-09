@@ -142,13 +142,39 @@ jobs:
             cat "$RUNNER_TEMP/product-smoke.log"
             exit 1
           fi
-      - name: Probar campañas, marketplace, Studio y conexiones contra PostgreSQL
+      - name: Probar campañas, Marketplace, Studio, conexiones y consola de workflows contra PostgreSQL
         env:
           CAMPAIGN_SMOKE: '1'
+          WORKFLOW_CONSOLE_SMOKE: '1'
           MARKETPLACE_TEST_DATABASE_URL: postgres://whatsap_smoke:ci-runtime-only@127.0.0.1:5432/whatsap_automat_smoke
           AGENT_STUDIO_TEST_DATABASE_URL: postgres://whatsap_smoke:ci-runtime-only@127.0.0.1:5432/whatsap_automat_smoke
           CHANNEL_CONNECTIONS_TEST_DATABASE_URL: postgres://whatsap_smoke:ci-runtime-only@127.0.0.1:5432/whatsap_automat_smoke
-        run: node --import tsx --test src/test/campaign-persistence.integration.test.ts src/test/marketplace-postgres.test.ts src/test/agent-studio-postgres.test.ts src/test/channel-connections-postgres.test.ts
+        run: node --import tsx --test src/test/campaign-persistence.integration.test.ts src/test/marketplace-postgres.test.ts src/test/agent-studio-postgres.test.ts src/test/channel-connections-postgres.test.ts src/test/workflow-console.integration.test.ts
+      - name: Ejecutar workflows con el worker compilado y Temporal
+        env:
+          WORKFLOW_TEST_DATABASE_URL: postgres://whatsap_smoke:ci-runtime-only@127.0.0.1:5432/whatsap_automat_smoke
+          WORKFLOW_TEST_TEMPORAL_ADDRESS: 127.0.0.1:7246
+          TEMPORAL_TLS: 'false'
+        run: |
+          temporal_archive="$RUNNER_TEMP/temporal-cli.tar.gz"
+          curl --fail --silent --show-error --location \
+            https://github.com/temporalio/cli/releases/download/v1.10.0/temporal_cli_1.10.0_linux_amd64.tar.gz \
+            --output "$temporal_archive"
+          printf '%s  %s\n' 521f461f3d108902763bb71e85cd0fd382dc9357b59604ae03da6ae734d16890 "$temporal_archive" | sha256sum -c -
+          tar -xzf "$temporal_archive" -C "$RUNNER_TEMP" temporal
+          "$RUNNER_TEMP/temporal" server start-dev --ip 127.0.0.1 --port 7246 --headless > "$RUNNER_TEMP/temporal-smoke.log" 2>&1 &
+          temporal_pid=$!
+          trap 'kill "$temporal_pid" 2>/dev/null || true' EXIT
+          for attempt in {1..30}; do
+            if "$RUNNER_TEMP/temporal" operator namespace describe --address "$WORKFLOW_TEST_TEMPORAL_ADDRESS" --namespace default >/dev/null 2>&1; then break; fi
+            if ! kill -0 "$temporal_pid" 2>/dev/null; then break; fi
+            sleep 1
+          done
+          if ! "$RUNNER_TEMP/temporal" operator namespace describe --address "$WORKFLOW_TEST_TEMPORAL_ADDRESS" --namespace default >/dev/null 2>&1 ||
+            ! node --import tsx --test src/test/workflows-ingress-rollback.test.ts; then
+            cat "$RUNNER_TEMP/temporal-smoke.log"
+            exit 1
+          fi
 
   contracts-ci:
     name: Shared Contracts CI (Node ${{ matrix.node-version }})
