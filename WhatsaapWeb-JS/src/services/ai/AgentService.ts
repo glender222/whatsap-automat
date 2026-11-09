@@ -119,11 +119,11 @@ export class AgentService {
   }
 
   async createAgent(companyId: number, userId: number | null, input: any): Promise<AiAgent> {
-    const agent = await this.agentRepo.create(companyId, userId, input);
-    if (input?.domainKey) {
-      await this.agentRepo.assignDomainAgent(companyId, input.domainKey, agent.id);
-    }
-    return agent;
+    return this.agentRepo.withMutation(companyId, async (repo) => {
+      const agent = await repo.create(companyId, userId, input);
+      if (input?.domainKey) await repo.assignDomainAgent(companyId, input.domainKey, agent.id);
+      return agent;
+    });
   }
 
   async getAgent(companyId: number, agentId: number): Promise<AiAgent> {
@@ -131,15 +131,17 @@ export class AgentService {
   }
 
   async updateAgent(companyId: number, agentId: number, input: any): Promise<AiAgent> {
-    const agent = await this.agentRepo.update(companyId, agentId, input);
-    if (input?.autoConfirmOrders !== undefined || input?.autoCreateVouchers !== undefined || input?.autoGeneratePaymentLinks !== undefined) {
-      return this.agentRepo.updateFlags(companyId, agentId, {
-        autoConfirmOrders: input.autoConfirmOrders,
-        autoCreateVouchers: input.autoCreateVouchers,
-        autoGeneratePaymentLinks: input.autoGeneratePaymentLinks,
-      });
-    }
-    return agent;
+    return this.agentRepo.withMutation(companyId, async (repo) => {
+      const agent = await repo.update(companyId, agentId, input);
+      if (input?.autoConfirmOrders !== undefined || input?.autoCreateVouchers !== undefined || input?.autoGeneratePaymentLinks !== undefined) {
+        return repo.updateFlags(companyId, agentId, {
+          autoConfirmOrders: input.autoConfirmOrders,
+          autoCreateVouchers: input.autoCreateVouchers,
+          autoGeneratePaymentLinks: input.autoGeneratePaymentLinks,
+        });
+      }
+      return agent;
+    });
   }
 
   async archiveAgent(companyId: number, agentId: number): Promise<void> {
@@ -254,31 +256,33 @@ export class AgentService {
       error.statusCode = 400;
       throw error;
     }
-    let agent = await this.agentRepo.get(companyId, agentId);
-    if (patch && Object.keys(patch).length > 0) {
-      const safePatch: Partial<AiAgent> = {};
-      for (const key of ['name', 'mode', 'model', 'provider', 'moduleAccess', 'toolAccess', 'catalogScope'] as const) {
-        if (patch[key] !== undefined) (safePatch as any)[key] = patch[key];
+    const domain = await this.agentRepo.withMutation(companyId, async (repo) => {
+      let agent = await repo.get(companyId, agentId);
+      if (patch && Object.keys(patch).length > 0) {
+        const safePatch: Partial<AiAgent> = {};
+        for (const key of ['name', 'mode', 'model', 'provider', 'moduleAccess', 'toolAccess', 'catalogScope'] as const) {
+          if (patch[key] !== undefined) (safePatch as any)[key] = patch[key];
+        }
+        if (Object.keys(safePatch).length > 0) {
+          agent = await repo.update(companyId, agentId, safePatch);
+        }
+        if (patch.profile) {
+          agent = await repo.updateProfile(companyId, agentId, patch.profile);
+        }
+        if (patch.rules) {
+          agent = await repo.updateRules(companyId, agentId, patch.rules);
+        }
       }
-      if (Object.keys(safePatch).length > 0) {
-        agent = await this.updateAgent(companyId, agentId, safePatch);
+      if (agent.mode === 'disabled' || patch?.mode === 'disabled') {
+        const error = new Error('No se puede deployar un agente en modo Desactivado') as Error & { statusCode?: number };
+        error.statusCode = 409;
+        throw error;
       }
-      if (patch.profile) {
-        agent = await this.updateProfile(companyId, agentId, patch.profile);
+      if (agent.status !== 'active') {
+        await repo.update(companyId, agentId, { status: 'active' });
       }
-      if (patch.rules) {
-        agent = await this.updateRules(companyId, agentId, patch.rules);
-      }
-    }
-    if (agent.mode === 'disabled' || patch?.mode === 'disabled') {
-      const error = new Error('No se puede deployar un agente en modo Desactivado') as Error & { statusCode?: number };
-      error.statusCode = 409;
-      throw error;
-    }
-    if (agent.status !== 'active' || patch?.status !== 'active') {
-      await this.agentRepo.update(companyId, agentId, { status: 'active' });
-    }
-    const domain = await this.agentRepo.assignDomainAgent(companyId, domainKey, agentId);
+      return repo.assignDomainAgent(companyId, domainKey, agentId);
+    });
     emitDashboard('agent:deployed', { companyId, domainKey, agentId });
     return domain;
   }
@@ -538,7 +542,7 @@ export class AgentService {
       }
     }
 
-    await pool.query(
+    await queryInTenantScope(pool, companyId,
       `INSERT INTO agent_test_runs (agent_id, company_id, input_message, output_json, created_by)
        VALUES ($1, $2, $3, $4::jsonb, $5)`,
       [agentId, companyId, input.message || '', JSON.stringify(output), userId]
@@ -584,6 +588,7 @@ export class AgentService {
     input: { message: string; history?: Array<{ fromMe: boolean; body: string }>; domainKey?: 'gestion_web' },
     userId: number | null
   ): Promise<AgentRuntimeResult & { turn: any | null }> {
+    await this.agentRepo.get(companyId, agentId);
     const chatId = await this.ensureSandboxConversation(companyId, agentId, userId);
     const result = await this.runAgent(
       companyId,
@@ -604,7 +609,7 @@ export class AgentService {
   private async resolveConversationId(companyId: number, chatId: string): Promise<number | null> {
     const normalized = String(chatId).replace('@c.us', '').replace('@s.whatsapp.net', '').replace(/[^\d]/g, '');
     if (!normalized) return null;
-    const result = await pool.query(
+    const result = await queryInTenantScope(pool, companyId,
       `SELECT id FROM conversations
        WHERE company_id = $1 AND channel IN ('whatsapp', 'ai_sandbox')
          AND external_conversation_id = ANY($2::varchar[])
@@ -616,7 +621,7 @@ export class AgentService {
 
   private async ensureSandboxConversation(companyId: number, agentId: number, userId: number | null): Promise<string> {
     const chatId = `agent-test:${agentId}:${userId || 0}`;
-    await pool.query(
+    await queryInTenantScope(pool, companyId,
       `INSERT INTO conversations (
          company_id, channel, external_conversation_id, type, title,
          last_message_at, metadata_json, created_at, updated_at

@@ -124,7 +124,7 @@ export class AiSessionRepositoryPg {
   async resolveConversationId(companyId: number, chatId: string): Promise<number | null> {
     const normalized = String(chatId || '').replace('@c.us', '').replace('@s.whatsapp.net', '').replace(/[^\d]/g, '');
     if (!normalized) return null;
-    const result = await this.pool.query(
+    const result = await queryInTenantScope(this.pool, companyId,
       `SELECT id FROM conversations
        WHERE company_id = $1 AND channel = 'whatsapp'
          AND external_conversation_id = ANY($2::varchar[])
@@ -144,7 +144,7 @@ export class AiSessionRepositoryPg {
     inboundProviderMessageId?: string | null;
     metadata?: Record<string, unknown>;
   }): Promise<AiChatSessionRecord> {
-    const result = await this.pool.query(
+    const result = await queryInTenantScope(this.pool, input.companyId,
       `INSERT INTO ai_chat_sessions (
          company_id, domain_key, conversation_id, chat_id, agent_id,
          status, last_inbound_provider_message_id, last_activity_at, metadata_json
@@ -178,7 +178,7 @@ export class AiSessionRepositoryPg {
 
   async getSessionByChat(companyId: number, chatId: string, domainKey = 'gestion_web'): Promise<AiChatSessionRecord | null> {
     const normalized = String(chatId || '').replace('@c.us', '').replace('@s.whatsapp.net', '').replace(/[^\d]/g, '');
-    const result = await this.pool.query(
+    const result = await queryInTenantScope(this.pool, companyId,
       `SELECT *
        FROM ai_chat_sessions
        WHERE company_id = $1 AND domain_key = $2
@@ -191,7 +191,7 @@ export class AiSessionRepositoryPg {
   }
 
   async listSessionsByDomain(companyId: number, domainKey: string, limit = 100): Promise<AiChatSessionRecord[]> {
-    const result = await this.pool.query(
+    const result = await queryInTenantScope(this.pool, companyId,
       `SELECT *
        FROM ai_chat_sessions
        WHERE company_id = $1 AND domain_key = $2
@@ -203,7 +203,7 @@ export class AiSessionRepositoryPg {
   }
 
   async updateSessionStatus(companyId: number, sessionId: number, status: AiSessionStatus): Promise<void> {
-    await this.pool.query(
+    await queryInTenantScope(this.pool, companyId,
       `UPDATE ai_chat_sessions
        SET status = $3, last_activity_at = NOW(), updated_at = NOW()
        WHERE company_id = $1 AND id = $2`,
@@ -233,7 +233,7 @@ export class AiSessionRepositoryPg {
     mode: 'suggest' | 'auto';
     isTest?: boolean;
   }): Promise<AiSessionTurnRecord> {
-    const result = await this.pool.query(
+    const result = await queryInTenantScope(this.pool, input.companyId,
       `INSERT INTO ai_session_turns (
          company_id, session_id, domain_key, conversation_id, chat_id,
          agent_id, inbound_provider_message_id, mode, is_test, status
@@ -263,7 +263,7 @@ export class AiSessionRepositoryPg {
     finalReplyPreview?: string | null;
     commandCount?: number;
   }): Promise<void> {
-    await this.pool.query(
+    await queryInTenantScope(this.pool, input.companyId,
       `UPDATE ai_session_turns
        SET status = $3,
            final_action = $4,
@@ -283,7 +283,7 @@ export class AiSessionRepositoryPg {
   }
 
   async createEvent(input: CreateSessionEventInput): Promise<AiSessionEventRecord> {
-    const result = await this.pool.query(
+    const result = await queryInTenantScope(this.pool, input.companyId,
       `INSERT INTO ai_session_events (
          company_id, session_id, turn_id, domain_key, conversation_id, chat_id,
          agent_id, kind, title, summary, status, tool_name, tool_call_id,
@@ -333,7 +333,7 @@ export class AiSessionRepositoryPg {
   async listActivityByChat(companyId: number, chatId: string, limit = 50): Promise<any[]> {
     const normalized = String(chatId || '').replace('@c.us', '').replace('@s.whatsapp.net', '').replace(/[^\d]/g, '');
     const safeLimit = Math.max(1, Math.min(Number(limit || 50), 100));
-    const turns = await this.pool.query(
+    const turns = await queryInTenantScope(this.pool, companyId,
       `SELECT t.*, a.name AS agent_name
        FROM ai_session_turns t
        LEFT JOIN ai_agents a ON a.id = t.agent_id
@@ -383,7 +383,7 @@ export class AiSessionRepositoryPg {
       clauses.push(`t.started_at <= $${params.length}::timestamptz`);
     }
     params.push(Math.max(1, Math.min(Number(filters.limit || 100), 300)));
-    const turns = await this.pool.query(
+    const turns = await queryInTenantScope(this.pool, companyId,
       `SELECT t.*, a.name AS agent_name
        FROM ai_session_turns t
        LEFT JOIN ai_agents a ON a.id = t.agent_id
@@ -396,7 +396,7 @@ export class AiSessionRepositoryPg {
   }
 
   async getDomainMetrics(companyId: number, domainKey: string): Promise<Record<string, unknown>> {
-    const result = await this.pool.query(
+    const result = await queryInTenantScope(this.pool, companyId,
       `SELECT
          (COUNT(DISTINCT s.id) FILTER (WHERE s.status = 'active'))::int AS active_sessions,
          COUNT(DISTINCT t.id)::int AS turns,
@@ -429,7 +429,7 @@ export class AiSessionRepositoryPg {
   private async attachEvents(companyId: number, turnRows: Record<string, any>[]): Promise<any[]> {
     if (turnRows.length === 0) return [];
     const turnIds = turnRows.map((row) => Number(row.id));
-    const events = await this.pool.query(
+    const events = await queryInTenantScope(this.pool, companyId,
       `SELECT *
        FROM ai_session_events
        WHERE company_id = $1 AND turn_id = ANY($2::bigint[])
