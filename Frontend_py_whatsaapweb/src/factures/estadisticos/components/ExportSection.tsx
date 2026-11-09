@@ -11,6 +11,20 @@ interface ExportSectionProps {
   filters: ReportFilters;
 }
 
+const statusLabels: Record<string, string> = {
+  draft: 'Borrador',
+  quoted: 'Cotizado',
+  pending_handoff: 'Requiere atención humana',
+  pending_approval: 'Pendiente de aprobación',
+  confirmed: 'Confirmado',
+  reserved: 'Reservado',
+  completed: 'Completado',
+  cancelled: 'Cancelado',
+  out_of_stock: 'Agotado',
+  unavailable: 'No disponible',
+  registered: 'Registrado',
+};
+
 const ExportSection: React.FC<ExportSectionProps> = ({ filters }) => {
   const [status, setStatus] = useState('');
   const [report, setReport] = useState<OperationalReportPage | null>(null);
@@ -18,13 +32,13 @@ const ExportSection: React.FC<ExportSectionProps> = ({ filters }) => {
   const [exporting, setExporting] = useState<'csv' | 'xls' | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const reportFilters = useMemo(() => ({ ...filters, status: status || undefined, limit: 20, offset: 0 }), [filters, status]);
+  const reportFilters = useMemo(() => ({ ...filters, status: status || undefined }), [filters, status]);
 
   const loadPreview = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
-      setReport(await getOperationalReport(reportFilters));
+      setReport(await getOperationalReport({ ...reportFilters, limit: 20, offset: 0 }));
     } catch (err: any) {
       setError(err?.response?.data?.message || err?.message || 'No se pudo cargar el reporte operativo.');
     } finally {
@@ -57,18 +71,18 @@ const ExportSection: React.FC<ExportSectionProps> = ({ filters }) => {
             <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">Reporte operativo</h3>
           </div>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            Servicios registrados al finalizar atenciones. Vista previa de hasta 20 filas.
+            Pedidos y servicios registrados en el periodo. Vista previa de hasta 20 filas.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <select
+            aria-label="Estado del pedido"
             value={status}
             onChange={(event) => setStatus(event.target.value)}
             className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
           >
             <option value="">Todos los estados</option>
-            <option value="completed">Completado</option>
-            <option value="registered">Registrado</option>
+            {Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </select>
           <button
             type="button"
@@ -128,7 +142,7 @@ const ExportSection: React.FC<ExportSectionProps> = ({ filters }) => {
                   <p className="max-w-xs truncate">{row.products || '-'}</p>
                   <p className="text-xs text-gray-500 dark:text-gray-400">{row.itemTypes || '-'}</p>
                 </td>
-                <td className="px-5 py-3">{row.status}</td>
+                <td className="px-5 py-3">{Object.hasOwn(statusLabels, row.status) ? statusLabels[row.status] : row.status}</td>
                 <td className="px-5 py-3">{row.employeeName || 'Sistema'}</td>
                 <td className="px-5 py-3 text-right">{row.actionCount}</td>
               </tr>
