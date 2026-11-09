@@ -174,6 +174,17 @@ export class MetaAccountStore {
     return result.rows[0] || null;
   }
 
+  async getAccountForCompanyPhone(companyId: number, phoneNumberId: string): Promise<Record<string, any> | null> {
+    const result = await this.query(companyId,
+      `SELECT *
+       FROM whatsapp_business_accounts
+       WHERE company_id = $1 AND phone_number_id = $2 AND provider = 'meta-cloud'
+         AND status IN ('connected', 'configured')`,
+      [companyId, phoneNumberId]
+    );
+    return result.rows[0] ?? null;
+  }
+
   async findByPhoneNumberId(phoneNumberId: string): Promise<{ company_id: number } | null> {
     return this.webhookWork.transaction(async ({ client }) => {
       await client.query("SELECT set_config('app.verified_meta_phone_number', $1, true)", [phoneNumberId]);

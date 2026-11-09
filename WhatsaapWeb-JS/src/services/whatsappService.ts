@@ -227,9 +227,12 @@ export class WhatsAppService {
     await this.metaAccountStore?.disconnect(companyId);
   }
 
-  private async getCompanyMetaClient(companyId = config.defaultCompanyId || 1): Promise<MetaCloudClient> {
-    const fallbackAllowed = companyId === (config.defaultCompanyId || 1);
-    const account = await this.metaAccountStore?.getAccountForCompany(companyId);
+  private async getCompanyMetaClient(companyId = config.defaultCompanyId || 1, phoneNumberId?: string): Promise<MetaCloudClient> {
+    const account = phoneNumberId
+      ? await this.metaAccountStore?.getAccountForCompanyPhone(companyId, phoneNumberId)
+      : await this.metaAccountStore?.getAccountForCompany(companyId);
+    const fallbackAllowed = companyId === (config.defaultCompanyId || 1) &&
+      (!phoneNumberId || (Boolean(account) && phoneNumberId === config.meta.phoneNumberId));
     const clientConfig = this.metaAccountStore?.toClientConfig(account || null, fallbackAllowed);
 
     if (!clientConfig?.accessToken || !clientConfig?.phoneNumberId) {
@@ -373,6 +376,7 @@ export class WhatsAppService {
               body: message || null,
               messageType: mediaType,
               providerMessageId: sent.providerMessageId,
+              phoneNumberId: metaClient.phoneNumberId,
               raw: { upload: upload.raw, send: sent.raw },
               media: {
                 providerMediaId: upload.mediaId,
@@ -538,11 +542,12 @@ export class WhatsAppService {
       };
     }
 
-    const metaClient = await this.getCompanyMetaClient(companyId);
-    const downloaded = await metaClient.downloadMedia(mediaId);
+    const phoneNumberId = attachment.phone_number_id || undefined;
+    const metaClient = await this.getCompanyMetaClient(companyId, phoneNumberId);
+    const downloaded = await metaClient.downloadMedia(mediaId, phoneNumberId);
     await fs.mkdir(uploadDir, { recursive: true });
     const filename = `${mediaId.replace(/[^\w.-]/g, '_')}${extensionFromMime(downloaded.mimeType, attachment.filename)}`;
-    const localPath = path.join(uploadDir, filename);
+    const localPath = path.join(uploadDir, `${attachment.attachment_id}-${filename}`);
     const temporaryPath = path.join(uploadDir, `.${randomUUID()}.tmp`);
     try {
       await fs.writeFile(temporaryPath, downloaded.bytes, { flag: 'wx' });

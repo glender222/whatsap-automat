@@ -52,7 +52,7 @@ async function api(
   app.use(express.json({
     verify(req, _res, buf) { (req as Request & { rawBody?: Buffer }).rawBody = buf; },
   }));
-  app.use('/api/v1/conversations', createConversationV1Routes(sender, query));
+  app.use('/api/v1/conversations', createConversationV1Routes(sender, query, webhookService));
   if (webhookService) app.use('/api/webhooks/meta/whatsapp', createMetaWebhookRoutes(webhookService));
   return listen(t, app.listen(0, '127.0.0.1'));
 }
@@ -159,14 +159,17 @@ test('durable CAS sends one Graph POST per text or attachment intent and reconci
   const originalProvider = config.whatsapp.provider;
   const originalSecret = config.meta.appSecret;
   const originalUploadDir = config.multer.dest;
+  const originalCacheDir = config.whatsapp.uploadDir;
   const uploadDir = await mkdtemp(join(tmpdir(), 'canonical-attachment-'));
   config.whatsapp.provider = 'meta-cloud';
   config.meta.appSecret = appSecret;
   config.multer.dest = uploadDir;
+  config.whatsapp.uploadDir = join(uploadDir, 'downloads');
   t.after(async () => {
     config.whatsapp.provider = originalProvider;
     config.meta.appSecret = originalSecret;
     config.multer.dest = originalUploadDir;
+    config.whatsapp.uploadDir = originalCacheDir;
     await rm(uploadDir, { recursive: true, force: true });
   });
 
@@ -531,5 +534,75 @@ test('durable CAS sends one Graph POST per text or attachment intent and reconci
     assert.equal(mediaRequests.length, uploadsAfterDispatch);
     for (let check = 0; check < 20 && (await readdir(uploadDir)).length > 0; check++) await delay(10);
     assert.deepEqual(await readdir(uploadDir), []);
+
+    const inboundRecipient = '12025550113';
+    const inboundId = `wamid.inbound-media-${tenantA}`;
+    const inboundMediaId = `inbound-media-${tenantA}`;
+    const inboundResponse = await signedWebhook(url, secondPhone, {
+      messages: [{
+        id: inboundId, from: inboundRecipient, timestamp: now(), type: 'image',
+        image: { id: inboundMediaId, mime_type: 'image/png' },
+      }],
+    });
+    assert.equal(inboundResponse.status, 200, await inboundResponse.text());
+    const inboundConversationId = await conversation(tenantA, inboundRecipient);
+    const inboundHistory = await fetch(`${url}/api/v1/conversations/${inboundConversationId}/messages`, {
+      headers: { authorization: `Bearer ${accessA}` },
+    });
+    assert.equal(inboundHistory.status, 200);
+    const inboundItem = (await inboundHistory.json()).items[0];
+    assert.equal(inboundItem.direction, 'inbound');
+    assert.equal(inboundItem.attachments[0].mimeType, 'image/png');
+    const outboundMediaId = sendRequest.body.document.id as string;
+    const downloads = new Map([
+      [outboundMediaId, { phone: phoneA, token: 'fixture-rotated-token', body: 'Fixture attachment', mime: 'text/plain' }],
+      [inboundMediaId, { phone: secondPhone, token: 'fixture-second-account-token', body: 'Fixture image bytes', mime: 'image/png' }],
+    ]);
+    const nativeFetch = globalThis.fetch;
+    const downloadGraph = t.mock.method(globalThis, 'fetch', async (input: string | URL | Request, init?: RequestInit) => {
+      const target = new URL(String(input));
+      if (target.origin === 'https://graph.facebook.com') {
+        const mediaId = target.pathname.split('/').at(-1)!;
+        const fixture = downloads.get(mediaId);
+        assert.ok(fixture);
+        assert.equal(target.searchParams.get('phone_number_id'), fixture.phone);
+        assert.equal(new Headers(init?.headers).get('authorization'), `Bearer ${fixture.token}`);
+        return Response.json({ url: `https://lookaside.fbsbx.com/${mediaId}` });
+      }
+      if (target.origin === 'https://lookaside.fbsbx.com') {
+        const fixture = downloads.get(target.pathname.slice(1));
+        assert.ok(fixture);
+        assert.equal(new Headers(init?.headers).get('authorization'), `Bearer ${fixture.token}`);
+        return new Response(fixture.body, { headers: { 'Content-Type': fixture.mime } });
+      }
+      return nativeFetch(input, init);
+    });
+    const mediaPath = (conversationId: number, message: typeof item) =>
+      `${url}/api/v1/conversations/${conversationId}/messages/${message.id}/attachments/${message.attachments[0].id}`;
+    const authorized = { headers: { authorization: `Bearer ${accessA}` } };
+    const outgoingPath = mediaPath(attachmentId, item);
+    const incomingPath = mediaPath(inboundConversationId, inboundItem);
+    const outgoing = await nativeFetch(outgoingPath, authorized);
+    assert.equal(outgoing.status, 200);
+    assert.match(outgoing.headers.get('content-type') ?? '', /^text\/plain\b/);
+    assert.equal(await outgoing.text(), 'Fixture attachment');
+    const foreign = await nativeFetch(incomingPath, { headers: { authorization: `Bearer ${accessB}` } });
+    assert.equal(foreign.status, 404);
+    assert.equal(downloadGraph.mock.callCount(), 2);
+
+    await uow.run(tenantA, (sql) => sql.query(
+      "UPDATE whatsapp_business_accounts SET status = 'disconnected' WHERE company_id = $1 AND phone_number_id = $2",
+      [tenantA, secondPhone],
+    ));
+    assert.equal((await nativeFetch(incomingPath, authorized)).status, 503);
+    assert.equal(downloadGraph.mock.callCount(), 2);
+    await accounts.upsertConnection(tenantA, { phoneNumberId: secondPhone, accessToken: 'fixture-second-account-token' });
+    const incoming = await nativeFetch(incomingPath, authorized);
+    assert.equal(incoming.status, 200);
+    assert.equal(incoming.headers.get('content-type'), 'image/png');
+    assert.equal(await incoming.text(), 'Fixture image bytes');
+    assert.equal(await (await nativeFetch(outgoingPath, authorized)).text(), 'Fixture attachment');
+    assert.equal(downloadGraph.mock.callCount(), 4);
+    downloadGraph.mock.restore();
   });
 });

@@ -26,7 +26,12 @@ export interface MetaMediaAttachment {
   mime_type: string | null;
   filename: string | null;
   internal_path: string | null;
+  phone_number_id: string | null;
 }
+
+const attachmentPhoneNumber = `COALESCE(send.phone_number_id, m.metadata_json #>> '{metadata,phone_number_id}') AS phone_number_id`;
+const attachmentSendClaim = `LEFT JOIN conversation_send_claims send
+  ON send.message_id = m.id AND send.tenant_id = m.company_id AND send.conversation_id = m.conversation_id`;
 
 export interface ServiceWindowStatus {
   hasActiveSession: boolean;
@@ -666,6 +671,7 @@ export class MetaInboxStore {
     body: string | null;
     messageType: string;
     providerMessageId: string | null;
+    phoneNumberId?: string;
     raw: unknown;
     template?: { name: string; language: string } | null;
     media?: {
@@ -710,7 +716,7 @@ export class MetaInboxStore {
           json(input.raw),
           input.template?.name || null,
           input.template?.language || null,
-          json({ raw: input.raw }),
+          json({ raw: input.raw, metadata: input.phoneNumberId ? { phone_number_id: input.phoneNumberId } : undefined }),
         ]
       );
       if (input.media) {
@@ -781,9 +787,11 @@ export class MetaInboxStore {
          a.metadata_json,
          m.provider_message_id,
          m.message_type,
-         m.body
+         m.body,
+         ${attachmentPhoneNumber}
        FROM message_attachments a
        JOIN messages m ON m.id = a.message_id
+       ${attachmentSendClaim}
        WHERE m.company_id = $1
          AND m.channel = 'whatsapp'
          AND (
@@ -800,10 +808,12 @@ export class MetaInboxStore {
 
   async findConversationAttachment(conversationId: number, messageId: number, attachmentId: number): Promise<MetaMediaAttachment | null> {
     const result = await this.query(
-      `SELECT a.id AS attachment_id, a.provider_media_id, a.mime_type, a.filename, a.internal_path
+      `SELECT a.id AS attachment_id, a.provider_media_id, a.mime_type, a.filename, a.internal_path,
+              ${attachmentPhoneNumber}
        FROM message_attachments a
        JOIN messages m ON m.id = a.message_id
        JOIN conversations c ON c.id = m.conversation_id AND c.company_id = m.company_id
+       ${attachmentSendClaim}
        WHERE c.company_id = $1 AND c.id = $2 AND m.id = $3 AND a.id = $4
          AND m.channel = 'whatsapp' AND m.provider = 'meta-cloud' AND a.provider = 'meta-cloud'`,
       [this.companyId, conversationId, messageId, attachmentId],
@@ -820,7 +830,7 @@ export class MetaInboxStore {
     metadata?: unknown;
   }): Promise<void> {
     await this.query(
-      `UPDATE message_attachments
+      `UPDATE message_attachments a
        SET internal_path = $2,
            mime_type = COALESCE($3, mime_type),
            size_bytes = COALESCE($4, size_bytes),
@@ -828,7 +838,9 @@ export class MetaInboxStore {
            metadata_json = COALESCE(metadata_json, '{}'::jsonb) || $6::jsonb,
            storage_status = 'downloaded',
            downloaded_at = NOW()
-       WHERE id = $1`,
+       WHERE a.id = $1 AND EXISTS (
+         SELECT 1 FROM messages m WHERE m.id = a.message_id AND m.company_id = $7
+       )`,
       [
         input.attachmentId,
         input.internalPath,
@@ -836,6 +848,7 @@ export class MetaInboxStore {
         input.sizeBytes || null,
         input.sha256 || null,
         json(input.metadata || {}),
+        this.companyId,
       ]
     );
   }

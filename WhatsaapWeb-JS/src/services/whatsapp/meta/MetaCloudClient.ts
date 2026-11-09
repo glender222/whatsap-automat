@@ -94,6 +94,10 @@ export class MetaCloudClient {
     return Boolean(this.config.accessToken && this.config.phoneNumberId);
   }
 
+  get phoneNumberId(): string {
+    return this.config.phoneNumberId;
+  }
+
   getMaskedConfig(): Record<string, unknown> {
     return {
       graphVersion: this.config.graphVersion,
@@ -410,11 +414,12 @@ export class MetaCloudClient {
     };
   }
 
-  async downloadMedia(mediaId: string): Promise<MetaDownloadResult> {
+  async downloadMedia(mediaId: string, phoneNumberId?: string): Promise<MetaDownloadResult> {
     if (!/^[A-Za-z0-9_-]{1,128}$/.test(mediaId)) {
       throw mediaDownloadError('MEDIA_NOT_FOUND', 404, 'No se encontró el archivo asociado al mensaje.');
     }
-    const { url: downloadLocation, ...metadata } = await this.request(`/${mediaId}`, { redirect: 'error' });
+    const phoneScope = phoneNumberId ? `?${new URLSearchParams({ phone_number_id: phoneNumberId })}` : '';
+    const { url: downloadLocation, ...metadata } = await this.request(`/${mediaId}${phoneScope}`, { redirect: 'error' });
     if (typeof downloadLocation !== 'string' || !downloadLocation) {
       throw mediaDownloadError('MEDIA_NOT_FOUND', 404, 'Meta Cloud API no devolvió una URL de media.');
     }
