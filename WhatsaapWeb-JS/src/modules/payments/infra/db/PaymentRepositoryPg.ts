@@ -1,3 +1,5 @@
+import { Pool } from 'pg';
+import { queryInTenantScope, withTenantTransaction } from '../../../../db/TenantScopedUoW';
 import { Queryable } from '../../../../shared/UnitOfWorkPort';
 import {
   CreatePaymentVoucherInput,
@@ -13,6 +15,10 @@ type Row = Record<string, any>;
 
 export class PaymentRepositoryPg {
   constructor(private readonly pool: Queryable) {}
+
+  private inTenant<T>(companyId: number, work: (client: Queryable) => Promise<T>): Promise<T> {
+    return this.pool instanceof Pool ? withTenantTransaction(companyId, work, this.pool) : work(this.pool);
+  }
 
   async list(companyId: number, filters: PaymentFilters): Promise<PaymentVoucherPage> {
     const params: unknown[] = [companyId];
@@ -143,14 +149,14 @@ export class PaymentRepositoryPg {
         SELECT * FROM orphan_voucher_rows
       )
     `;
-    const countResult = await this.pool.query(
+    const countResult = await queryInTenantScope(this.pool, companyId,
       `${baseQuery}
        SELECT COUNT(*)::int AS count FROM unified`,
       params
     );
 
     const listParams = [...params, filters.limit, filters.offset];
-    const rowsResult = await this.pool.query(
+    const rowsResult = await queryInTenantScope(this.pool, companyId,
       `${baseQuery}
        SELECT *
        FROM unified
@@ -168,7 +174,7 @@ export class PaymentRepositoryPg {
   }
 
   async countPending(companyId: number): Promise<number> {
-    const result = await this.pool.query(
+    const result = await queryInTenantScope(this.pool, companyId,
       `WITH payable_orders AS (
          SELECT o.id
          FROM customer_orders o
@@ -203,7 +209,7 @@ export class PaymentRepositoryPg {
   }
 
   async get(companyId: number, voucherId: number): Promise<PaymentVoucher | null> {
-    const result = await this.pool.query(
+    const result = await queryInTenantScope(this.pool, companyId,
       `SELECT * FROM payment_vouchers WHERE company_id = $1 AND id = $2 LIMIT 1`,
       [companyId, voucherId]
     );
@@ -211,13 +217,30 @@ export class PaymentRepositoryPg {
   }
 
   async create(input: CreatePaymentVoucherInput): Promise<PaymentVoucher> {
-    const result = await this.pool.query(
+    const result = await queryInTenantScope(this.pool, input.companyId,
       `INSERT INTO payment_vouchers (
          company_id, order_id, chat_id, contact_id, conversation_id, source_message_id,
          file_url, mime_type, file_size, payment_method, amount, currency, sender_reference,
          status, uploaded_by, notes, metadata_json
        )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'pending', $14, $15, $16)
+       SELECT $1::integer, $2::bigint, $3::varchar, $4::integer, $5::integer, $6::integer, $7::text,
+              $8::varchar, $9::bigint, $10::varchar, $11::numeric, $12::varchar, $13::varchar,
+              'pending', $14::bigint, $15::text, $16::jsonb
+       WHERE ($2::bigint IS NULL OR EXISTS (
+         SELECT 1 FROM customer_orders o WHERE o.company_id = $1 AND o.id = $2
+           AND ($4::integer IS NULL OR o.contact_id IS NULL OR o.contact_id = $4)
+           AND ($5::integer IS NULL OR o.conversation_id IS NULL OR o.conversation_id = $5)
+       ))
+       AND ($4::integer IS NULL OR EXISTS (SELECT 1 FROM contacts WHERE company_id = $1 AND id = $4))
+       AND ($5::integer IS NULL OR EXISTS (
+         SELECT 1 FROM conversations WHERE company_id = $1 AND id = $5
+           AND ($4::integer IS NULL OR contact_id IS NULL OR contact_id = $4)
+       ))
+       AND ($6::integer IS NULL OR EXISTS (
+         SELECT 1 FROM messages WHERE company_id = $1 AND id = $6
+           AND ($5::integer IS NULL OR conversation_id = $5)
+       ))
+       AND ($14::bigint IS NULL OR EXISTS (SELECT 1 FROM usuarios WHERE company_id = $1 AND id = $14 AND activo))
        RETURNING *`,
       [
         input.companyId,
@@ -238,106 +261,92 @@ export class PaymentRepositoryPg {
         JSON.stringify(input.metadata || {}),
       ]
     );
-    return this.mapVoucher(result.rows[0]);
+    const voucher = result.rows[0];
+    if (!voucher) throw Object.assign(new Error('Referencia de comprobante no encontrada'), { statusCode: 404 });
+    return this.mapVoucher(voucher);
   }
 
   async markFromMessage(input: MarkFromMessageInput): Promise<PaymentVoucher> {
-    const messageResult = await this.pool.query(
-      `SELECT m.id, m.conversation_id, m.company_id, m.body, m.message_type,
-              c.external_conversation_id, c.contact_id
-       FROM messages m
-       LEFT JOIN conversations c ON c.id = m.conversation_id
-       WHERE m.company_id = $1 AND m.id = $2
-       LIMIT 1`,
-      [input.companyId, input.messageId]
-    );
-    const message = messageResult.rows[0];
-    if (!message) {
-      const error = new Error('Mensaje no encontrado') as Error & { statusCode?: number };
-      error.statusCode = 404;
-      throw error;
-    }
-
-    const attachmentResult = await this.pool.query(
-      `SELECT COALESCE(external_url, internal_path) AS file_url, mime_type, size_bytes
-       FROM message_attachments
-       WHERE message_id = $1
-         AND COALESCE(external_url, internal_path) IS NOT NULL
-       ORDER BY id ASC
-       LIMIT 1`,
-      [message.id]
-    );
-    const attachment = attachmentResult.rows[0];
-    if (!attachment?.file_url) {
-      const error = new Error('El mensaje no tiene adjunto valido para comprobante') as Error & { statusCode?: number };
-      error.statusCode = 400;
-      throw error;
-    }
-
-    return this.create({
-      companyId: input.companyId,
-      orderId: input.orderId ?? null,
-      chatId: input.chatId || message.external_conversation_id || null,
-      contactId: message.contact_id ? Number(message.contact_id) : null,
-      conversationId: message.conversation_id ? Number(message.conversation_id) : null,
-      sourceMessageId: Number(message.id),
-      fileUrl: attachment.file_url,
-      mimeType: attachment.mime_type || null,
-      fileSize: attachment.size_bytes ? Number(attachment.size_bytes) : null,
-      paymentMethod: input.paymentMethod,
-      amount: input.amount ?? null,
-      currency: input.currency || 'PEN',
-      senderReference: input.senderReference ?? null,
-      uploadedBy: input.uploadedBy ?? null,
-      notes: input.notes ?? null,
-      metadata: { origin: 'chat_message', messageId: Number(message.id) },
+    return this.inTenant(input.companyId, async (client) => {
+      const { rows: [message] } = await client.query(
+        `SELECT m.id, m.conversation_id, m.provider, m.provider_message_id, c.external_conversation_id, c.contact_id,
+                attachment.file_url, attachment.provider_media_id, attachment.mime_type, attachment.size_bytes
+         FROM messages m
+         LEFT JOIN conversations c ON c.id = m.conversation_id AND c.company_id = m.company_id
+         LEFT JOIN LATERAL (
+           SELECT COALESCE(external_url, internal_path) AS file_url, provider_media_id, mime_type, size_bytes
+           FROM message_attachments
+           WHERE message_id = m.id AND (
+             COALESCE(external_url, internal_path) IS NOT NULL OR
+             (m.provider = 'meta-cloud' AND m.provider_message_id IS NOT NULL AND provider_media_id IS NOT NULL)
+           )
+           ORDER BY id LIMIT 1
+         ) attachment ON true
+         WHERE m.company_id = $1 AND m.id = $2`,
+        [input.companyId, input.messageId]
+      );
+      if (!message) throw Object.assign(new Error('Mensaje no encontrado'), { statusCode: 404 });
+      const fileUrl = message.provider === 'meta-cloud' && message.provider_media_id && message.provider_message_id
+        ? `/api/media/${encodeURIComponent(message.provider_message_id)}` : message.file_url;
+      if (!fileUrl) {
+        throw Object.assign(new Error('El mensaje no tiene adjunto válido para comprobante'), { statusCode: 400 });
+      }
+      return new PaymentRepositoryPg(client).create({
+        ...input,
+        chatId: message.external_conversation_id || input.chatId || null,
+        contactId: message.contact_id ?? null,
+        conversationId: message.conversation_id ?? null,
+        sourceMessageId: Number(message.id),
+        fileUrl,
+        mimeType: message.mime_type,
+        fileSize: message.size_bytes ? Number(message.size_bytes) : null,
+        metadata: { origin: 'chat_message', messageId: Number(message.id) },
+      });
     });
   }
 
   async updateStatus(
     companyId: number,
     voucherId: number,
-    status: PaymentVoucherStatus,
+    status: Exclude<PaymentVoucherStatus, 'pending'>,
     actorUserId: number | null,
     rejectionReason?: string | null
   ): Promise<PaymentVoucher | null> {
-    const result = await this.pool.query(
-      `UPDATE payment_vouchers
-       SET status = $3,
-           validated_by = $4,
-           validated_at = CASE WHEN $3 IN ('validated','rejected') THEN NOW() ELSE validated_at END,
-           rejection_reason = $5,
-           updated_at = NOW()
-       WHERE company_id = $1 AND id = $2
-       RETURNING *`,
-      [companyId, voucherId, status, actorUserId, rejectionReason ?? null]
-    );
-    if (result.rows[0] && status === 'validated' && result.rows[0].order_id) {
-      await this.pool.query(
-        `UPDATE customer_orders
-         SET status = CASE
-             WHEN status IN ('draft','quoted','pending_handoff','pending_approval') THEN 'confirmed'
-             ELSE status
-           END,
-           updated_at = NOW()
-         WHERE company_id = $1 AND id = $2`,
-        [companyId, Number(result.rows[0].order_id)]
+    return this.inTenant(companyId, async (client) => {
+      const { rows: [voucher] } = await client.query(
+        `UPDATE payment_vouchers
+         SET status = $3, validated_by = $4, validated_at = NOW(), rejection_reason = $5, updated_at = NOW()
+         WHERE company_id = $1 AND id = $2 AND status = 'pending'
+         RETURNING *`,
+        [companyId, voucherId, status, actorUserId, rejectionReason ?? null]
       );
-      await this.pool.query(
+      if (!voucher) {
+        const existing = await new PaymentRepositoryPg(client).get(companyId, voucherId);
+        if (!existing || (existing.status === status &&
+            (status === 'validated' || existing.rejectionReason === rejectionReason))) return existing;
+        throw Object.assign(new Error('El comprobante ya tiene una decisión'), { statusCode: 409, code: 'PAYMENT_ALREADY_DECIDED' });
+      }
+
+      let orderConfirmed = false;
+      if (status === 'validated' && voucher.order_id) {
+        const order = await client.query(
+          `UPDATE customer_orders SET status = 'confirmed', updated_at = NOW()
+           WHERE company_id = $1 AND id = $2 AND status IN ('draft','quoted','pending_handoff','pending_approval')`,
+          [companyId, voucher.order_id]
+        );
+        orderConfirmed = Boolean(order.rowCount);
+      }
+      await client.query(
         `INSERT INTO operational_actions (
-           company_id, order_id, contact_id, conversation_id, actor_user_id,
-           action_type, status, description, metadata_json
-         )
-         SELECT company_id, id, contact_id, conversation_id, $3,
-                'payment_validated', 'completed',
-                'Pago validado y pedido confirmado',
-                $4::jsonb
-         FROM customer_orders
-         WHERE company_id = $1 AND id = $2`,
-        [companyId, Number(result.rows[0].order_id), actorUserId, JSON.stringify({ voucherId, source: 'payments' })]
+           company_id, order_id, contact_id, conversation_id, actor_user_id, action_type, status, description, metadata_json
+         ) VALUES ($1, $2, $3, $4, $5, $6, 'completed', $7, $8::jsonb)`,
+        [companyId, voucher.order_id, voucher.contact_id, voucher.conversation_id, actorUserId,
+          status === 'validated' ? 'payment_validated' : 'payment_rejected',
+          status === 'validated' ? 'Comprobante validado' : 'Comprobante rechazado',
+          JSON.stringify({ voucherId, orderConfirmed, source: 'payments' })]
       );
-    }
-    return result.rows[0] ? this.mapVoucher(result.rows[0]) : null;
+      return this.mapVoucher(voucher);
+    });
   }
 
   private mapVoucher(row: Row): PaymentVoucher {

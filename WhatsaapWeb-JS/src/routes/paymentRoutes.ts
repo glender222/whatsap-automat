@@ -5,7 +5,7 @@ import pool from '../config/database';
 import config from '../config/index';
 import { JwtRequest, resolveWhatsappCompanyId } from '../middleware/jwtAuth';
 import { PaymentRepositoryPg, PaymentService } from '../modules/payments';
-import { emitDashboard, emitToRoom } from '../sockets/socketEmitter';
+import { emitDashboard } from '../sockets/socketEmitter';
 
 const multer = require('multer') as any;
 
@@ -86,8 +86,9 @@ export default function createPaymentRoutes(): Router {
   });
 
   router.post('/', upload.single('file'), async (req: JwtRequest & { file?: any }, res: Response, next: NextFunction) => {
+    const file = req.file;
+    let saved = false;
     try {
-      const file = req.file;
       if (!file) return res.status(400).json({ success: false, message: 'Archivo de comprobante requerido' });
       const companyId = resolveWhatsappCompanyId(req);
       const voucher = await service.create({
@@ -108,10 +109,11 @@ export default function createPaymentRoutes(): Router {
         notes: req.body.notes ? String(req.body.notes) : null,
         metadata: { origin: 'manual_upload', originalName: file.originalname },
       });
+      saved = true;
       emitDashboard('payment-created', { companyId, voucherId: voucher.id, chatId: voucher.chatId });
-      if (voucher.chatId) emitToRoom(voucher.chatId, 'payment-created', { voucherId: voucher.id });
       return res.status(201).json({ success: true, data: voucher });
     } catch (error) {
+      if (file?.path && !saved) await fs.promises.unlink(file.path).catch(() => undefined);
       return next(error);
     }
   });
@@ -134,7 +136,6 @@ export default function createPaymentRoutes(): Router {
         notes: req.body.notes ? String(req.body.notes) : null,
       });
       emitDashboard('payment-created', { companyId, voucherId: voucher.id, chatId: voucher.chatId });
-      if (voucher.chatId) emitToRoom(voucher.chatId, 'payment-created', { voucherId: voucher.id });
       return res.status(201).json({ success: true, data: voucher });
     } catch (error) {
       return next(error);
@@ -161,7 +162,6 @@ export default function createPaymentRoutes(): Router {
       const data = await service.validate(companyId, id, getUserId(req));
       if (!data) return res.status(404).json({ success: false, message: 'Comprobante no encontrado' });
       emitDashboard('payment-updated', { companyId, voucherId: data.id, status: data.status, chatId: data.chatId });
-      if (data.chatId) emitToRoom(data.chatId, 'payment-updated', { voucherId: data.id, status: data.status });
       return res.json({ success: true, data });
     } catch (error) {
       return next(error);
@@ -181,7 +181,6 @@ export default function createPaymentRoutes(): Router {
       );
       if (!data) return res.status(404).json({ success: false, message: 'Comprobante no encontrado' });
       emitDashboard('payment-updated', { companyId, voucherId: data.id, status: data.status, chatId: data.chatId });
-      if (data.chatId) emitToRoom(data.chatId, 'payment-updated', { voucherId: data.id, status: data.status });
       return res.json({ success: true, data });
     } catch (error) {
       return next(error);

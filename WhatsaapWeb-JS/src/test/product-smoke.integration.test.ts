@@ -333,4 +333,66 @@ test('real API isolates two companies through auth, signed ingress, inbox, socke
     [retryApproval.id]
   ));
   assert.equal(replayAudit.rowCount, 1);
+
+  const payments = '/api/payments';
+  await api(payments, 403, employeeToken);
+  const createOrder = (tenantId: number) => withTenantTransaction(tenantId, async (db) => {
+    const { rows: [order] } = await db.query(
+      `INSERT INTO customer_orders (company_id, title, order_type, status)
+       VALUES ($1, 'Pedido QA', 'commercial', 'pending_approval') RETURNING id`, [tenantId]
+    );
+    return Number(order.id);
+  });
+  const [order, foreignOrder] = await Promise.all([createOrder(owner.user.companyId), createOrder(other.user.companyId)]);
+  const image = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jQ8sAAAAASUVORK5CYII=', 'base64');
+  async function uploadVoucher(orderId: number, amount: string, expectedStatus: number) {
+    const body = new FormData();
+    body.append('file', new Blob([image], { type: 'image/png' }), 'voucher-fixture.png');
+    body.append('orderId', String(orderId));
+    body.append('amount', amount);
+    const response = await fetch(`${base}${payments}`, {
+      method: 'POST', headers: { Authorization: `Bearer ${owner.accessToken}` }, body,
+    });
+    const result = await response.json();
+    assert.equal(response.status, expectedStatus, result.message || result.error);
+    return result.data;
+  }
+  await uploadVoucher(foreignOrder, '18.50', 404);
+  await uploadVoucher(order, 'invalid-amount', 400);
+  const voucher = await uploadVoucher(order, '18.50', 201);
+  assert.equal(voucher.status, 'pending');
+  assert.equal(voucher.orderId, order);
+  await api(`${payments}/${voucher.id}`, 404, other.accessToken);
+  const protectedFile = (token: string) => fetch(`${base}${voucher.fileUrl}`, { headers: { Authorization: `Bearer ${token}` } });
+  const preview = await protectedFile(owner.accessToken);
+  assert.equal(preview.status, 200);
+  assert.deepEqual(Buffer.from(await preview.arrayBuffer()), image);
+  assert.equal((await protectedFile(other.accessToken)).status, 404);
+  const [decisionA, decisionB] = await Promise.all([1, 2].map(() => api(`${payments}/${voucher.id}/validate`, 200, owner.accessToken, {})));
+  assert.deepEqual(decisionA, decisionB);
+  assert.equal(decisionA.status, 'validated');
+  await api(`${payments}/${voucher.id}/reject`, 409, owner.accessToken, { rejectionReason: 'Decisión anterior' });
+  const orderAudit = await withTenantTransaction(owner.user.companyId, (db) => db.query(
+    `SELECT o.status, COUNT(a.id)::int AS decisions
+     FROM customer_orders o LEFT JOIN operational_actions a ON a.order_id = o.id AND a.action_type = 'payment_validated'
+     WHERE o.company_id = $1 AND o.id = $2 GROUP BY o.status`,
+    [owner.user.companyId, order]
+  ));
+  assert.deepEqual(orderAudit.rows, [{ status: 'confirmed', decisions: 1 }]);
+
+  const mediaMessageId = `wamid.${randomUUID()}`;
+  const document = JSON.stringify({ entry: [{ changes: [{ field: 'messages', value: {
+    metadata: { phone_number_id: phoneNumberId },
+    messages: [{ id: mediaMessageId, from: chatId, type: 'document', document: {
+      id: 'fixture-media-id', mime_type: 'application/pdf', filename: 'voucher-fixture.pdf',
+    } }],
+  } }] }] });
+  assert.equal((await webhook(sign(document), 200, document)).results[0].duplicate, false);
+  const uploadedMessage = await withTenantTransaction(owner.user.companyId, (db) => db.query(
+    'SELECT id FROM messages WHERE company_id = $1 AND provider_message_id = $2', [owner.user.companyId, mediaMessageId]
+  ));
+  const fromMessage = await api(`${payments}/from-message`, 201, owner.accessToken, { messageId: uploadedMessage.rows[0].id });
+  assert.equal(fromMessage.fileUrl, `/api/media/${mediaMessageId}`);
+  assert.equal(fromMessage.chatId, chatId);
+  assert.equal(fromMessage.mimeType, 'application/pdf');
 });

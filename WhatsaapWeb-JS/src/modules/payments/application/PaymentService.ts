@@ -35,9 +35,7 @@ export class PaymentService {
   create(input: CreatePaymentVoucherInput): Promise<PaymentVoucher> {
     if (!input.fileUrl?.trim()) throw this.validationError('fileUrl requerido');
     if (!VALID_METHODS.includes(input.paymentMethod)) throw this.validationError('paymentMethod invalido');
-    if (input.amount !== null && input.amount !== undefined && Number(input.amount) < 0) {
-      throw this.validationError('amount no puede ser negativo');
-    }
+    this.assertAmount(input.amount);
     return this.repository.create(input);
   }
 
@@ -46,6 +44,7 @@ export class PaymentService {
       throw this.validationError('messageId invalido');
     }
     if (!VALID_METHODS.includes(input.paymentMethod)) throw this.validationError('paymentMethod invalido');
+    this.assertAmount(input.amount);
     return this.repository.markFromMessage(input);
   }
 
@@ -69,6 +68,12 @@ export class PaymentService {
   assertStatus(value: unknown): asserts value is PaymentVoucherStatus {
     if (!VALID_STATUSES.includes(value as PaymentVoucherStatus)) {
       throw this.validationError('status invalido');
+    }
+  }
+
+  private assertAmount(amount: number | null | undefined): void {
+    if (amount != null && (!Number.isFinite(amount) || amount < 0 || amount > 9999999999.99)) {
+      throw this.validationError('Monto inválido');
     }
   }
 
