@@ -35,9 +35,15 @@ export default function CampaignWizard() {
   }, []);
 
   const availableSegments = segments.filter((segment) => segment.targetChannel === channel || segment.targetChannel === 'any');
+  const requiresSegment = channel === 'whatsapp-cloud';
+  const segmentSelectionUnavailable = segmentStatus !== 'ready' || availableSegments.length === 0;
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (requiresSegment && !availableSegments.some((segment) => segment.id === segmentId)) {
+      setError('Selecciona un segmento compatible con WhatsApp antes de crear el borrador.');
+      return;
+    }
     const values = new FormData(event.currentTarget);
     const name = String(values.get('name') ?? '').trim();
     const contentBody = String(values.get('contentBody') ?? '').trim();
@@ -108,11 +114,28 @@ export default function CampaignWizard() {
         </div>
         <label className="block space-y-1 text-sm font-medium">
           <span>Segmento de audiencia</span>
-          <select className={inputClass} value={segmentId} onChange={(event) => setSegmentId(event.target.value)}>
-            <option value="">Sin segmento</option>
+          <select
+            className={inputClass}
+            value={segmentId}
+            onChange={(event) => setSegmentId(event.target.value)}
+            required={requiresSegment}
+            disabled={requiresSegment && segmentSelectionUnavailable}
+            aria-describedby={requiresSegment ? 'campaign-segment-help' : undefined}
+          >
+            <option value="">{requiresSegment ? 'Selecciona un segmento' : 'Sin segmento'}</option>
             {availableSegments.map((segment) => <option key={segment.id} value={segment.id}>{segment.name}</option>)}
           </select>
         </label>
+        {requiresSegment && (
+          <p id="campaign-segment-help" className="text-sm text-gray-600 dark:text-gray-300">
+            {segmentStatus === 'ready' && availableSegments.length === 0
+              ? 'Todavía no hay segmentos compatibles con WhatsApp.'
+              : 'El borrador de WhatsApp requiere un segmento.'}{' '}
+            <Link to="/dashboard/segmentos" className="font-medium text-emerald-700 underline dark:text-emerald-300">
+              Ir a Segmentos
+            </Link>
+          </p>
+        )}
         {segmentStatus !== 'ready' && (
           <p role="status" className="text-sm text-gray-600 dark:text-gray-300">
             {segmentStatus === 'loading' ? 'Cargando segmentos…' : 'No pudimos cargar los segmentos.'}
@@ -151,7 +174,7 @@ export default function CampaignWizard() {
           </label>
         </div>
         {error && <p role="alert" className="text-sm text-red-700 dark:text-red-300">{error}</p>}
-        <button type="submit" disabled={submitting} className="inline-flex items-center gap-2 rounded-md bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-60">
+        <button type="submit" disabled={submitting || (requiresSegment && segmentSelectionUnavailable)} className="inline-flex items-center gap-2 rounded-md bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-60">
           <Save size={16} /> {submitting ? 'Creando…' : 'Crear borrador'}
         </button>
       </form>
