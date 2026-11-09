@@ -41,7 +41,7 @@ function connect(token: string): Promise<Socket> {
 
 test('real API isolates two companies through auth, signed ingress, inbox, sockets and CAS', {
   skip: !base && 'Run against a dedicated local smoke database and set PRODUCT_SMOKE_URL',
-  timeout: 20000,
+  timeout: 40000,
 }, async (t) => {
   assert.equal(new URL(base!).hostname, '127.0.0.1');
   assert.match(config.database.name, /_smoke$/);
@@ -240,6 +240,7 @@ test('real API isolates two companies through auth, signed ingress, inbox, socke
   assert.equal(stationSession.user.id, employee.id);
   assert.equal(stationSession.user.companyId, owner.user.companyId);
   const employeeToken = stationSession.accessToken;
+  const employeeId = employee.id;
   const workspacePath = '/api/v1/workspaces/current';
   await api(workspacePath, 401);
   const ownerWorkspace = await api(workspacePath, 200, owner.accessToken);
@@ -421,11 +422,6 @@ test('real API isolates two companies through auth, signed ingress, inbox, socke
        VALUES ($1, $2, $3, 'reservation', 2, 0, 2)`,
       [tenantId, product.id, order],
     );
-    const { rows: [tag] } = await db.query(
-      "INSERT INTO tags (company_id, name) VALUES ($1, 'Seguimiento QA') RETURNING id", [tenantId],
-    );
-    await db.query('INSERT INTO tag_chats (company_id, tag_id, conversation_id, chat_id) VALUES ($1, $2, $3, $4)',
-      [tenantId, tag.id, conversationId, chatId]);
     await db.query(
       `INSERT INTO operational_actions (company_id, contact_id, order_id, conversation_id, action_type, description)
        VALUES ($1, $2, $3, $4, 'history_smoke', 'Acción registrada')`,
@@ -433,6 +429,29 @@ test('real API isolates two companies through auth, signed ingress, inbox, socke
     );
     return contact;
   });
+  const tagsRoot = '/api/tags';
+  const tagsBefore = await api(tagsRoot, 200, owner.accessToken);
+  const defaultTag = tagsBefore.find((tag: { is_default: boolean }) => tag.is_default);
+  assert.equal(defaultTag.name, 'Todo');
+  await api(tagsRoot, 403, employeeToken, { name: 'Operador sin permiso' });
+  const createdTag = await api(tagsRoot, 200, owner.accessToken, { name: 'Seguimiento QA' });
+  await api(tagsRoot, 409, owner.accessToken, { name: 'SEGUIMIENTO QA' });
+  await api(`${tagsRoot}/${createdTag.id}`, 404, other.accessToken);
+  const tagChats = `${tagsRoot}/${createdTag.id}/chats`;
+  await api(tagChats, 404, owner.accessToken, { chatId: 'not-an-existing-chat' });
+  await Promise.all([chatId, `${chatId}@c.us`].map((id) => api(tagChats, 200, owner.accessToken, { chatId: id })));
+  assert.deepEqual(await api(tagChats, 200, owner.accessToken), [chatId]);
+  const filteredChats = await api(`${tagChats}/full`, 200, owner.accessToken);
+  assert.equal(filteredChats.length, 1);
+  assert.equal(filteredChats[0].conversationId, String(conversationId));
+  assert.equal(filteredChats[0].id, chatId);
+  const tagUsers = `${tagsRoot}/${createdTag.id}/users`;
+  await api(tagUsers, 404, owner.accessToken, { employeeId: other.user.id });
+  await api(tagUsers, 200, owner.accessToken, { employeeId });
+  const taggedUsers = await api(tagUsers, 200, owner.accessToken);
+  assert.deepEqual(taggedUsers.map((user: { id: string }) => user.id), [String(employeeId)]);
+  const tagStats = await api(`${tagsRoot}/${createdTag.id}/stats`, 200, owner.accessToken);
+  assert.deepEqual(tagStats, { chat_count: 1, employee_count: 1 });
   const historyRoot = '/api/customer-history';
   const history = await api(`${historyRoot}/chats/${encodeURIComponent(chatId + '@c.us')}?messageLimit=1&conversationLimit=1`, 200, owner.accessToken);
   assert.equal(history.contact.id, contactId);
@@ -495,4 +514,15 @@ test('real API isolates two companies through auth, signed ingress, inbox, socke
   const reportChat = await api(`${reports}/chat/${encodeURIComponent(chatId + '@s.whatsapp.net')}/history`, 200, owner.accessToken);
   assert.ok(reportChat.messages.some((message: { id: string; hasMedia: boolean }) => message.id === mediaMessageId && message.hasMedia));
   await api(`${reports}/chat/${chatId}/history`, 404, other.accessToken);
+
+  const remove = (path: string) => fetch(`${base}${path}`, {
+    method: 'DELETE', headers: { Authorization: `Bearer ${owner.accessToken}` },
+  });
+  assert.equal((await remove(`${tagChats}/${encodeURIComponent(chatId + '@s.whatsapp.net')}`)).status, 200);
+  assert.equal((await remove(`${tagUsers}/${employeeId}`)).status, 200);
+  assert.deepEqual(await api(tagChats, 200, owner.accessToken), []);
+  assert.deepEqual(await api(tagUsers, 200, owner.accessToken), []);
+  assert.equal((await remove(`${tagsRoot}/${defaultTag.id}`)).status, 400);
+  assert.equal((await remove(`${tagsRoot}/${createdTag.id}`)).status, 200);
+  await api(`${tagsRoot}/${createdTag.id}`, 404, owner.accessToken);
 });
