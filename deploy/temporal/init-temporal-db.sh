@@ -8,10 +8,10 @@ set -e
 
 echo "==> Inicializando bases de datos segregadas para Temporal OSS..."
 
-psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
-    SELECT 'CREATE DATABASE temporal_visibility'
-    WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'temporal_visibility')\gexec
-    GRANT ALL PRIVILEGES ON DATABASE temporal_visibility TO $POSTGRES_USER;
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
+  --set=visibility="${VISIBILITY_DBNAME:-temporal_visibility}" --set=owner="$POSTGRES_USER" <<'EOSQL'
+    SELECT format('CREATE DATABASE %I OWNER %I', :'visibility', :'owner')
+    WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = :'visibility')\gexec
 EOSQL
 
 echo "==> Bases de datos de Temporal (temporal y temporal_visibility) listas."

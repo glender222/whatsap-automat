@@ -2,6 +2,18 @@
 
 Este documento detalla la arquitectura de despliegue, configuración de seguridad, TLS/mTLS, persistencia segregada y recomendaciones de recursos para **Temporal OSS** en Whatsap-Automat, conforme a las especificaciones del **Blueprint v0.4** (§7 y §15) y los requerimientos de **PR-07**.
 
+## Entorno local con Compose
+
+Desde este directorio, copia `.env.example` a `.env` y configura las credenciales de PostgreSQL de la demo. Los puertos publicados quedan en `127.0.0.1` y el volumen `temporal-postgres-data` conserva ambas bases de Temporal. El servicio de esquema termina antes de arrancar Temporal Server y la UI espera al namespace.
+
+```sh
+docker compose up -d
+docker compose ps -a
+temporal operator namespace describe --address 127.0.0.1:7233 --namespace default
+```
+
+La UI abre en `http://127.0.0.1:8233`. Las imágenes de Temporal están fijadas a sus versiones y sumas de imagen. El servicio de esquema descarga el código fuente de esa versión y comprueba su SHA-256 antes de aplicar las migraciones de PostgreSQL. Para actualizar un volumen existente, detén el entorno anterior y respalda ambas bases antes del arranque. [Ejemplo oficial de Temporal con PostgreSQL](https://github.com/temporalio/samples-server/blob/main/compose/docker-compose-postgres.yml)
+
 ---
 
 ## 1. Arquitectura de Despliegue
@@ -48,21 +60,22 @@ Se requieren pares de certificados X.509 firmados por una Autoridad Certificador
 3. `client.cert` y `client.key`: Certificado y clave privada para Workers y Clientes de la API.
 
 ### 2.2 Variables de Entorno del Servidor Temporal
-Para habilitar TLS en `temporalio/auto-setup` o `temporalio/server`:
+Configura estas variables en el servidor `temporalio/server` y monta los archivos de certificados en las rutas indicadas.
 
 ```yaml
 environment:
   # Habilitación de TLS
-  TEMPORAL_TLS_CERTS_DIR: /etc/temporal/certs
   TEMPORAL_TLS_FRONTEND_CERT: /etc/temporal/certs/cluster.cert
   TEMPORAL_TLS_FRONTEND_KEY: /etc/temporal/certs/cluster.key
-  TEMPORAL_TLS_CLIENT_CA_CERT: /etc/temporal/certs/ca.cert
+  TEMPORAL_TLS_CLIENT1_CA_CERT: /etc/temporal/certs/ca.cert
   TEMPORAL_TLS_REQUIRE_CLIENT_AUTH: "true"
 
   # TLS entre servicios internos del cluster (History, Matching)
-  TEMPORAL_TLS_INTERNODE_CERT: /etc/temporal/certs/cluster.cert
-  TEMPORAL_TLS_INTERNODE_KEY: /etc/temporal/certs/cluster.key
+  TEMPORAL_TLS_SERVER_CERT: /etc/temporal/certs/cluster.cert
+  TEMPORAL_TLS_SERVER_KEY: /etc/temporal/certs/cluster.key
   TEMPORAL_TLS_SERVER_CA_CERT: /etc/temporal/certs/ca.cert
+  TEMPORAL_TLS_FRONTEND_SERVER_NAME: temporal.internal
+  TEMPORAL_TLS_INTERNODE_SERVER_NAME: temporal.internal
 ```
 
 ### 2.3 Worker de automatizaciones con mTLS
@@ -86,22 +99,12 @@ Usa `TEMPORAL_TLS_SERVER_NAME` si el nombre del certificado difiere del nombre d
 ## 3. Retención de Historial y Archival
 
 ### 3.1 Política de Retención (`Retention Period`)
-- **Entorno Demo / Pruebas:** `DEFAULT_NAMESPACE_RETENTION=3d` (3 días).
-- **Entorno Productivo:** Se recomienda entre 7 y 30 días (`DEFAULT_NAMESPACE_RETENTION=14d`).
+- **Entorno de prueba**. `TEMPORAL_NAMESPACE_RETENTION=3d` al crear el namespace en Compose.
+- **Entorno productivo**. Configura la retención de cada namespace según el periodo de auditoría y la capacidad de almacenamiento.
 - Pasado este periodo, Temporal purga automáticamente las ejecuciones cerradas para evitar el crecimiento desmedido de PostgreSQL.
 
 ### 3.2 Archival para Auditoría de Largo Plazo
-Si una empresa requiere conservar el historial de flujos de trabajo por motivos regulatorios (e.g. 1 a 5 años):
-- Activar **Archival** hacia almacenamiento de objetos S3 / Google Cloud Storage / Azure Blob / MinIO local.
-- Temporal descarga el historial completo de eventos en formato JSON comprimido hacia el bucket configurado antes de purgarlo de PostgreSQL.
-
-```yaml
-environment:
-  ARCHIVAL_ENABLED: "true"
-  ARCHIVAL_PROVIDER: "s3" # o gcs
-  ARCHIVAL_HISTORY_S3_BUCKET_NAME: "whatsap-temporal-history-archive"
-  ARCHIVAL_VISIBILITY_S3_BUCKET_NAME: "whatsap-temporal-visibility-archive"
-```
+Si necesitas conservar el historial más allá de la retención del namespace, configura el bloque `archival` del servidor y el destino de historial o visibilidad del namespace. Comprueba que el servicio pueda escribir y consultar el destino antes de reducir la retención en PostgreSQL. [Configuración oficial de Archival](https://docs.temporal.io/self-hosted-guide/archival)
 
 ---
 
@@ -150,15 +153,24 @@ Temporal Server expone métricas Prometheus en el puerto configurado (típicamen
 
 ## 6. Procedimientos de Respaldo y Restauración (OPS-01)
 
-1. **Backup de Esquemas Temporal:**
-   ```bash
-   docker exec -t demo-temporal-postgresql pg_dump -U temporal temporal > backup_temporal_$(date +%Y%m%d).sql
-   docker exec -t demo-temporal-postgresql pg_dump -U temporal temporal_visibility > backup_visibility_$(date +%Y%m%d).sql
-   ```
-2. **Restauración:**
-   ```bash
-   cat backup_temporal.sql | docker exec -i demo-temporal-postgresql psql -U temporal -d temporal
-   cat backup_visibility.sql | docker exec -i demo-temporal-postgresql psql -U temporal -d temporal_visibility
-   ```
-3. **Reconciliación:**
-   Temporal retiene el estado de las tareas pendientes. Al restaurar, los trabajadores reconectan y reanudan las tareas registradas en el snapshot sin duplicación lógica si las actividades respetan sus `effectKey`.
+Detén el ingreso de nuevas ejecuciones, el relay y los workers. En la demo, detén Temporal y su UI para tomar las dos copias del mismo punto de corte.
+
+```sh
+docker compose stop temporal-ui temporal
+umask 077
+docker compose exec -T temporal-postgresql sh -c \
+  'pg_dump --format=custom --username "$POSTGRES_USER" --dbname "$POSTGRES_DB"' > temporal.dump
+docker compose exec -T temporal-postgresql sh -c \
+  'pg_dump --format=custom --username "$POSTGRES_USER" --dbname "$VISIBILITY_DBNAME"' > temporal-visibility.dump
+sha256sum temporal.dump temporal-visibility.dump > temporal.sha256
+```
+
+Restaura ambas copias en un servidor PostgreSQL separado con bases vacías, los nombres de base originales y sus propietarios. Temporal identifica cada versión de esquema por nombre de base. Las entradas en `pg_service.conf` deben apuntar al servidor de restauración. Confirma las sumas antes de iniciar la restauración.
+
+```sh
+sha256sum -c temporal.sha256
+pg_restore --exit-on-error --single-transaction --dbname=service=temporal-restore temporal.dump
+pg_restore --exit-on-error --single-transaction --dbname=service=temporal-visibility-restore temporal-visibility.dump
+```
+
+Arranca Temporal con las bases restauradas y verifica namespace, historial y visibilidad antes de conectar workers. Compara las ejecuciones con el outbox y el estado de negocio del mismo punto de corte. Conserva el identificador original de cada ejecución y sus claves de efectos al reconciliar. [Respaldo de la base de negocio](../../WhatsaapWeb-JS/README.md#respaldar-y-restaurar-la-base-de-negocio)
