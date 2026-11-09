@@ -930,6 +930,178 @@ paths:
         '422':
           $ref: '#/components/responses/ValidationError'
 
+  /marketplace/extensions:
+    get:
+      summary: Consultar el catálogo público de extensiones
+      description: Las fichas retiradas quedan fuera del catálogo. La instalación de extensiones está deshabilitada.
+      operationId: listMarketplaceExtensions
+      security: []
+      parameters:
+        - in: query
+          name: q
+          schema: { type: string }
+        - in: query
+          name: category
+          schema: { type: string }
+        - in: query
+          name: type
+          schema:
+            $ref: '#/components/schemas/MarketplaceExtensionType'
+        - in: query
+          name: verified
+          schema: { type: boolean }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - in: query
+          name: offset
+          schema: { type: integer, minimum: 0, default: 0 }
+      responses:
+        '200':
+          description: Página del catálogo
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data, pagination]
+                properties:
+                  success: { const: true }
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MarketplaceListing'
+                  pagination:
+                    type: object
+                    required: [total, limit, offset]
+                    properties:
+                      total: { type: integer, minimum: 0 }
+                      limit: { type: integer }
+                      offset: { type: integer }
+        '400':
+          description: Parámetros de búsqueda inválidos
+    post:
+      summary: Publicar o actualizar una ficha de la empresa
+      description: Requiere rol ADMIN. El catálogo publica metadatos y conserva el SHA-256 fijado para cada versión. Las fichas comunitarias se registran sin verificar. El editor aloja los archivos por separado.
+      operationId: publishMarketplaceExtension
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PublishMarketplaceExtensionRequest'
+      responses:
+        '201':
+          description: Ficha publicada o actualizada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MarketplaceListingResponse'
+        '400':
+          description: Manifiesto, metadatos o checksum inválidos
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Se requiere una identidad administrativa de la empresa o el nombre está reservado
+        '409':
+          description: El nombre o identificador ya está reservado, la ficha fue retirada o la versión ya tiene otro SHA-256
+
+  /marketplace/extensions/{id}:
+    get:
+      summary: Consultar una ficha pública de extensión
+      operationId: getMarketplaceExtension
+      security: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          description: ID de ficha, identificador de extensión o nombre registrado.
+          schema: { type: string }
+      responses:
+        '200':
+          description: Ficha publicada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MarketplaceListingResponse'
+        '404':
+          description: Ficha no publicada o inexistente
+
+  /marketplace/publications:
+    get:
+      summary: Consultar las publicaciones de la propia empresa
+      description: Requiere rol ADMIN. Incluye fichas publicadas y retiradas por la empresa autenticada.
+      operationId: listOwnedMarketplacePublications
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - in: query
+          name: offset
+          schema: { type: integer, minimum: 0, default: 0 }
+      responses:
+        '200':
+          description: Página privada de publicaciones propias
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data, pagination]
+                properties:
+                  success: { const: true }
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MarketplacePublication'
+                  pagination:
+                    type: object
+                    required: [limit, offset, hasMore]
+                    properties:
+                      limit: { type: integer }
+                      offset: { type: integer }
+                      hasMore: { type: boolean }
+        '400':
+          description: Parámetros de paginación inválidos
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Se requiere una identidad administrativa de la empresa
+
+  /marketplace/extensions/{id}/withdraw:
+    post:
+      summary: Retirar una publicación propia del catálogo
+      description: Requiere rol ADMIN de la empresa propietaria. La operación es definitiva e idempotente. Conserva identificadores, alias, reseñas y fecha de retirada.
+      operationId: withdrawMarketplacePublication
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          description: ID de ficha, identificador de extensión o nombre registrado.
+          schema: { type: string }
+      responses:
+        '200':
+          description: Ficha retirada, incluida una repetición de la retirada
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success: { const: true }
+                  data:
+                    $ref: '#/components/schemas/MarketplacePublication'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Se requiere una identidad administrativa de la empresa
+        '404':
+          description: Ficha inexistente o ajena a la empresa autenticada
+
   /operations/executions:
     get:
       summary: Consultar ejecuciones y estado de despacho
@@ -1931,3 +2103,150 @@ components:
               type: integer
             deliveryUnknownCount:
               type: integer
+
+    MarketplaceExtensionType:
+      type: string
+      enum: [channel, tool, ui]
+
+    MarketplaceManifest:
+      type: object
+      required: [name, version, type, entrypoint]
+      properties:
+        id:
+          type: string
+          pattern: '^(?:@[a-z0-9_.-]+/)?[a-z0-9_.-]+$'
+        name:
+          type: string
+          pattern: '^(?:@[a-z0-9_.-]+/)?[a-z0-9_.-]+$'
+        version:
+          type: string
+          pattern: '^\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?$'
+        type:
+          $ref: '#/components/schemas/MarketplaceExtensionType'
+        entrypoint: { type: string, minLength: 1 }
+        displayName: { type: string, maxLength: 128 }
+        description: { type: string, maxLength: 512 }
+        license: { type: string }
+        author:
+          $ref: '#/components/schemas/MarketplaceAuthor'
+        slots:
+          type: array
+          description: Una extensión de interfaz requiere al menos un slot aquí o en ui.slots.
+          items: { type: string }
+        ui:
+          type: object
+          required: [slots]
+          properties:
+            slots:
+              type: array
+              minItems: 1
+              items: { type: string }
+            entrypointHtml: { type: string }
+        permissions:
+          type: array
+          items: { type: string }
+
+    MarketplaceAuthor:
+      oneOf:
+        - type: string
+        - type: object
+          required: [name]
+          properties:
+            name: { type: string }
+            email: { type: string, format: email }
+            url: { type: string, format: uri }
+
+    PublishMarketplaceExtensionRequest:
+      type: object
+      required: [manifest]
+      properties:
+        manifest:
+          $ref: '#/components/schemas/MarketplaceManifest'
+        tarballBase64:
+          type: string
+          contentEncoding: base64
+          description: Bytes opcionales para calcular o comprobar el SHA-256 de la ficha.
+        expectedSha256:
+          type: string
+          pattern: '^[a-fA-F0-9]{64}$'
+        tarballUrl:
+          type: string
+          format: uri
+          description: URL HTTPS de archivo alojado por el editor, sin credenciales incrustadas.
+        displayName: { type: string, maxLength: 128 }
+        longDescription: { type: string, maxLength: 10000 }
+        categories:
+          type: array
+          items: { type: string }
+        tags:
+          type: array
+          items: { type: string }
+
+    MarketplaceListing:
+      type: object
+      required: [id, extensionId, name, displayName, version, type, description, license, categories, tags, status, verified, manifest, rating, permissions, publishedAt, updatedAt]
+      properties:
+        id: { type: string }
+        extensionId: { type: string }
+        name: { type: string }
+        displayName: { type: string }
+        version: { type: string }
+        type:
+          $ref: '#/components/schemas/MarketplaceExtensionType'
+        description: { type: string }
+        longDescription: { type: string }
+        author:
+          $ref: '#/components/schemas/MarketplaceAuthor'
+        license: { type: string }
+        categories:
+          type: array
+          items: { type: string }
+        tags:
+          type: array
+          items: { type: string }
+        status: { const: published }
+        verified: { type: boolean }
+        manifest:
+          $ref: '#/components/schemas/MarketplaceManifest'
+        rating:
+          type: object
+          required: [count, average]
+          properties:
+            count: { type: integer, minimum: 0 }
+            average: { type: number, minimum: 0, maximum: 5 }
+        permissions:
+          type: array
+          items: { type: string }
+        tarballUrl: { type: string, format: uri }
+        tarballSha256:
+          type: string
+          pattern: '^[a-fA-F0-9]{64}$'
+        tarballSizeBytes: { type: integer, minimum: 0 }
+        publishedAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    MarketplaceListingResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success: { const: true }
+        data:
+          $ref: '#/components/schemas/MarketplaceListing'
+
+    MarketplacePublication:
+      type: object
+      required: [id, extensionId, displayName, version, type, state, publishedAt, withdrawnAt]
+      properties:
+        id: { type: string }
+        extensionId: { type: string }
+        displayName: { type: string }
+        version: { type: string }
+        type:
+          $ref: '#/components/schemas/MarketplaceExtensionType'
+        state:
+          type: string
+          enum: [published, withdrawn]
+        publishedAt: { type: string, format: date-time }
+        withdrawnAt:
+          type: [string, 'null']
+          format: date-time
