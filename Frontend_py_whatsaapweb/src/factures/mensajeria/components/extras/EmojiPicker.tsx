@@ -1,50 +1,39 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
 import Picker from '@emoji-mart/react';
-import data from '@emoji-mart/data';
+import type { EmojiMartData } from '@emoji-mart/data';
 
 interface EmojiPickerProps {
+  id: string;
   open: boolean;
   onSelect: (emoji: string) => void;
-  onClose: () => void;
 }
 
-type EmojiMartEmoji = { native: string; [key: string]: any };
+type EmojiMartEmoji = { native: string };
 
-const pickerWidth = 380;
+const EmojiPicker: React.FC<EmojiPickerProps> = ({ id, open, onSelect }) => {
+  const [data, setData] = useState<EmojiMartData>();
+  const [loadFailed, setLoadFailed] = useState(false);
 
-const EmojiPicker: React.FC<EmojiPickerProps> = ({ open, onSelect, onClose }) => {
-  const pickerRef = useRef<HTMLDivElement>(null);
-
-  // Cierra el picker si se hace click fuera del área
   useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (pickerRef.current && !pickerRef.current.contains(event.target as Node)) {
-        onClose();
-      }
-    }
-
-    if (open) {
-      document.addEventListener('mousedown', handleClickOutside);
-    }
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, [open, onClose]);
+    if (!open || data) return;
+    let active = true;
+    // The package entry is native.json and its declarations expose only the data type.
+    void import('@emoji-mart/data').then(
+      (module) => { if (active) setData(module.default as unknown as EmojiMartData); },
+      () => { if (active) setLoadFailed(true); },
+    );
+    return () => { active = false; };
+  }, [data, open]);
 
   if (!open) return null;
   return (
     <div
-      className="absolute bottom-12 left-0 z-30 flex items-start"
-      style={{ width: `${pickerWidth}px` }}
+      id={id}
+      role="dialog"
+      aria-label="Selector de emojis"
+      className="absolute bottom-full left-2 right-2 z-30 mb-2 max-h-[50vh] max-w-[380px] overflow-y-auto rounded-lg border border-gray-200 bg-white p-2 shadow-lg"
     >
-      <div
-        ref={pickerRef}
-        className="bg-white rounded-lg border border-gray-200 p-2"
-        style={{
-          boxShadow: '0 2px 16px rgba(0,0,0,0.15)',
-          width: `${pickerWidth}px`
-        }}
-      >
+      {data ? (
         <Picker
           data={data}
           onEmojiSelect={(e: EmojiMartEmoji) => onSelect(e.native)}
@@ -53,9 +42,13 @@ const EmojiPicker: React.FC<EmojiPickerProps> = ({ open, onSelect, onClose }) =>
           searchPosition="top"
           emojiButtonSize={36}
           theme="light"
-          width={pickerWidth}
+          dynamicWidth
         />
-      </div>
+      ) : (
+        <p role={loadFailed ? 'alert' : 'status'} className="p-2 text-sm text-gray-700">
+          {loadFailed ? 'No se pudieron cargar los emojis.' : 'Cargando emojis…'}
+        </p>
+      )}
     </div>
   );
 };

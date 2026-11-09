@@ -1,6 +1,6 @@
 // src/factures/mensajeria/components/bandeja de chats/MessageInputBar.tsx
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useId } from 'react';
 import {
   Paperclip,
   Smile,
@@ -70,6 +70,7 @@ const MessageInputBar: React.FC<MessageInputBarProps> = ({
   const [isAttachMenuOpen, setAttachMenuOpen] = useState(false);
   const [isQuickRepliesOpen, setQuickRepliesOpen] = useState(false); // ✅ NUEVO: Estado para respuestas rápidas
   const attachMenuRef = useRef<HTMLDivElement>(null);
+  const emojiPickerId = useId();
   const fileSendLock = useRef(false);
   const canSubmit = !uploading && !textSending && Boolean(selectedFile ? canSendFile : canSendText && message.trim());
 
@@ -301,19 +302,23 @@ const MessageInputBar: React.FC<MessageInputBarProps> = ({
         </button>
 
         {/* Botón emoji picker */}
-        <div className="relative" ref={emojiPickerRef}>
+        <div className="contents" ref={emojiPickerRef}>
           <button
             className="p-2 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
             onClick={() => setEmojiPickerOpen((prev) => !prev)}
             type="button"
+            aria-label="Emojis"
+            aria-expanded={emojiPickerOpen}
+            aria-haspopup="dialog"
+            aria-controls={emojiPickerOpen ? emojiPickerId : undefined}
             disabled={uploading || !selectedChat}
           >
             <Smile size={20} />
           </button>
           <EmojiPicker
+            id={emojiPickerId}
             open={emojiPickerOpen}
             onSelect={handleEmojiSelect}
-            onClose={() => setEmojiPickerOpen(false)}
           />
         </div>
 

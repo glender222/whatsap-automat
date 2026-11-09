@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { useAtom, useSetAtom } from 'jotai';
 import MessagesPanel from './bandeja de chats/MessagesPanel';
 import MessageInputBar from './bandeja de chats/MessageInputBar';
@@ -69,11 +69,21 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const emojiPickerRef = useRef<HTMLDivElement>(null);
   const composerInputRef = useRef<HTMLTextAreaElement>(null);
+  const pendingEmojiCaret = useRef<{ input: HTMLTextAreaElement; offset: number }>(null);
   const ownershipFocus = useRef(false);
   const customerHistory = useCustomerHistory(selectedChat);
 
   const iaPauseStatus = selectedChat ? agentState.iaPauseByChat[selectedChat] : undefined;
   const isIaPaused = composer.conversation?.aiPaused ?? Boolean(iaPauseStatus?.paused);
+
+  useLayoutEffect(() => {
+    const caret = pendingEmojiCaret.current;
+    if (emojiPickerOpen || !caret) return;
+    pendingEmojiCaret.current = null;
+    if (composerInputRef.current !== caret.input) return;
+    caret.input.focus();
+    caret.input.setSelectionRange(caret.offset, caret.offset);
+  }, [emojiPickerOpen, message]);
 
   useEffect(() => {
     if (!composer.owns) ownershipFocus.current = false;
@@ -152,16 +162,25 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
   }, [agentState.activityByChat, selectedChat]);
 
   useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (emojiPickerOpen && emojiPickerRef.current && !emojiPickerRef.current.contains(event.target as Node)) {
+    if (!emojiPickerOpen) return;
+    function handlePointerOutside(event: PointerEvent) {
+      if (emojiPickerRef.current && !emojiPickerRef.current.contains(event.target as Node)) {
         setEmojiPickerOpen(false);
       }
     }
-    if (emojiPickerOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      if (emojiPickerRef.current?.contains(event.target as Node)) event.stopPropagation();
+      setEmojiPickerOpen(false);
+      emojiPickerRef.current?.querySelector('button')?.focus();
     }
+    document.addEventListener('pointerdown', handlePointerOutside);
+    // Emoji Mart stops Escape from bubbling out of its shadow-root search input.
+    document.addEventListener('keydown', handleEscape, true);
     return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('pointerdown', handlePointerOutside);
+      document.removeEventListener('keydown', handleEscape, true);
     };
   }, [emojiPickerOpen]);
 
@@ -184,8 +203,14 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
   };
 
   const handleEmojiSelect = (emoji: string) => {
-    setMessage((prev) => prev + emoji);
+    const input = composerInputRef.current;
+    const start = input?.selectionStart ?? message.length;
+    const end = input?.selectionEnd ?? start;
+    if (input) pendingEmojiCaret.current = { input, offset: start + emoji.length };
+    setMessage((previous) => previous.slice(0, start) + emoji + previous.slice(end));
     setEmojiPickerOpen(false);
+    // Keep focus in the selection gesture so mobile browsers can reopen the keyboard.
+    input?.focus();
   };
 
   const getAgentStatusText = () => {
