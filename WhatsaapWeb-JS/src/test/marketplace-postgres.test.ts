@@ -184,6 +184,63 @@ describe('Marketplace PostgreSQL with FORCE RLS', { skip: !connectionString && '
     assert.deepEqual(review, { score: 4, review: 'Preserve this review' });
   });
 
+  test('known version digests remain immutable while metadata edits and new versions are accepted', async (t) => {
+    const request = await marketplaceHttp(t, new MarketplaceRegistry(db));
+    const admin = accessToken({ userId: 61, companyId: tenantA, rol: 'ADMIN' });
+    const extensionId = `${runId}-pinned`;
+    const tarballUrl = 'https://example.invalid/original.tgz';
+    const sha256 = 'a'.repeat(64);
+    const changedSha = 'b'.repeat(64);
+    const publish = (version: string, fields: Record<string, unknown> = {}) => request('/extensions', jsonPost({
+      manifest: { ...manifest(extensionId), version }, ...fields,
+    }, admin));
+    const original = await publish('1.0.0', { expectedSha256: sha256.toUpperCase(), tarballUrl });
+    assert.equal(original.status, 201);
+    const listing = (await original.json()).data;
+    assert.equal(listing.tarballSha256, sha256);
+    const edited = await publish('1.0.0', { displayName: 'Updated description' });
+    assert.equal(edited.status, 201);
+    const editing = (await edited.json()).data;
+    assert.equal(editing.id, listing.id);
+    assert.equal(editing.tarballSha256, sha256);
+    assert.equal(editing.tarballUrl, tarballUrl);
+    assert.equal(editing.displayName, 'Updated description');
+
+    const sameDigest = await publish('1.0.0', { expectedSha256: sha256, tags: ['new-tag'] });
+    assert.equal(sameDigest.status, 201);
+    const sameVersionConflict = await publish('1.0.0', { expectedSha256: changedSha });
+    assert.equal(sameVersionConflict.status, 409);
+    assert.match((await sameVersionConflict.json()).detail, /already has a different SHA-256/);
+
+    assert.equal((await publish('2.0.0', { expectedSha256: changedSha })).status, 201);
+    assert.equal((await publish('1.0.0', { expectedSha256: changedSha })).status, 409);
+    const previous = await publish('1.0.0', { expectedSha256: sha256, tarballUrl });
+    assert.equal(previous.status, 201);
+    assert.equal((await previous.json()).data.tarballSha256, sha256);
+
+    const concurrent = await Promise.all([
+      publish('3.0.0', { expectedSha256: 'c'.repeat(64) }),
+      publish('3.0.0', { expectedSha256: 'd'.repeat(64) }),
+    ]);
+    assert.deepEqual(concurrent.map((response) => response.status).sort(), [201, 409]);
+
+    const pinned = await tenantWork.run(tenantA, (client) => client.query(
+      'SELECT version, sha256 FROM marketplace_version_digests WHERE listing_id = $1 ORDER BY version', [listing.id],
+    ));
+    assert.deepEqual(pinned.rows.slice(0, 2), [
+      { version: '1.0.0', sha256 }, { version: '2.0.0', sha256: changedSha },
+    ]);
+    assert.equal(pinned.rowCount, 3);
+    const foreign = await tenantWork.run(tenantB, (client) => client.query(
+      'SELECT version FROM marketplace_version_digests WHERE listing_id = $1', [listing.id],
+    ));
+    assert.equal(foreign.rowCount, 0);
+    await assert.rejects(tenantWork.run(tenantB, (client) => client.query(
+      'INSERT INTO marketplace_version_digests(listing_id, version, sha256) VALUES ($1,$2,$3)',
+      [listing.id, '4.0.0', changedSha],
+    )), { code: '42501' });
+  });
+
   test('persists rating upserts across API instances and exposes only public aggregates', async (t) => {
     const firstPool = new Pool({ connectionString });
     let firstPoolClosed = false;

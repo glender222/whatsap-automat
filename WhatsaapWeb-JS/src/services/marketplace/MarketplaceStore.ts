@@ -84,19 +84,34 @@ export class MarketplaceStore {
           ON CONFLICT DO NOTHING RETURNING id
         `, [listing.id, listing.extensionId, listing.name, publisherTenantId, listing, listing.publishedAt]);
 
-        let listingId = inserted.rows[0]?.id;
-        if (!listingId) {
-          const updated = await client.query(`
-            UPDATE marketplace_extensions
-            SET listing = $4::jsonb || jsonb_build_object('id', id, 'publishedAt', listing->'publishedAt'),
-                updated_at = clock_timestamp()
+        let listingId = inserted.rows[0]?.id as string | undefined;
+        if (listingId) {
+          await this.pinDigest(client, listingId, listing.version, listing.tarballSha256);
+        } else {
+          const { rows: [current] }: { rows: { id: string; listing: MarketplaceListing }[] } = await client.query(`
+            SELECT id, listing FROM marketplace_extensions
             WHERE extension_id = $1 AND name = $2 AND publisher_tenant_id = $3
               AND withdrawn_at IS NULL
-            RETURNING id
-          `, [listing.extensionId, listing.name, publisherTenantId, listing]);
-          listingId = updated.rows[0]?.id;
+            FOR UPDATE
+          `, [listing.extensionId, listing.name, publisherTenantId]);
+          if (!current) throw conflict;
+          listingId = current.id;
+          const previousArtifact = current.listing.version === listing.version ? current.listing : undefined;
+          const digest = await this.pinDigest(client, listingId, listing.version,
+            listing.tarballSha256 ?? previousArtifact?.tarballSha256);
+          const updated = {
+            ...listing,
+            id: listingId,
+            publishedAt: current.listing.publishedAt,
+            tarballSha256: digest,
+            tarballUrl: listing.tarballUrl ?? previousArtifact?.tarballUrl,
+            tarballSizeBytes: listing.tarballSizeBytes ?? previousArtifact?.tarballSizeBytes,
+          };
+          await client.query(`
+            UPDATE marketplace_extensions SET listing = $2::jsonb, updated_at = clock_timestamp()
+            WHERE id = $1 AND publisher_tenant_id = $3
+          `, [listingId, updated, publisherTenantId]);
         }
-        if (!listingId) throw conflict;
 
         const published = await this.getExtension(listingId, client);
         if (!published) throw new Error('The published marketplace listing could not be read.');
@@ -106,6 +121,24 @@ export class MarketplaceStore {
       if ((error as { code?: string }).code === '23505') throw conflict;
       throw error;
     }
+  }
+
+  private async pinDigest(client: Queryable, listingId: string, version: string, requested?: string): Promise<string | undefined> {
+    const sha256 = requested?.toLowerCase();
+    if (sha256) {
+      await client.query(`
+        INSERT INTO marketplace_version_digests (listing_id, version, sha256)
+        VALUES ($1, $2, $3) ON CONFLICT DO NOTHING
+      `, [listingId, version, sha256]);
+    }
+
+    const { rows: [pin] }: { rows: { sha256: string }[] } = await client.query(`
+      SELECT sha256 FROM marketplace_version_digests WHERE listing_id = $1 AND version = $2
+    `, [listingId, version]);
+    if (pin && sha256 && pin.sha256 !== sha256) {
+      throw new MarketplaceError(409, 'The extension version already has a different SHA-256 checksum.');
+    }
+    return pin?.sha256;
   }
 
   async listPublications(publisherTenantId: number, limit: number, offset: number) {

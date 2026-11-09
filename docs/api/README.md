@@ -129,6 +129,8 @@ La migración `034_marketplace_catalog.sql` crea el catálogo y las reseñas en 
 
 El registro empieza vacío y las publicaciones comunitarias aparecen sin verificar. El editor aloja por separado los archivos de descarga en HTTPS. El servidor usa los bytes enviados para comprobar o calcular el hash y guarda los metadatos en PostgreSQL. La instalación de extensiones está deshabilitada. La migración `042_marketplace_publication_withdrawal.sql` añade el estado y la auditoría de retirada. La retirada conserva identificadores, alias y reseñas, excluye la ficha de los endpoints públicos y devuelve `409` si se intenta volver a publicar mediante `POST /extensions`. La gestión del catálogo no controla los archivos alojados por el editor.
 
+La migración `043_marketplace_version_digests.sql` fija el SHA-256 conocido de cada versión. Un intento de cambiarlo devuelve `409`, incluso después de publicar otra versión. Se pueden editar los metadatos de la versión vigente sin volver a subir el archivo. Al migrar se conserva el digest de la versión publicada que consta en el catálogo. El registro histórico solo cubre las versiones cuyos digests se hayan fijado.
+
 Para ejecutar las pruebas de PostgreSQL, usa una base aislada con las migraciones aplicadas y un rol sin `SUPERUSER` ni `BYPASSRLS`. Las pruebas crean empresas y publicaciones en esa base. Configura `MARKETPLACE_TEST_DATABASE_URL` y ejecuta desde `WhatsaapWeb-JS`:
 
 ```bash

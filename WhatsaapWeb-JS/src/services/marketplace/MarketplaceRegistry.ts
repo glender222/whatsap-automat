@@ -102,6 +102,7 @@ export class MarketplaceRegistry {
     if (options.tarballBuffer && !computedSha256) {
       computedSha256 = crypto.createHash('sha256').update(options.tarballBuffer).digest('hex');
     }
+    if (typeof computedSha256 === 'string') computedSha256 = computedSha256.toLowerCase();
 
     let tarballUrl: string | undefined;
     if (options.tarballUrl !== undefined) {
