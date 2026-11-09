@@ -309,6 +309,14 @@ jobs:
       - name: Checkout código
         uses: actions/checkout@v4
 
+      - name: Configurar Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+
+      - name: Verificar SBOM desde archivos de bloqueo
+        run: node --test scripts/sbom-generate.test.cjs
+
       - name: Verificar presencia de LICENSE MIT
         run: |
           test -f LICENSE || (echo "ERROR: Archivo LICENSE ausente" && exit 1)
