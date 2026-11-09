@@ -6,6 +6,7 @@ import {
   LayoutDashboard,
   Layers3,
   Package,
+  Puzzle,
   ReceiptText,
   Send,
   Server,
@@ -47,6 +48,7 @@ export const workspaceSections: WorkspaceSection[] = [
       { to: '/dashboard/ia/dominios', label: 'Dominios de IA', icon: Layers3, adminOnly: true },
       { to: '/dashboard/campanas', label: 'Campañas', icon: Send },
       { to: '/dashboard/segmentos', label: 'Segmentos', icon: Users },
+      { to: '/dashboard/marketplace', label: 'Marketplace', icon: Puzzle },
     ],
   },
   {

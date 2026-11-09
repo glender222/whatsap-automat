@@ -31,6 +31,8 @@ const InventoryPage = lazy(() => import("../factures/inventario/pages/InventoryP
 const CampaignsPage = lazy(() => import("../components/campaigns/CampaignsPage"));
 const CampaignWizard = lazy(() => import("../components/campaigns/CampaignWizard"));
 const SegmentsManager = lazy(() => import("../components/campaigns/SegmentsManager"));
+const MarketplacePage = lazy(() => import("../components/marketplace/MarketplacePage"));
+const MarketplaceDetailPage = lazy(() => import("../components/marketplace/MarketplaceDetailPage"));
 const AuditEventsPage = lazy(() => import("../pages/Admin/AuditEventsPage"));
 const SystemHealthPage = lazy(() => import("../pages/Admin/SystemHealthPage"));
 
@@ -78,6 +80,8 @@ function AppRoutesInner() {
           <Route path="campanas" element={<CampaignsPage />} />
           <Route path="campanas/nueva" element={<CampaignWizard />} />
           <Route path="segmentos" element={<SegmentsManager />} />
+          <Route path="marketplace" element={<MarketplacePage />} />
+          <Route path="marketplace/:extensionId" element={<MarketplaceDetailPage />} />
           <Route path="canales/email" element={
             <section className="mx-auto max-w-3xl space-y-2 p-6">
               <h1 className="text-2xl font-semibold">Canal de correo electrónico</h1>
