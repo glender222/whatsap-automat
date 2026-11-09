@@ -88,6 +88,25 @@ export function draftSpec({ entryNodeId, policyRef, nodes, edges, limits }: Grap
   return { entryNodeId, policyRef, nodes, edges, limits };
 }
 
+const comparisonSections = [
+  ['entryNodeId', 'Nodo de entrada'], ['policyRef', 'Política'], ['nodes', 'Nodos'],
+  ['edges', 'Conexiones'], ['limits', 'Límites'],
+] as const;
+
+function formatSpecSection(value: GraphSpec[keyof GraphSpec]) {
+  return JSON.stringify(value, (_key, entry: unknown) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return entry;
+    const record = entry as Record<string, unknown>;
+    return Object.fromEntries(Object.keys(record).sort().map((key) => [key, record[key]]));
+  }, 2);
+}
+
+export function compareGraphSpecs(previous: GraphSpec, current: GraphSpec) {
+  return comparisonSections.map(([key, label]) => ({
+    key, label, before: formatSpecSection(previous[key]), after: formatSpecSection(current[key]),
+  })).filter(({ before, after }) => before !== after);
+}
+
 export function readVersion(raw: string | null): number | undefined {
   if (raw && /^[1-9][0-9]*$/.test(raw)) {
     const value = Number(raw);

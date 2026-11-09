@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight, CheckCircle2, CircleAlert, GitBranch, LockKeyhole } from 'lucide-react';
 import { Link, useLocation, useParams, useSearchParams } from 'react-router-dom';
+import AgentGraphComparisonPanel from './AgentGraphComparisonPanel';
 import AgentGraphFixturePanel from './AgentGraphFixturePanel';
 import GraphProblemNotice from './GraphProblemNotice';
 import {
@@ -201,6 +202,7 @@ function GraphDetails({ graphId }: { graphId: string }) {
             </div>
             <p className="break-all text-xs text-gray-600 dark:text-gray-300">Huella de la revisión <code>{draft.specHash}</code></p>
           </section>
+          {draft.version > 1 && <AgentGraphComparisonPanel key={draft.specHash + '/' + draft.version} draft={draft} />}
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
             <RevisionChecks key={draft.specHash + '/' + draft.version} draft={draft} />
             <div className="min-w-0 space-y-4">

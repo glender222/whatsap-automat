@@ -3,7 +3,7 @@ import { test, type TestContext } from 'node:test';
 import { AxiosError, type InternalAxiosRequestConfig } from 'axios';
 import { api } from '../shared/axios/http';
 import {
-  draftSpec, exampleGraph, getGraphDraft, graphFixtureProblem, graphPath, graphProblem, listGraphDrafts, saveGraphDraft,
+  compareGraphSpecs, draftSpec, exampleGraph, getGraphDraft, graphFixtureProblem, graphPath, graphProblem, listGraphDrafts, saveGraphDraft,
   simulateGraphDraft, validateGraphDraft, type GraphDraft, type GraphFixtureResult, type GraphValidation,
 } from '../components/agent-studio/canonical/agentGraphApi';
 
@@ -20,6 +20,17 @@ function mockResponse(context: TestContext, respond: (request: InternalAxiosRequ
 const draft: GraphDraft = {
   ...exampleGraph, schemaVersion: 1, graphId: 'nuevo', tenantId: '27', version: 1, status: 'draft', specHash: 'a'.repeat(64),
 };
+
+test('revision comparison ignores object key order and detects ordered graph changes', () => {
+  const previous = { ...exampleGraph, nodes: [{ ...exampleGraph.nodes[0], config: { a: 1, b: 2 } }] };
+  const same = { ...previous, nodes: [{ ...previous.nodes[0], config: { b: 2, a: 1 } }] };
+  assert.deepEqual(compareGraphSpecs(previous, same), []);
+  const next = { ...same, policyRef: 'otra-politica', nodes: [...same.nodes, exampleGraph.nodes[1]] };
+  const changes = compareGraphSpecs(previous, next);
+  assert.deepEqual(changes.map(({ key }) => key), ['policyRef', 'nodes']);
+  assert.match(changes[0].after, /otra-politica/);
+  assert.match(changes[1].after, /"id": "fin"/);
+});
 
 test('Agent Studio reads catalog pages and immutable revisions from the canonical API', async (context) => {
   mockResponse(context, (request) => {
