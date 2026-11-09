@@ -80,7 +80,7 @@ function OrderList({ page }: { page: number }) {
       {current?.page && (
         <div className="space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className={subtext} role="status">Página {page} · {total} {total === 1 ? 'pedido' : 'pedidos'} registrados</p>
+            <p className={subtext} role="status">Página {page} · {total} {total === 1 ? 'pedido registrado' : 'pedidos registrados'}</p>
             <button type="button" className={secondary} onClick={() => setAttempt((value) => value + 1)}>
               <RefreshCw size={16} aria-hidden="true" /> Actualizar listado
             </button>
