@@ -1,11 +1,11 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { type SendMessageResultV1, type StandardErrorCode, toCanonicalDeliveryState } from '@whatsap-automat/contracts';
 import config from '../../config/index';
 import { TenantScopedUoW, tenantScopedUoW } from '../../db/TenantScopedUoW';
 import type { Queryable } from '../../shared/UnitOfWorkPort';
 import MetaAccountStore from '../whatsapp/meta/MetaAccountStore';
 import { MetaCloudClient } from '../whatsapp/meta/MetaCloudClient';
-import { applyCanonicalMetaStatuses, lockMetaReceipt } from '../whatsapp/meta/MetaCanonicalReceipt';
+import { applyCanonicalMetaStatuses, lockMetaReceipt, refreshConversationPreview } from '../whatsapp/meta/MetaCanonicalReceipt';
 
 export class ConversationSendError extends Error {
   constructor(
@@ -36,6 +36,7 @@ type ClaimRow = {
 };
 type ReservedSend = {
   messageId: number;
+  callbackRef: string;
   recipient: string;
   windowExpiresAt: Date;
   client: MetaCloudClient;
@@ -103,14 +104,25 @@ export class ConversationSendService {
 
     let receipt: string | null;
     try {
-      const sent = await reserved.client.sendText(reserved.recipient, text, { redirect: 'error' });
+      const sent = await reserved.client.sendText(reserved.recipient, text, {
+        redirect: 'error', callbackData: `automat:${reserved.callbackRef}`,
+      });
       receipt = sent.providerMessageId;
     } catch (error) {
       if (definiteGraphRejection(error)) return this.complete(command, reserved, hash, null, 'META_REJECTED');
+      return this.readOutcome(command, hash);
+    }
+    if (typeof receipt !== 'string' || !/^wamid\.[A-Za-z0-9+/_=-]{1,249}$/.test(receipt)) return this.readOutcome(command, hash);
+    return this.complete(command, reserved, hash, receipt, null);
+  }
+
+  private async readOutcome(command: SendConversationText, hash: string): Promise<SendMessageResultV1> {
+    try {
+      const claim = await this.uow.run(command.tenantId, (db) => getClaim(db, command.tenantId, command.key));
+      return claim ? replay(claim, command, hash) : unknownDelivery;
+    } catch {
       return unknownDelivery;
     }
-    if (typeof receipt !== 'string' || !/^wamid\.[A-Za-z0-9+/_=-]{1,249}$/.test(receipt)) return unknownDelivery;
-    return this.complete(command, reserved, hash, receipt, null);
   }
 
   private async reserve(db: Queryable, command: SendConversationText, hash: string): Promise<ReservedSend> {
@@ -193,15 +205,16 @@ export class ConversationSendService {
       ON CONFLICT (company_id, client_request_id) DO NOTHING RETURNING id
     `, [tenantId, conversationId, key, recipient, text, actorId]);
     if (!message) throw new ConversationSendError('CONFLICT', 'IDEMPOTENCY_KEY_CONFLICT', 'This key is already in use.');
+    const callbackRef = randomUUID();
     await db.query(`
       INSERT INTO conversation_send_claims
-        (tenant_id, request_key, conversation_id, actor_id, expected_version, payload_hash, connection_id, phone_number_id, recipient_id, message_id)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-    `, [tenantId, key, conversationId, actorId, expectedVersion, hash, account.connection_id, phoneId, recipient, message.id]);
+        (tenant_id, request_key, conversation_id, actor_id, expected_version, payload_hash, connection_id, phone_number_id, recipient_id, message_id, callback_ref)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+    `, [tenantId, key, conversationId, actorId, expectedVersion, hash, account.connection_id, phoneId, recipient, message.id, callbackRef]);
     await db.query('UPDATE conversations SET version = version + 1, updated_at = clock_timestamp() WHERE company_id = $1 AND id = $2',
       [tenantId, conversationId]);
     return {
-      messageId: message.id, recipient, windowExpiresAt: expiresAt,
+      messageId: message.id, callbackRef, recipient, windowExpiresAt: expiresAt,
       client: new MetaCloudClient(clientConfig, this.fetchGraph),
     };
   }
@@ -213,7 +226,7 @@ export class ConversationSendService {
   private async complete(
     command: SendConversationText, reserved: ReservedSend, hash: string, receipt: string | null, rejection: string | null,
   ): Promise<SendMessageResultV1> {
-    const { tenantId, conversationId, key, text } = command;
+    const { tenantId, key } = command;
     try {
       return await this.uow.run(tenantId, async (db) => {
         if (receipt) await lockMetaReceipt(db, tenantId, receipt);
@@ -222,7 +235,10 @@ export class ConversationSendService {
           WHERE tenant_id = $1 AND request_key = $2 AND state = 'unknown_delivery' AND message_id = $5
           RETURNING message_id
         `, [tenantId, key, receipt ? 'provider_accepted' : 'failed', receipt, reserved.messageId]);
-        if (!result.rows.length) return unknownDelivery;
+        if (!result.rows.length) {
+          const claim = await getClaim(db, tenantId, key);
+          return claim ? replay(claim, command, hash) : unknownDelivery;
+        }
 
         await db.query(`
           UPDATE messages SET provider_message_id = $3::varchar, status = $4::varchar, error_code = $5,
@@ -238,12 +254,7 @@ export class ConversationSendService {
 
         if (receipt) {
           await applyCanonicalMetaStatuses(db, tenantId, receipt);
-          await db.query(`
-            UPDATE conversations c SET last_message_at = m.occurred_at, last_outbound_message_at = m.occurred_at,
-              last_message_preview = $4, last_message_direction = 'outbound', updated_at = clock_timestamp()
-            FROM messages m WHERE c.company_id = $1 AND c.id = $2 AND m.company_id = c.company_id AND m.id = $3
-              AND (c.last_message_at IS NULL OR c.last_message_at <= m.occurred_at)
-          `, [tenantId, conversationId, reserved.messageId, text]);
+          await refreshConversationPreview(db, tenantId, reserved.messageId);
         }
         const claim = await getClaim(db, tenantId, key);
         return claim ? replay(claim, command, hash) : unknownDelivery;

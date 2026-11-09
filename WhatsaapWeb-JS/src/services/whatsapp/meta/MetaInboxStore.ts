@@ -3,7 +3,7 @@ import { Pool } from 'pg';
 import pool from '../../../config/database';
 import { TenantScopedUoW } from '../../../db/TenantScopedUoW';
 import { Queryable } from '../../../shared/UnitOfWorkPort';
-import { applyCanonicalMetaStatuses, lockMetaReceipt } from './MetaCanonicalReceipt';
+import { applyCanonicalMetaStatuses, correlateCanonicalMetaStatus, lockMetaReceipt } from './MetaCanonicalReceipt';
 
 function toUnixSeconds(value: unknown): number | null {
   if (!value) return null;
@@ -568,9 +568,13 @@ export class MetaInboxStore {
         await lockMetaReceipt(client, this.companyId, providerMessageId);
       }
       const legacyKey = `status:${providerMessageId}:${status.status}:${status.timestamp || ''}`;
-      const receiptKey = 'status:' + createHash('sha256').update(JSON.stringify([
+      const callbackData = typeof status.biz_opaque_callback_data === 'string' &&
+        status.biz_opaque_callback_data.startsWith('automat:') ? status.biz_opaque_callback_data : null;
+      const receiptIdentity = [
         providerMessageId, status.status, status.timestamp ?? null, metadata?.phone_number_id ?? null, status.recipient_id ?? null,
-      ])).digest('hex');
+      ];
+      if (callbackData) receiptIdentity.push(callbackData);
+      const receiptKey = 'status:' + createHash('sha256').update(JSON.stringify(receiptIdentity)).digest('hex');
       const event = await client.query(
         `INSERT INTO whatsapp_webhook_events (
            company_id, provider, phone_number_id, event_type, event_dedupe_key,
@@ -582,6 +586,7 @@ export class MetaInboxStore {
            WHERE company_id = $1::integer AND provider = 'meta-cloud' AND event_dedupe_key = $7::varchar
              AND phone_number_id IS NOT DISTINCT FROM $2::varchar
              AND payload_json #>> '{status,recipient_id}' IS NOT DISTINCT FROM $8::text
+             AND ($9::text IS NULL OR payload_json #>> '{status,biz_opaque_callback_data}' = $9::text)
          )
          ON CONFLICT (company_id, provider, event_dedupe_key) DO NOTHING
          RETURNING *`,
@@ -594,14 +599,19 @@ export class MetaInboxStore {
           json({ status, metadata, value }),
           legacyKey,
           status.recipient_id ?? null,
+          callbackData,
         ]
       );
       if (!event.rows[0]) {
         return { duplicate: true };
       }
 
+      const eventId = String(event.rows[0].id);
+      if (typeof providerMessageId === 'string' && callbackData) {
+        await correlateCanonicalMetaStatus(client, this.companyId, providerMessageId, eventId);
+      }
       const canonical = typeof providerMessageId === 'string' &&
-        await applyCanonicalMetaStatuses(client, this.companyId, providerMessageId, String(event.rows[0].id));
+        await applyCanonicalMetaStatuses(client, this.companyId, providerMessageId, eventId);
       if (!canonical) {
         const messageResult = await client.query(
           `SELECT * FROM messages WHERE company_id = $1 AND channel = 'whatsapp' AND provider_message_id = $2 LIMIT 1`,

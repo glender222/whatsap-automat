@@ -227,7 +227,7 @@ export class MetaCloudClient {
     return result?.id === phoneId && !result.error;
   }
 
-  async sendText(to: string, body: string, options: { redirect?: RequestRedirect } = {}): Promise<MetaSendResult> {
+  async sendText(to: string, body: string, options: { redirect?: RequestRedirect; callbackData?: string } = {}): Promise<MetaSendResult> {
     const result = await this.request(`/${this.config.phoneNumberId}/messages`, {
       method: 'POST',
       redirect: options.redirect,
@@ -235,6 +235,7 @@ export class MetaCloudClient {
         messaging_product: 'whatsapp',
         to: this.normalizeRecipient(to),
         type: 'text',
+        ...(options.callbackData && { biz_opaque_callback_data: options.callbackData }),
         text: {
           preview_url: false,
           body,

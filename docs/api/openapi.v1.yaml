@@ -152,7 +152,8 @@ paths:
       description: >-
         El operador autenticado debe controlar la conversación. Se requiere una ventana de atención de 24 horas
         comprobada con mensajes entrantes de la cuenta de envío. La clave se conserva para reintentar el mismo intento.
-        Si se desconoce la entrega, se bloquea un nuevo intento en esa conversación.
+        Si se desconoce la entrega, se bloquea un nuevo intento en esa conversación. Un webhook firmado con la
+        referencia del intento y la cuenta y el destinatario correctos puede resolver ese estado sin reenviar.
       operationId: sendConversationMessage
       security:
         - BearerAuth: []

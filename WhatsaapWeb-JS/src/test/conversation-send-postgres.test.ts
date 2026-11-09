@@ -248,9 +248,14 @@ test('durable CAS sends one Graph POST per intent and reconciles authenticated r
   assert.deepEqual(acknowledged, { status: 202, body: {
     providerMessageId: providerId, accepted: true, rawStatus: 'delivered', deliveryState: 'delivered',
   } });
+  const firstCallback = graphRequests[0].body.biz_opaque_callback_data;
+  assert.match(firstCallback, /^automat:[a-f0-9-]{36}$/);
   assert.deepEqual(graphRequests, [{
     url: `/v25.0/${phoneA}/messages`, method: 'POST', auth: `Bearer ${tenantToken}`,
-    body: { messaging_product: 'whatsapp', to: recipient, type: 'text', text: { preview_url: false, body: 'Hola desde la bandeja' } },
+    body: {
+      messaging_product: 'whatsapp', to: recipient, type: 'text', biz_opaque_callback_data: firstCallback,
+      text: { preview_url: false, body: 'Hola desde la bandeja' },
+    },
   }]);
   for (const [phone, state] of [[secondPhone, 'read'], [phoneA, 'sent'], [phoneA, 'read'], [phoneA, 'failed']]) {
     const response = await signedWebhook(url, phone, status(state));
@@ -299,12 +304,54 @@ test('durable CAS sends one Graph POST per intent and reconciles authenticated r
   assert.deepEqual(await sdk.conversations.sendText(String(id), 'Hola desde la bandeja', version + 2, 'missing-provider-ack'), missingAck.body);
   assert.equal((await send(restarted, id, 'blind-retry-new-key', version + 3, accessA)).body.metadata.reasonCode, 'DELIVERY_UNRESOLVED');
 
+  const recoveredId = 'wamid.test-recovered-without-ack';
+  const callback = graphRequests[2].body.biz_opaque_callback_data;
+  assert.notEqual(callback, firstCallback);
+  const receipt = {
+    id: recoveredId, status: 'delivered', timestamp: now(), recipient_id: recipient, biz_opaque_callback_data: callback,
+  };
+  assert.equal((await signedWebhook(url, phoneA, { statuses: [receipt] }, 'invalid-secret')).status, 403);
+  for (const [phone, modified] of [
+    [phoneA, { biz_opaque_callback_data: firstCallback }],
+    [secondPhone, {}],
+    [phoneB, {}],
+    [phoneA, { recipient_id: '12025550999' }],
+    [phoneA, { timestamp: String(Number(now()) - 3_600) }],
+  ] as const) {
+    assert.equal((await signedWebhook(url, phone, { statuses: [{ ...receipt, ...modified }] })).status, 200);
+  }
+  assert.deepEqual(await send(restarted, id, 'missing-provider-ack', version + 2, accessA), missingAck);
+  const correlated = await signedWebhook(url, phoneA, { statuses: [receipt] });
+  assert.equal(correlated.status, 200, await correlated.text());
+  assert.equal((await (await signedWebhook(url, phoneA, { statuses: [receipt] })).json()).results[0].duplicate, true);
+  assert.deepEqual(await sdk.conversations.sendText(String(id), 'Hola desde la bandeja', version + 2, 'missing-provider-ack'), {
+    providerMessageId: recoveredId, accepted: true, rawStatus: 'delivered', deliveryState: 'delivered',
+  });
+  const recoveredHistory = await (await read(`${messageUrl}?limit=1`)).json();
+  assert.equal(recoveredHistory.items[0].deliveryState, 'delivered');
+  assert.equal(recoveredHistory.items[0].clientRequestId, 'missing-provider-ack');
+  assert.equal(JSON.stringify(recoveredHistory).includes(callback), false);
+  assert.equal(graphRequests.length, 3);
+
+  const postRecoveryStarted = new Promise<ServerResponse>((resolve) => { reply = (_request, response) => resolve(response); });
+  const postRecovery = send(restarted, id, 'new-intent-after-recovery', version + 3, accessA);
+  const postRecoveryResponse = await Promise.race([postRecoveryStarted, postRecovery.then((result) => {
+    throw new Error(`Expected a new Graph request after reconciliation, got ${JSON.stringify(result)}`);
+  })]);
+  t.after(() => postRecoveryResponse.destroy());
+  const postRecoveryId = 'wamid.test-post-recovery';
+  assert.equal((await signedWebhook(url, phoneA, { statuses: [{
+    ...receipt, id: postRecoveryId, status: 'sent', biz_opaque_callback_data: graphRequests[3].body.biz_opaque_callback_data,
+  }] })).status, 200);
+  postRecoveryResponse.end(JSON.stringify({ messages: [{ id: postRecoveryId }] }));
+  assert.equal((await postRecovery).body.deliveryState, 'dispatched');
+
   await inbound(phoneB, '12025550105');
   const tenantBId = await conversation(tenantB, '12025550105', actor + 1);
   reply = (_request, response) => { response.destroy(); };
   const networkLoss = await send(url, tenantBId, 'missing-provider-ack', 1, accessB);
   assert.equal(networkLoss.body.deliveryState, 'unknown_delivery');
   assert.deepEqual(await send(restarted, tenantBId, 'missing-provider-ack', 1, accessB), networkLoss);
-  assert.equal(graphRequests.length, 4);
-  assert.equal(graphRequests[3].auth, 'Bearer fixture-other-tenant-token');
+  assert.equal(graphRequests.length, 5);
+  assert.equal(graphRequests[4].auth, 'Bearer fixture-other-tenant-token');
 });
