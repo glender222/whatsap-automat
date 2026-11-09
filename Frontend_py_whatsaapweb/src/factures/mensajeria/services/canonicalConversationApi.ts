@@ -10,6 +10,7 @@ export interface CanonicalConversation {
   channel: string;
   status: string;
   stateVersion: number;
+  hasUnresolvedDelivery?: boolean;
   assignedUserId: string | null;
   assignedAgentId: string | null;
   aiPaused: boolean;
@@ -81,9 +82,9 @@ export async function takeConversationControl(conversation: CanonicalConversatio
   return data;
 }
 
-export async function readCanonicalHistory(conversation: CanonicalConversation, signal: AbortSignal) {
+export async function readCanonicalHistory(conversation: CanonicalConversation, signal: AbortSignal, clientRequestId?: string) {
   const { data } = await api.get<{ items: CanonicalMessage[] }>(endpoint(conversation.id) + '/messages', {
-    params: { limit: 50 }, signal,
+    params: clientRequestId ? { limit: 1, clientRequestId } : { limit: 50 }, signal,
   });
   if (!Array.isArray(data?.items) || !data.items.every((item) =>
     item.conversationId === conversation.id && item.tenantId === conversation.tenantId)) {
@@ -103,7 +104,7 @@ export async function sendCanonicalText(intent: TextIntent): Promise<TextOutcome
       ['provider_accepted', 'dispatched', 'delivered', 'read'].includes(data.deliveryState)) {
     return { kind: 'accepted', deliveryState: data.deliveryState };
   }
-  if (status === 202 && data?.accepted === false && data.deliveryState === 'failed') {
+  if (status === 202 && data?.deliveryState === 'failed') {
     return { kind: 'failed', deliveryState: 'failed' };
   }
   return { kind: 'unknown', deliveryState: 'unknown_delivery' };
@@ -114,7 +115,7 @@ const rejectionMessages: Record<string, string> = {
   HUMAN_TAKEOVER_REQUIRED: 'Toma el control de esta conversación con tu sesión antes de enviar.',
   CONVERSATION_CLOSED: 'La conversación está cerrada. El mensaje no se envió.',
   CONVERSATION_CHANNEL_UNSUPPORTED: 'El envío de texto está disponible para conversaciones verificadas de WhatsApp Cloud.',
-  DELIVERY_UNRESOLVED: 'Hay un envío anterior sin confirmar. Revisa su estado en WhatsApp antes de iniciar otro.',
+  DELIVERY_UNRESOLVED: 'Hay un envío anterior sin confirmar. Actualiza su estado antes de iniciar otro.',
   SERVICE_WINDOW_CLOSED: 'La ventana de atención de 24 horas está cerrada. El mensaje no se envió.',
   SENDING_ACCOUNT_UNAVAILABLE: 'La conexión de WhatsApp de esta empresa no está disponible.',
   SENDING_ACCOUNT_UNVERIFIED: 'No se pudo verificar la cuenta de WhatsApp que recibió esta conversación.',

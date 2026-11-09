@@ -46,6 +46,7 @@ export const conversationV1Schema = z.object({
   status: conversationStatusSchema,
   stage: commercialStageSchema,
   stateVersion: z.number().int().nonnegative(),
+  hasUnresolvedDelivery: z.boolean().optional(),
   aiPaused: z.boolean(),
   aiPausedUntil: z.string().datetime().nullable(),
   assignedUserId: z.string().nullable(),

@@ -69,6 +69,7 @@ interface TakeoverResult {
 
 interface ChatSessionStatus extends MobileChatOwnership {
   hasActiveSession: boolean;
+  hasUnresolvedDelivery?: boolean;
 }
 
 export class MobileApiError extends Error {
@@ -179,9 +180,12 @@ export const apiClient = {
     );
   },
 
-  async listConversationMessages(conversationId: number | string, cursor?: string) {
+  async listConversationMessages(conversationId: number | string, cursor?: string, clientRequestId?: string) {
+    const params = new URLSearchParams({ limit: clientRequestId ? '1' : '50' });
+    if (cursor) params.set('cursor', cursor);
+    if (clientRequestId) params.set('clientRequestId', clientRequestId);
     const page = await authenticated<ConversationMessagePage>(
-      `/v1/conversations/${encodeURIComponent(conversationId)}/messages?limit=50${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
+      `/v1/conversations/${encodeURIComponent(conversationId)}/messages?${params}`,
       undefined,
       'canonical',
     );

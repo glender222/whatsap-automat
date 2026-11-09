@@ -20,7 +20,9 @@ const statusExpression = `CASE WHEN archived_at IS NOT NULL THEN 'archived' ELSE
 const conversationColumns = `id, company_id, channel, external_conversation_id, contact_id, title,
   ${statusExpression} AS status, commercial_stage, version,
   ia_paused AND (ia_resume_at IS NULL OR ia_resume_at > NOW()) AS ia_paused, ia_resume_at,
-  assigned_user_id, owner_type, owner_id, last_message_at, service_window_expires_at, created_at, updated_at`;
+  assigned_user_id, owner_type, owner_id, last_message_at, service_window_expires_at, created_at, updated_at,
+  EXISTS (SELECT 1 FROM conversation_send_claims s WHERE s.tenant_id = conversations.company_id
+    AND s.conversation_id = conversations.id AND s.state = 'unknown_delivery') AS has_unresolved_delivery`;
 
 function encodeCursor(direction: Cursor['direction'], id: number): string {
   return Buffer.from(`${direction}:${id}`).toString('base64url');
@@ -70,6 +72,7 @@ type ConversationRow = {
   status: ConversationStatus;
   commercial_stage: CommercialStage;
   version: number;
+  has_unresolved_delivery: boolean;
   ia_paused: boolean;
   ia_resume_at: Date | null;
   assigned_user_id: number | null;
@@ -92,6 +95,7 @@ function conversationFromRow(row: ConversationRow): ConversationV1 {
     status: row.status,
     stage: row.commercial_stage,
     stateVersion: row.version,
+    hasUnresolvedDelivery: row.has_unresolved_delivery,
     aiPaused: Boolean(row.ia_paused),
     aiPausedUntil: dateText(row.ia_resume_at),
     assignedUserId: idText(row.assigned_user_id),
@@ -138,7 +142,7 @@ export class ConversationQueryService {
     return this.uow.run(tenantId, (client) => readConversation(client, tenantId, id));
   }
 
-  messages(tenantId: number, id: number, page: ConversationPage) {
+  messages(tenantId: number, id: number, page: ConversationPage, clientRequestId?: string) {
     return this.uow.run(tenantId, async (client) => {
       const conversation = await readConversation(client, tenantId, id);
       if (!conversation) return null;
@@ -155,8 +159,9 @@ export class ConversationQueryService {
            AND send.conversation_id = m.conversation_id AND send.message_id = m.id
          WHERE m.company_id = $1 AND m.conversation_id = $2 AND m.direction IN ('inbound', 'outbound')
            AND ($3::integer IS NULL OR m.id ${cursorOperator(page.cursor)} $3)
+           AND ($5::varchar IS NULL OR m.client_request_id = $5)
          ORDER BY m.id ${orderForCursor(page.cursor)} LIMIT $4`,
-        [tenantId, id, page.cursor?.id ?? null, page.limit + 1]
+        [tenantId, id, page.cursor?.id ?? null, page.limit + 1, clientRequestId ?? null]
       );
       return pageOf(rows.map((row): ConversationMessageV1 => ({
         id: String(row.id), conversationId: conversation.id, tenantId: conversation.tenantId,

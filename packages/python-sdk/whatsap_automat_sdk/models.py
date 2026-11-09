@@ -162,6 +162,7 @@ class Conversation(AutomatBaseModel):
     status: Union[ConversationStatus, str]
     stage: Union[CommercialStage, str]
     state_version: int = Field(alias="stateVersion")
+    has_unresolved_delivery: Optional[bool] = Field(default=None, alias="hasUnresolvedDelivery")
     ai_paused: bool = Field(default=False, alias="aiPaused")
     ai_paused_until: Optional[Union[datetime, str]] = Field(default=None, alias="aiPausedUntil")
     assigned_user_id: Optional[str] = Field(default=None, alias="assignedUserId")

@@ -18,6 +18,8 @@ import {
   ConversationSendError, ConversationSendService, conversationSendService,
 } from '../services/conversations/ConversationSendService';
 
+const requestKeyPattern = /^[A-Za-z0-9_.:-]{1,128}$/;
+
 function problem(
   req: JwtRequest, res: Response, code: StandardErrorCode, detail: string, metadata?: Record<string, unknown>,
 ) {
@@ -64,7 +66,11 @@ export default function createConversationV1Routes(
       if (!isInternalChatId(id)) return problem(req, res, StandardErrorCode.NOT_FOUND, 'Conversation not found');
       const page = parseConversationPage(req.query, 50);
       if (!page) return problem(req, res, StandardErrorCode.VALIDATION_ERROR, 'Invalid message cursor or page size');
-      const result = await query.messages(resolveWhatsappCompanyId(req), Number(id), page);
+      const key = req.query.clientRequestId;
+      if (key !== undefined && (typeof key !== 'string' || !requestKeyPattern.test(key))) {
+        return problem(req, res, StandardErrorCode.VALIDATION_ERROR, 'Invalid client request ID');
+      }
+      const result = await query.messages(resolveWhatsappCompanyId(req), Number(id), page, key);
       if (!result) return problem(req, res, StandardErrorCode.NOT_FOUND, 'Conversation not found');
       return res.json(result);
     } catch (error) { return next(error); }
@@ -82,7 +88,7 @@ export default function createConversationV1Routes(
     const body = req.body;
     const version = body?.expectedConversationVersion;
     const message = body?.message;
-    if (!key || !/^[A-Za-z0-9_.:-]{1,128}$/.test(key) ||
+    if (!key || !requestKeyPattern.test(key) ||
         !Number.isSafeInteger(version) || version < 0 || version >= 2147483647 ||
         !message || typeof message !== 'object' || typeof message.kind !== 'string') {
       return problem(req, res, StandardErrorCode.VALIDATION_ERROR, 'Provide an idempotency key, expected conversation version and message');

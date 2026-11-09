@@ -9,7 +9,7 @@ export default function CanonicalSendStatus({ composer }: { composer: CanonicalC
   if (phase === 'takeover') message = 'Confirmando la toma de control…';
   else if (phase === 'send') message = 'Esperando confirmación de WhatsApp…';
   else if (error) message = error;
-  else if (unresolved) message = notice?.tone === 'unknown' ? notice.message : 'Hay un envío sin confirmar. Consulta el historial y revisa su estado en WhatsApp.';
+  else if (unresolved) message = notice?.tone === 'unknown' ? notice.message : 'Hay un envío sin confirmar. Actualiza el estado para comprobar si llegó una confirmación.';
   else if (loading) message = 'Verificando la conversación…';
   else if (!conversation || conversation.channel !== 'whatsapp-cloud') message = 'El envío de texto requiere una conversación de WhatsApp Cloud verificada.';
   else if (conversation.status !== 'open') message = 'La conversación está cerrada.';

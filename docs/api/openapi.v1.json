@@ -163,7 +163,7 @@
     "/conversations/{id}/messages": {
       "get": {
         "summary": "Obtener mensajes de una conversación",
-        "description": "Devuelve mensajes y estados de entrega con paginación cursor.",
+        "description": "Devuelve mensajes y estados de entrega con paginación cursor. Filtra por clave de intento para comprobar su estado sin reenviar.",
         "operationId": "getConversationMessages",
         "security": [
           {
@@ -196,6 +196,15 @@
               "default": 50,
               "minimum": 1,
               "maximum": 100
+            }
+          },
+          {
+            "name": "clientRequestId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.:-]{1,128}$"
             }
           }
         ],
@@ -1919,6 +1928,10 @@
           },
           "stateVersion": {
             "type": "integer"
+          },
+          "hasUnresolvedDelivery": {
+            "type": "boolean",
+            "description": "La conversación tiene un envío canónico pendiente de confirmación."
           },
           "aiPaused": {
             "type": "boolean"

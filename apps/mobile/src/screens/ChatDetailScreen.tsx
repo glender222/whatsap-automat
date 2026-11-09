@@ -64,7 +64,7 @@ export function ChatDetailScreen({ route, navigation }: Props) {
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [canLoadOlder, setCanLoadOlder] = useState(false);
   const [sending, setSending] = useState(false);
-  const [serverDeliveryBlocked, setServerDeliveryBlocked] = useState(false);
+  const [serverDeliveryBlocked, setServerDeliveryBlocked] = useState<boolean | null>(null);
   const [hasActiveSession, setHasActiveSession] = useState<boolean | null>(null);
   const [loadError, setLoadError] = useState('');
   const [sendNotice, setSendNotice] = useState('');
@@ -78,6 +78,7 @@ export function ChatDetailScreen({ route, navigation }: Props) {
 
   const { id: chatId, conversationId, stateVersion, assignedUserId } = chat;
   const pending = pendingReplies.get(chatId);
+  const pendingKey = pending?.key;
   const updateOwnership = useCallback((ownership: MobileChatOwnership) => {
     const { conversationId, stateVersion, assignedUserId, aiPaused } = ownership;
     if (stateVersion == null || !Number.isInteger(stateVersion)) return;
@@ -113,8 +114,17 @@ export function ChatDetailScreen({ route, navigation }: Props) {
         olderCursor.current = nextCursor;
         setCanLoadOlder(conversationId != null ? Boolean(nextCursor) : page.length === 50);
       }
-      setMessages((current) => mergeMessages(replaceHistory ? [] : current, page));
-      if (page.some(isUnresolvedReply)) setServerDeliveryBlocked(false);
+      let fresh = page;
+      if (conversationId != null && pendingKey && !page.some((message) => message.clientRequestId === pendingKey)) {
+        const exact = await apiClient.listConversationMessages(conversationId, undefined, pendingKey).catch(() => null);
+        const match = exact?.messages.find((message) => message.clientRequestId === pendingKey && message.fromMe);
+        if (match) fresh = [...page, match];
+      }
+      setMessages((current) => mergeMessages(replaceHistory ? [] : current, fresh));
+      const historyBlocked = fresh.some(isUnresolvedReply);
+      const sessionBlocked = sessionResult.status === 'fulfilled' ? sessionResult.value.hasUnresolvedDelivery : undefined;
+      if (typeof sessionBlocked === 'boolean') setServerDeliveryBlocked(sessionBlocked || historyBlocked);
+      else if (historyBlocked) setServerDeliveryBlocked(null);
       setLoadError('');
       const latestInbound = page.reduce<MobileMessage | undefined>((latest, item) =>
         !item.fromMe && (!latest || item.timestamp > latest.timestamp) ? item : latest, undefined)?.id;
@@ -129,7 +139,7 @@ export function ChatDetailScreen({ route, navigation }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [chatId, conversationId, updateOwnership]);
+  }, [chatId, conversationId, pendingKey, updateOwnership]);
   const refresh = useRefreshOnFocus(load);
 
   useEffect(() => {
@@ -196,7 +206,7 @@ export function ChatDetailScreen({ route, navigation }: Props) {
     }
   }
 
-  const hasUnresolvedDelivery = serverDeliveryBlocked || messages.some(isUnresolvedReply);
+  const hasUnresolvedDelivery = serverDeliveryBlocked ?? messages.some(isUnresolvedReply);
   const ownsConversation = assignedUserId != null && String(assignedUserId) === session.userId;
   const canEdit = hasActiveSession === true && !loadError && !pending && !hasUnresolvedDelivery && !sending;
   const canSend = canEdit && ownsConversation && conversationId != null && stateVersion != null && Boolean(draft.trim());
@@ -315,7 +325,7 @@ export function ChatDetailScreen({ route, navigation }: Props) {
             <Pressable accessibilityRole="button" style={styles.loadOlder} onPress={() => void refreshChat()} disabled={refreshing}>
               <Text style={styles.action}>Actualizar conversación</Text>
             </Pressable>
-            {pending ? (
+            {pending && !hasUnresolvedDelivery ? (
               <Pressable accessibilityRole="button" style={styles.loadOlder} onPress={() => void send(pending)}>
                 <Text style={styles.action}>Reintentar el mismo envío</Text>
               </Pressable>

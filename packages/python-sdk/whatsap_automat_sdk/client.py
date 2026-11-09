@@ -97,11 +97,14 @@ class ConversationsResource:
         conversation_id: str,
         cursor: Optional[str] = None,
         limit: int = 50,
+        client_request_id: Optional[str] = None,
     ) -> CursorPager[ConversationMessage]:
         def fetcher(c: Optional[str]) -> PagedResponse[ConversationMessage]:
             q: Dict[str, Any] = {"limit": limit}
             if c:
                 q["cursor"] = c
+            if client_request_id is not None:
+                q["clientRequestId"] = client_request_id
             res = self._client._request("GET", f"/conversations/{conversation_id}/messages", params=q)
             return PagedResponse[ConversationMessage](
                 items=[ConversationMessage.model_validate(x) for x in res.get("items", [])],
@@ -446,11 +449,14 @@ class AsyncConversationsResource:
         conversation_id: str,
         cursor: Optional[str] = None,
         limit: int = 50,
+        client_request_id: Optional[str] = None,
     ) -> AsyncCursorPager[ConversationMessage]:
         async def fetcher(c: Optional[str]) -> PagedResponse[ConversationMessage]:
             q: Dict[str, Any] = {"limit": limit}
             if c:
                 q["cursor"] = c
+            if client_request_id is not None:
+                q["clientRequestId"] = client_request_id
             res = await self._client._request("GET", f"/conversations/{conversation_id}/messages", params=q)
             return PagedResponse[ConversationMessage](
                 items=[ConversationMessage.model_validate(x) for x in res.get("items", [])],

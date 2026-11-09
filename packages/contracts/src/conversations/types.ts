@@ -60,6 +60,7 @@ export interface ConversationV1 {
   readonly status: ConversationStatus;
   readonly stage: CommercialStage;
   readonly stateVersion: number; // CAS counter for optimistic concurrency
+  readonly hasUnresolvedDelivery?: boolean;
   readonly aiPaused: boolean;
   readonly aiPausedUntil: string | null;
   readonly assignedUserId: string | null;

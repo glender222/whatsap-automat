@@ -141,6 +141,16 @@ test('maps canonical history and cursor for reconciliation of an exact outbound 
     }],
     nextCursor: 'older',
   });
+  globalThis.fetch = async (input) => {
+    const url = new URL(String(input));
+    assert.equal(url.pathname, '/api/v1/conversations/8/messages');
+    assert.equal(url.searchParams.get('limit'), '1');
+    assert.equal(url.searchParams.get('clientRequestId'), 'mobile-request:1');
+    return json(200, { items: [], nextCursor: null });
+  };
+  assert.deepEqual(await apiClient.listConversationMessages(8, undefined, 'mobile-request:1'), {
+    messages: [], nextCursor: null,
+  });
 });
 
 test('sends CAS version to the real takeover endpoint and reads the version returned by the server', async () => {

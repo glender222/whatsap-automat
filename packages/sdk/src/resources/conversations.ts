@@ -40,7 +40,7 @@ export class ConversationsResource {
     return this.http.get<ConversationV1>(`/conversations/${id}`);
   }
 
-  listMessages(conversationId: string, params: { cursor?: string; limit?: number } = {}): CursorPager<ConversationMessageV1> {
+  listMessages(conversationId: string, params: { cursor?: string; limit?: number; clientRequestId?: string } = {}): CursorPager<ConversationMessageV1> {
     return new CursorPager(async (cursor) => {
       const res = await this.http.get<{ items: ConversationMessageV1[]; nextCursor: string | null; hasMore: boolean }>(
         `/conversations/${conversationId}/messages`,

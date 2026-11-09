@@ -31,6 +31,7 @@ export interface ServiceWindowStatus {
   stateVersion?: number;
   assignedUserId?: string | null;
   aiPaused?: boolean;
+  hasUnresolvedDelivery?: boolean;
 }
 
 export class MetaInboxStore {
@@ -195,7 +196,9 @@ export class MetaInboxStore {
          ia_paused AND (ia_resume_at IS NULL OR ia_resume_at > NOW()) AS ia_paused,
          service_window_expires_at,
          last_customer_message_at,
-         status
+         status,
+         EXISTS (SELECT 1 FROM conversation_send_claims s WHERE s.tenant_id = conversations.company_id
+           AND s.conversation_id = conversations.id AND s.state = 'unknown_delivery') AS has_unresolved_delivery
        FROM conversations
        WHERE company_id = $1 AND channel = 'whatsapp' AND external_conversation_id = $2`,
       [this.companyId, this.normalizePhone(chatId)]
@@ -216,6 +219,7 @@ export class MetaInboxStore {
         stateVersion: row.version,
         assignedUserId: row.assigned_user_id == null ? null : String(row.assigned_user_id),
         aiPaused: Boolean(row.ia_paused),
+        hasUnresolvedDelivery: row.has_unresolved_delivery,
       }),
       reason: hasActiveSession
         ? 'service_window_open'

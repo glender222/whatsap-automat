@@ -299,6 +299,14 @@ test('durable CAS sends one Graph POST per intent and reconciles authenticated r
   reply = (_request, response) => { response.end('{}'); };
   const missingAck = await send(url, id, 'missing-provider-ack', version + 2, accessA);
   assert.equal(missingAck.body.deliveryState, 'unknown_delivery');
+  const conversationUrl = `${url}/api/v1/conversations/${id}`;
+  const exactHistoryUrl = `${messageUrl}?limit=1&clientRequestId=missing-provider-ack`;
+  assert.equal((await (await read(conversationUrl)).json()).hasUnresolvedDelivery, true);
+  assert.equal((await (await read(exactHistoryUrl)).json()).items[0].deliveryState, 'unknown_delivery');
+  assert.equal((await read(`${messageUrl}?clientRequestId=invalid%20key`)).status, 422);
+  assert.equal((await fetch(exactHistoryUrl, { headers: { authorization: `Bearer ${accessB}` } })).status, 404);
+  const sessionStatus = new MetaInboxStore({ companyId: tenantA, db });
+  assert.equal((await sessionStatus.getServiceWindowStatus(recipient)).hasUnresolvedDelivery, true);
   const restarted = await api(t, sender());
   const sdk = new AutomatClient({ baseUrl: `${restarted}/api/v1`, token: accessA });
   assert.deepEqual(await sdk.conversations.sendText(String(id), 'Hola desde la bandeja', version + 2, 'missing-provider-ack'), missingAck.body);
@@ -327,9 +335,12 @@ test('durable CAS sends one Graph POST per intent and reconciles authenticated r
   assert.deepEqual(await sdk.conversations.sendText(String(id), 'Hola desde la bandeja', version + 2, 'missing-provider-ack'), {
     providerMessageId: recoveredId, accepted: true, rawStatus: 'delivered', deliveryState: 'delivered',
   });
-  const recoveredHistory = await (await read(`${messageUrl}?limit=1`)).json();
+  assert.equal((await (await read(conversationUrl)).json()).hasUnresolvedDelivery, false);
+  assert.equal((await sessionStatus.getServiceWindowStatus(recipient)).hasUnresolvedDelivery, false);
+  const recoveredHistory = await (await read(exactHistoryUrl)).json();
   assert.equal(recoveredHistory.items[0].deliveryState, 'delivered');
   assert.equal(recoveredHistory.items[0].clientRequestId, 'missing-provider-ack');
+  assert.deepEqual((await (await read(`${messageUrl}?clientRequestId=no-such-attempt`)).json()).items, []);
   assert.equal(JSON.stringify(recoveredHistory).includes(callback), false);
   assert.equal(graphRequests.length, 3);
 

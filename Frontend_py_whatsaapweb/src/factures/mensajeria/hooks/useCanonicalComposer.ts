@@ -1,19 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   deliveryLabel, messageProblem, readCanonicalHistory, resolveCanonicalChat, sendCanonicalText, takeConversationControl,
-  type CanonicalConversation, type InboxActor, type TextIntent,
+  type CanonicalConversation, type CanonicalMessage, type InboxActor, type TextIntent,
 } from '../services/canonicalConversationApi';
 
 type Pending = Omit<TextIntent, 'text'> & { phase: 'unconfirmed' | 'unknown' };
 type Snapshot = { scope: string; requestNumber: number; inboundId?: string; conversation: CanonicalConversation | null; unresolved: boolean };
 type Notice = { tone: 'status' | 'error' | 'unknown'; message: string };
 const storageKey = (scope: string, id: string) => 'inbox-pending-text/' + scope.split('/', 2).join('/') + '/' + id;
-const outcomeUncertain = 'La entrega sigue sin confirmar. Revisa el historial y concilia el envío en WhatsApp antes de continuar.';
+const outcomeUncertain = 'La entrega sigue sin confirmar. Actualiza el estado para comprobar si llegó una confirmación de WhatsApp.';
 
 function readPending(scope: string, id: string): Pending | null {
   try {
     const value = JSON.parse(sessionStorage.getItem(storageKey(scope, id)) ?? 'null') as Pending | null;
-    return value && typeof value.key === 'string' && typeof value.conversationId === 'string' &&
+    return value && typeof value.key === 'string' && /^[A-Za-z0-9_.:-]{1,128}$/.test(value.key) && typeof value.conversationId === 'string' &&
       Number.isSafeInteger(value.version) && ['unconfirmed', 'unknown'].includes(value.phase) ? value : null;
   } catch {
     return null;
@@ -78,14 +78,22 @@ export function useCanonicalComposer({
       .then(async (conversation) => {
         const history = conversation ? await readCanonicalHistory(conversation, request.signal) : [];
         if (request.signal.aborted) return;
-        const unresolved = history.some((item) => item.direction === 'outbound' && item.causedBy?.type === 'human' &&
+        const unresolved = conversation?.hasUnresolvedDelivery === true || history.some((item) =>
+          item.direction === 'outbound' && item.causedBy?.type === 'human' &&
           Boolean(item.clientRequestId) && item.deliveryState === 'unknown_delivery');
         setSnapshot({ scope, requestNumber, inboundId, conversation, unresolved });
         setLoadError(undefined);
         if (!conversation || locks.current.has(scope)) return;
+        if (conversation.hasUnresolvedDelivery === false && !unresolved) {
+          setServerUnresolved((previous) => previous[scope] ? { ...previous, [scope]: false } : previous);
+        }
         const previous = savedIntents.current.get(scope) ?? readPending(scope, conversation.id);
         if (!previous || previous.conversationId !== conversation.id) return;
-        const recorded = history.find((item) => item.direction === 'outbound' && item.clientRequestId === previous.key);
+        const matchesAttempt = (item: CanonicalMessage) => item.direction === 'outbound' &&
+          item.causedBy?.type === 'human' && item.clientRequestId === previous.key;
+        const recorded = history.find(matchesAttempt) ??
+          (await readCanonicalHistory(conversation, request.signal, previous.key)).find(matchesAttempt);
+        if (request.signal.aborted || locks.current.has(scope)) return;
         if (recorded && ['provider_accepted', 'dispatched', 'delivered', 'read', 'failed'].includes(recorded.deliveryState)) {
           const text = exactIntents.current.get(scope)?.text;
           if (text && recorded.deliveryState !== 'failed') acceptDraft(chatId, text);
