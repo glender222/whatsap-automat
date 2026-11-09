@@ -15,6 +15,7 @@ import {
   Settings,
   Shield,
   ShieldCheck,
+  ShoppingBag,
   Sparkles,
   Users,
   Workflow,
@@ -61,6 +62,7 @@ export const workspaceSections: WorkspaceSection[] = [
     links: [
       { to: '/dashboard/catalogos', label: 'Catálogos', icon: Layers3, adminOnly: true },
       { to: '/dashboard/inventario', label: 'Inventario', icon: Package },
+      { to: '/dashboard/pedidos', label: 'Pedidos', icon: ShoppingBag },
       { to: '/dashboard/pagos', label: 'Validación de pagos', icon: ReceiptText },
     ],
   },

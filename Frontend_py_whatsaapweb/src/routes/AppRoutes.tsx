@@ -22,6 +22,7 @@ const GeneralSettingsPage = lazy(() => import("../factures/setting/pages/General
 const PermissionsPage = lazy(() => import("../factures/permisos/pages/PermissionsPage"));
 const DashboardPage = lazy(() => import("../factures/dashboard/pages/DashboardPage"));
 const PaymentsPage = lazy(() => import("../factures/dashboard/pages/PaymentsPage"));
+const OrdersPage = lazy(() => import("../factures/dashboard/orders/OrdersPage"));
 const HandoffPage = lazy(() => import("../factures/dashboard/pages/HandoffPage"));
 const AiDomainsPage = lazy(() => import("../factures/agentes/pages/AiDomainsPage"));
 const AgentsPage = lazy(() => import("../factures/agentes/pages/AgentsPage"));
@@ -76,6 +77,7 @@ function AppRoutesInner() {
         <Route path="/dashboard">
           <Route index element={<PrivateRoute adminOnly><DashboardPage /></PrivateRoute>} />
           <Route path="pagos" element={<PaymentsPage />} />
+          <Route path="pedidos" element={<OrdersPage />} />
           <Route path="handoff" element={<HandoffPage />} />
           <Route path="ia/dominios" element={<PrivateRoute adminOnly><AiDomainsPage /></PrivateRoute>} />
           <Route path="ia-settings" element={<Navigate to="/dashboard/ia/dominios" replace />} />
