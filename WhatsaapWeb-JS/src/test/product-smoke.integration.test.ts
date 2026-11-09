@@ -8,6 +8,8 @@ import { AutomatClient } from '../../../packages/sdk/src';
 import config from '../config/index';
 import pool from '../config/database';
 import { auditLogger } from '../services/audit/AuditLogger';
+import { hitlApprovalService } from '../services/ai/broker';
+import { withTenantTransaction } from '../db/TenantScopedUoW';
 import { MetaAccountStore } from '../services/whatsapp/meta/MetaAccountStore';
 
 const base = process.env.PRODUCT_SMOKE_URL;
@@ -193,4 +195,41 @@ test('real API isolates two companies through auth, signed ingress, inbox, socke
   assert.equal(health.status, 200);
   const report = await health.json();
   assert.ok(report.checks.some((check: { code: string; status: string }) => check.code === 'DB-PG-001' && check.status === 'PASS'));
+
+  const approvals = '/api/v1/ai/approvals';
+  const station = { nombre: 'Operador QA', email: `${randomUUID()}@example.invalid`, password: randomUUID() };
+  const { employee } = await api('/api/auth/create-station', 200, owner.accessToken, station);
+  const stationSession = await api('/api/auth/login', 200, undefined, station);
+  assert.equal(stationSession.user.id, employee.id);
+  assert.equal(stationSession.user.companyId, owner.user.companyId);
+  const employeeToken = stationSession.accessToken;
+  await api('/api/v1/admin/health/diagnostics', 403, employeeToken);
+  const createApproval = (expiresInSeconds: number) => hitlApprovalService.createApprovalRequest({
+    tenantId: owner.user.companyId, runId: randomUUID(), toolName: 'test-review', risk: 'financial',
+    effectKey: randomUUID(), proposedActionHash: 'synthetic-action-hash', expiresInSeconds,
+    inputPayload: { lineItems: [{ description: 'QA only', api_key: 'fixture-secret' }] },
+  });
+  const [approval, expired] = await Promise.all([createApproval(60), createApproval(-1)]);
+  const decision = { decision: 'approved', expectedVersion: 1, decidedBy: other.user.id };
+  await api(approvals, 403, employeeToken);
+  assert.deepEqual(await api(approvals, 200, other.accessToken), []);
+  const pending = await api(approvals, 200, owner.accessToken);
+  assert.deepEqual(pending.map((item: { id: string }) => item.id), [approval.id]);
+  assert.deepEqual(pending[0].details.parametersRedacted.lineItems, [{ description: 'QA only', api_key: '[REDACTED]' }]);
+  const approvalPath = `${approvals}/${approval.id}/decision`;
+  await api(approvalPath, 403, employeeToken, decision);
+  await api(approvalPath, 404, other.accessToken, decision);
+  await api(approvalPath, 409, owner.accessToken, { ...decision, expectedVersion: 2 });
+  await api(`${approvals}/${expired.id}/decision`, 410, owner.accessToken, decision);
+  assert.equal((await hitlApprovalService.getApprovalById(owner.user.companyId, expired.id))?.status, 'pending');
+  const approved = await api(approvalPath, 200, owner.accessToken, decision);
+  assert.equal(approved.decidedBy, String(owner.user.id));
+  assert.equal(approved.status, 'approved');
+  await api(approvalPath, 409, owner.accessToken, decision);
+  const auditRows = await withTenantTransaction(owner.user.companyId, (client) => client.query(
+    `SELECT actor_user_id FROM operational_actions
+     WHERE company_id = $1 AND action_type = 'approval_decision' AND metadata_json->>'approvalId' = $2`,
+    [owner.user.companyId, approval.id]
+  ));
+  assert.deepEqual(auditRows.rows.map((row) => String(row.actor_user_id)), [String(owner.user.id)]);
 });

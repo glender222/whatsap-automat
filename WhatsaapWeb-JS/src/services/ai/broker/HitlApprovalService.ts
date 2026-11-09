@@ -1,9 +1,11 @@
+import { randomUUID } from 'node:crypto';
 import { TenantScopedUoW, tenantScopedUoW } from '../../../db/TenantScopedUoW';
 import {
   ApprovalRequestV1,
   ApprovalDecisionResultV1,
 } from '@whatsap-automat/contracts';
 import { emitToTenant } from '../../../sockets/socketEmitter';
+import { toPositiveInt } from '../../../middleware/jwtAuth';
 
 export class ApprovalNotFoundError extends Error {
   readonly code = 'APPROVAL_NOT_FOUND';
@@ -58,12 +60,12 @@ export class HitlApprovalService {
     expectedConversationVersion?: number;
     expiresInSeconds?: number;
   }): Promise<ApprovalRequestV1> {
-    const id = `appr_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    const id = `appr_${randomUUID()}`;
     const expiresAt = new Date(Date.now() + (params.expiresInSeconds ?? 86400) * 1000).toISOString();
 
     const redacted = this.redactSensitiveData(params.inputPayload);
 
-    return this.uow.run(params.tenantId, async (client) => {
+    const approval = await this.uow.run(params.tenantId, async (client) => {
       const res = await client.query(
         `INSERT INTO approval_requests (
           id, tenant_id, run_id, agent_graph_id, node_id, tool_name,
@@ -85,26 +87,20 @@ export class HitlApprovalService {
           JSON.stringify(params.inputPayload),
           JSON.stringify(redacted),
           params.conversationId || null,
-          params.expectedConversationVersion || null,
+          params.expectedConversationVersion ?? null,
           expiresAt,
         ]
       );
 
-      const row = res.rows[0];
-
-      try {
-        emitToTenant(params.tenantId, 'approval.created', {
-          approvalId: row.id,
-          toolName: row.tool_name,
-          risk: row.risk,
-          expiresAt: row.expires_at,
-        });
-      } catch {
-        // Socket emission failure is non-fatal
-      }
-
-      return this.mapRowToContract(row);
+      return this.mapRowToContract(res.rows[0]);
     });
+    emitToTenant(params.tenantId, 'approval.created', {
+      approvalId: approval.id,
+      toolName: params.toolName,
+      risk: approval.risk,
+      expiresAt: approval.expiresAt,
+    });
+    return approval;
   }
 
   async listPendingApprovals(
@@ -169,7 +165,7 @@ export class HitlApprovalService {
       throw new Error(`Invalid expectedVersion: ${params.expectedVersion}. Version must be positive integer.`);
     }
 
-    return this.uow.run(params.tenantId, async (client) => {
+    const result = await this.uow.run(params.tenantId, async (client) => {
       // CAS Atomic Update
       const updateRes = await client.query(
         `UPDATE approval_requests
@@ -180,6 +176,7 @@ export class HitlApprovalService {
              version = version + 1,
              updated_at = NOW()
          WHERE id = $4 AND tenant_id = $5 AND version = $6 AND status = 'pending'
+           AND expires_at > clock_timestamp()
          RETURNING *`,
         [
           params.decision,
@@ -194,7 +191,7 @@ export class HitlApprovalService {
       if (updateRes.rowCount === 0) {
         // Disambiguate failure reasons
         const checkRes = await client.query(
-          `SELECT id, status, version, expires_at FROM approval_requests
+          `SELECT id, status, version, expires_at <= clock_timestamp() AS expired FROM approval_requests
            WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
           [params.approvalId, params.tenantId]
         );
@@ -204,7 +201,7 @@ export class HitlApprovalService {
         }
 
         const current = checkRes.rows[0];
-        if (new Date(current.expires_at).getTime() < Date.now()) {
+        if (current.expired) {
           throw new ApprovalExpiredError(params.approvalId);
         }
 
@@ -221,68 +218,57 @@ export class HitlApprovalService {
 
       const row = updateRes.rows[0];
 
-      // Audit trail in operational_actions table if available
-      try {
-        await client.query(
-          `INSERT INTO operational_actions (
-            company_id, actor_user_id, action_type, status, description, metadata_json
-          ) VALUES ($1, $2, 'approval_decision', 'completed', $3, $4::jsonb)`,
-          [
-            params.tenantId,
-            Number(params.actorId) || 1,
-            `Supervisor decided approval request: ${params.decision}`,
-            JSON.stringify({
-              approvalId: row.id,
-              decision: params.decision,
-              reason: params.reason || null,
-              previousVersion: params.expectedVersion,
-              newVersion: Number(row.version),
-              toolName: row.tool_name,
-              risk: row.risk,
-              actorRole: params.actorRole,
-            }),
-          ]
-        );
-      } catch {
-        // Audit log table optional in mock/lite environments
-      }
-
-      try {
-        emitToTenant(params.tenantId, 'approval.decided', {
-          approvalId: row.id,
-          decision: row.status,
-          decidedBy: row.decided_by,
-          decidedAt: row.decided_at,
-          newVersion: Number(row.version),
-        });
-      } catch {
-        // Socket emission non-fatal
-      }
+      await client.query(
+        `INSERT INTO operational_actions (
+          company_id, actor_user_id, action_type, status, description, metadata_json
+        ) VALUES ($1, $2, 'approval_decision', 'completed', $3, $4::jsonb)`,
+        [
+          params.tenantId,
+          toPositiveInt(params.actorId),
+          `Supervisor decided approval request: ${params.decision}`,
+          JSON.stringify({
+            approvalId: row.id,
+            decision: params.decision,
+            reason: params.reason || null,
+            previousVersion: params.expectedVersion,
+            newVersion: Number(row.version),
+            toolName: row.tool_name,
+            risk: row.risk,
+            actorId: params.actorId,
+            actorRole: params.actorRole,
+          }),
+        ]
+      );
 
       return {
         approvalId: row.id,
-        status: row.status as any,
+        status: params.decision,
         decidedAt: new Date(row.decided_at).toISOString(),
         decidedBy: row.decided_by,
       };
     });
+    emitToTenant(params.tenantId, 'approval.decided', {
+      approvalId: result.approvalId,
+      decision: result.status,
+      decidedBy: result.decidedBy,
+      decidedAt: result.decidedAt,
+      newVersion: params.expectedVersion + 1,
+    });
+    return result;
   }
 
   private redactSensitiveData(input: Record<string, unknown>): Record<string, unknown> {
-    const sensitiveKeys = ['apiKey', 'password', 'token', 'secret', 'creditCard', 'cvv', 'auth'];
-    const redacted: Record<string, unknown> = {};
-
-    for (const [key, value] of Object.entries(input)) {
-      const lower = key.toLowerCase();
-      if (sensitiveKeys.some((s) => lower.includes(s.toLowerCase()))) {
-        redacted[key] = '[REDACTED]';
-      } else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-        redacted[key] = this.redactSensitiveData(value as Record<string, unknown>);
-      } else {
-        redacted[key] = value;
+    const sensitiveKey = /apikey|api_key|password|token|secret|creditcard|credit_card|cvv|auth/i;
+    const redactValue = (value: unknown): unknown => {
+      if (Array.isArray(value)) return value.map(redactValue);
+      if (value !== null && typeof value === 'object') {
+        return this.redactSensitiveData(value as Record<string, unknown>);
       }
-    }
-    return redacted;
+      return value;
+    };
+    return Object.fromEntries(Object.entries(input).map(([key, value]) => [
+      key, sensitiveKey.test(key) ? '[REDACTED]' : redactValue(value),
+    ]));
   }
 
   private mapRowToContract(row: any): ApprovalRequestV1 {
