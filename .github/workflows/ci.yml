@@ -76,7 +76,7 @@ jobs:
 
       - name: Autorización de herramientas, aprobaciones y marketplace
         working-directory: WhatsaapWeb-JS
-        run: node --import tsx --import ./src/test/fixtures/testEnv.ts --test src/test/ai-tool-routes.test.ts src/test/publication-gate.test.ts src/test/agent-eval-simulator.test.ts src/test/tool-broker.test.ts src/test/m2-ssrf-adversarial-challenge.test.ts src/test/m4-ssrf-cas-adversarial.test.ts src/test/rag-knowledge-base.test.ts src/test/m3-rag-adversarial-challenge.test.ts src/test/marketplace-registry.test.ts src/test/openapi-routes.test.ts src/test/workflows-ingress-rollback.test.ts
+        run: node --import tsx --import ./src/test/fixtures/testEnv.ts --test src/test/ai-tool-routes.test.ts src/test/publication-gate.test.ts src/test/agent-eval-simulator.test.ts src/test/tool-broker.test.ts src/test/m2-ssrf-adversarial-challenge.test.ts src/test/m4-ssrf-cas-adversarial.test.ts src/test/rag-knowledge-base.test.ts src/test/m3-adversarial-challenge.test.ts src/test/m3-rag-adversarial-challenge.test.ts src/test/marketplace-registry.test.ts src/test/openapi-routes.test.ts src/test/workflows-ingress-rollback.test.ts
 
   product-smoke:
     name: Flujo de producto con PostgreSQL y Socket.IO

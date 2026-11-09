@@ -540,14 +540,25 @@ describe('PR-F5-03 Adversarial Stress Verification: Publication Gate, Spec Hash 
 
         assert.equal(result.passed, true);
         assert.equal(result.scenarioId, 'scen_trace_test');
-        assert.ok(result.traceSteps.length >= 5, `Expected >= 5 trace steps, got ${result.traceSteps.length}`);
+        assert.deepEqual(result.traceSteps.map(({ nodeKind, status }) => [nodeKind, status]), [
+          ['agent', 'completed'],
+          ['condition', 'skipped'],
+          ['subgraph', 'skipped'],
+          ['agent', 'completed'],
+          ['tool', 'completed'],
+          ['end', 'completed'],
+        ]);
 
         // Verify sequential monotonic step indexing
         result.traceSteps.forEach((step, idx) => {
           assert.equal(step.step, idx + 1);
           assert.ok(step.nodeId);
           assert.ok(step.nodeKind);
-          assert.equal(step.status, 'completed');
+          if (step.status === 'skipped') {
+            assert.deepEqual(step.outputPayload, { behavior: 'traversal_only' });
+            assert.equal(step.costMicroUsd, 0);
+            assert.equal(step.tokensUsed, 0);
+          }
           assert.ok(step.durationMs >= 1);
           assert.ok(step.costMicroUsd >= 0);
           assert.ok(step.tokensUsed >= 0);
