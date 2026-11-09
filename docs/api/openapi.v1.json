@@ -301,6 +301,112 @@
         }
       }
     },
+    "/conversations/{id}/messages/attachments": {
+      "post": {
+        "summary": "Enviar un adjunto por WhatsApp Cloud",
+        "description": "El operador autenticado debe controlar la conversación y tener una ventana de atención vigente de 24 horas comprobada con mensajes entrantes de la cuenta de envío. La API registra el adjunto y su intento antes de enviarlo. La misma clave y el mismo archivo, nombre, tipo, pie, opción de documento, versión, conversación y operador devuelven el estado del intento existente. Cambiar esos datos con la misma clave produce un conflicto. Una entrega incierta bloquea nuevos envíos en la conversación hasta que se concilie con un webhook firmado.",
+        "operationId": "sendConversationAttachment",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,9}$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.:-]{1,128}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "file",
+                  "expectedConversationVersion"
+                ],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "Archivo con nombre UTF-8 y tipo MIME admitido. Límite de 5 MB para imágenes, 16 MB para audio y video listo, y 100 MB para documentos."
+                  },
+                  "message": {
+                    "type": "string",
+                    "maxLength": 1024,
+                    "description": "Pie opcional para imágenes, videos y documentos."
+                  },
+                  "forceDocument": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Solicita el envío como documento si WhatsApp admite el tipo MIME del archivo."
+                  },
+                  "expectedConversationVersion": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 2147483646
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Estado registrado del intento, incluido un rechazo o una entrega incierta. Consulta deliveryState.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SendMessageResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "503": {
+            "description": "Carga o procesamiento temporalmente indisponible antes del envío. Puedes reintentar con la misma clave.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/conversations/{id}/messages/{messageId}/attachments/{attachmentId}": {
       "get": {
         "summary": "Descargar un adjunto de WhatsApp Cloud",
