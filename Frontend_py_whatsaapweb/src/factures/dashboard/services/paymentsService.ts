@@ -58,6 +58,24 @@ function unwrap<T>(response: { data: { success: boolean; data: T } }): T {
 }
 
 export const paymentsService = {
+  async getVoucherFile(fileUrl: string, signal: AbortSignal): Promise<Blob> {
+    const apiBase = new URL(api.defaults.baseURL ?? '/api', window.location.origin);
+    const prefix = apiBase.pathname.replace(/\/api\/?$/, '').replace(/\/$/, '');
+    const stored = new URL(fileUrl, apiBase.origin);
+    const pathname = stored.pathname.startsWith(`${prefix}/`) ? stored.pathname.slice(prefix.length) : stored.pathname;
+    if (stored.origin !== apiBase.origin || stored.username || stored.password || stored.search || stored.hash ||
+        !/^\/(?:uploads\/payment-vouchers|api\/media)\/[^/]+$/.test(pathname) || /%(?:2f|5c)/i.test(pathname)) {
+      throw new Error('La ruta del comprobante no es válida.');
+    }
+
+    const { data } = await api.get<Blob>(`${apiBase.origin}${prefix}${pathname}`, { responseType: 'blob', signal });
+    const mimeType = data.type.split(';')[0];
+    if (!data.size || !/^(?:image\/(?:jpeg|png|webp|gif)|application\/pdf|video\/mp4)$/i.test(mimeType)) {
+      throw new Error('El archivo no tiene un formato de comprobante compatible.');
+    }
+    return data;
+  },
+
   async list(filters: PaymentListFilters = {}): Promise<PaymentVoucherPage> {
     const response = await api.get('/payments', {
       params: {

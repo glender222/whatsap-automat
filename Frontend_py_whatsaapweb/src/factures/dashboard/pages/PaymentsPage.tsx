@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { CheckCircle2, ExternalLink, FileText, Image as ImageIcon, Loader2, XCircle } from 'lucide-react';
 import {
@@ -58,31 +58,80 @@ function formatDate(value: string | null): string {
   }).format(new Date(value));
 }
 
-function renderThumb(row: PaymentProcessSummary) {
-  if (!row.fileUrl) return <span className="text-xs text-[#5B6F66]">Sin voucher</span>;
-  const isImage = row.mimeType?.startsWith('image/');
-  const Icon = isImage ? ImageIcon : FileText;
-  if (isImage) {
-    return (
-      <a
-        href={row.fileUrl}
-        target="_blank"
-        rel="noreferrer"
-        className="block h-12 w-12 overflow-hidden rounded-lg border border-[#D9E5DF] bg-[#F7FAF8]"
-      >
-        <img src={row.fileUrl} alt="Comprobante" className="h-full w-full object-cover" />
-      </a>
-    );
-  }
+function PaymentDialog({ titleId, onClose, wide, children }: {
+  titleId: string;
+  onClose: () => void;
+  wide?: boolean;
+  children: ReactNode;
+}) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    const trigger = document.activeElement;
+    dialog.showModal();
+    dialog.querySelector<HTMLElement>('[data-payment-initial-focus]')?.focus();
+    return () => {
+      dialog.close();
+      if (trigger instanceof HTMLElement && trigger.isConnected) trigger.focus();
+    };
+  }, []);
   return (
-    <a
-      href={row.fileUrl}
-      target="_blank"
-      rel="noreferrer"
-      className="flex h-12 w-12 items-center justify-center rounded-lg border border-[#D9E5DF] bg-[#F7FAF8] text-[#5B6F66] transition hover:bg-[#EEF4F1] hover:text-[#128C7E]"
+    <dialog
+      ref={dialogRef}
+      aria-labelledby={titleId}
+      onCancel={(event) => { event.preventDefault(); onClose(); }}
+      onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}
+      className={`fixed inset-0 m-auto max-h-[calc(100dvh_-_2rem)] w-[calc(100%_-_2rem)] overflow-y-auto rounded-2xl border-0 bg-white p-0 shadow-xl backdrop:bg-black/40 ${wide ? 'max-w-2xl' : 'max-w-md'}`}
     >
-      <Icon className="h-5 w-5" />
-    </a>
+      <div className="p-6">{children}</div>
+    </dialog>
+  );
+}
+
+function VoucherPreview({ fileUrl }: { fileUrl: string }) {
+  const [preview, setPreview] = useState<{ url: string; isImage: boolean } | 'error'>();
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let objectUrl: string | undefined;
+    paymentsService.getVoucherFile(fileUrl, controller.signal)
+      .then((blob) => {
+        if (controller.signal.aborted) return;
+        objectUrl = URL.createObjectURL(blob);
+        setPreview({ url: objectUrl, isImage: blob.type.startsWith('image/') });
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setPreview('error');
+      });
+    return () => {
+      controller.abort();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [attempt, fileUrl]);
+
+  return (
+    <section aria-label="Comprobante de pago" className="mt-4 space-y-2 rounded-xl border border-[#D9E5DF] p-4">
+      {!preview ? <p role="status" className="text-sm text-[#5B6F66]">Cargando comprobante…</p> :
+        preview === 'error' ? (
+          <div className="space-y-2">
+            <p role="alert" className="text-sm text-red-700">No se pudo abrir el comprobante.</p>
+            <button type="button" className="admin-button-secondary" onClick={() => {
+              setPreview(undefined);
+              setAttempt((value) => value + 1);
+            }}>Volver a intentar</button>
+          </div>
+        ) : (
+          <>
+            {preview.isImage && <img src={preview.url} alt="Comprobante de pago" className="mx-auto max-h-52 max-w-full rounded-lg object-contain" />}
+            <a href={preview.url} target="_blank" rel="noopener noreferrer" className="admin-button-secondary">
+              <ExternalLink className="h-4 w-4" aria-hidden="true" />
+              Abrir comprobante en otra pestaña
+            </a>
+          </>
+        )}
+    </section>
   );
 }
 
@@ -268,7 +317,14 @@ export default function PaymentsPage() {
                           {row.paymentMethod ? METHOD_LABEL[row.paymentMethod] : 'Metodo por definir'}
                         </div>
                       </td>
-                      <td className="px-4 py-3">{renderThumb(row)}</td>
+                      <td className="px-4 py-3">
+                        {row.fileUrl ? (
+                          <button type="button" onClick={() => setSelectedRow(row)} className="admin-button-secondary whitespace-nowrap text-xs">
+                            {row.mimeType?.startsWith('image/') ? <ImageIcon className="h-4 w-4" aria-hidden="true" /> : <FileText className="h-4 w-4" aria-hidden="true" />}
+                            Ver comprobante
+                          </button>
+                        ) : <span className="text-xs text-[#5B6F66]">Sin voucher</span>}
+                      </td>
                       <td className="px-4 py-3 text-xs text-[#5B6F66]">
                         {formatDate(row.uploadedAt || row.orderCreatedAt)}
                       </td>
@@ -351,15 +407,8 @@ export default function PaymentsPage() {
       </div>
 
       {rejecting && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-          onClick={() => setRejecting(null)}
-        >
-          <div
-            className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <h3 className="mb-2 text-lg font-bold text-[#10231C]">Rechazar comprobante</h3>
+        <PaymentDialog titleId="reject-payment-title" onClose={() => setRejecting(null)}>
+            <h3 id="reject-payment-title" className="mb-2 text-lg font-bold text-[#10231C]">Rechazar comprobante</h3>
             <p className="mb-4 text-sm text-[#5B6F66]">
               Indica el motivo del rechazo. El pedido seguira pendiente para coordinar otro comprobante o cancelarlo.
             </p>
@@ -367,9 +416,10 @@ export default function PaymentsPage() {
               value={rejecting.reason}
               onChange={(event) => setRejecting({ ...rejecting, reason: event.target.value })}
               rows={3}
+              aria-label="Motivo del rechazo"
               placeholder="Ej: Monto no coincide con el total del pedido."
               className="admin-textarea"
-              autoFocus
+              data-payment-initial-focus=""
             />
             <div className="mt-4 flex justify-end gap-2">
               <button
@@ -391,22 +441,14 @@ export default function PaymentsPage() {
                 Confirmar rechazo
               </button>
             </div>
-          </div>
-        </div>
+        </PaymentDialog>
       )}
 
       {selectedRow && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-          onClick={() => setSelectedRow(null)}
-        >
-          <div
-            className="w-full max-w-2xl rounded-2xl bg-white p-6 shadow-xl"
-            onClick={(event) => event.stopPropagation()}
-          >
+        <PaymentDialog titleId="payment-detail-title" onClose={() => setSelectedRow(null)} wide>
             <div className="mb-4 flex items-start justify-between gap-3">
               <div>
-                <h3 className="text-lg font-bold text-[#10231C]">
+                <h3 id="payment-detail-title" tabIndex={-1} data-payment-initial-focus="" className="text-lg font-bold text-[#10231C]">
                   {selectedRow.orderId ? `Pedido #${selectedRow.orderId}` : 'Comprobante sin pedido'}
                 </h3>
                 <p className="text-sm text-[#5B6F66]">
@@ -418,7 +460,9 @@ export default function PaymentsPage() {
               </span>
             </div>
 
-            <div className="rounded-xl border border-[#D9E5DF]">
+            {selectedRow.fileUrl && <VoucherPreview key={selectedRow.fileUrl} fileUrl={selectedRow.fileUrl} />}
+
+            <div className="mt-4 overflow-x-auto rounded-xl border border-[#D9E5DF]">
               <table className="w-full text-left text-sm">
                 <thead className="bg-[#F7FAF8] text-xs uppercase text-[#5B6F66]">
                   <tr>
@@ -480,8 +524,7 @@ export default function PaymentsPage() {
                 Cerrar
               </button>
             </div>
-          </div>
-        </div>
+        </PaymentDialog>
       )}
     </div>
   );
