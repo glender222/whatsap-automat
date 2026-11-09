@@ -119,3 +119,22 @@ test('a downstream provider 401 does not replay a mutation', async (t) => {
   await assert.rejects(api.post('/chats/7/messages', {}), AxiosError);
   assert.deepEqual(sent, ['/chats/7/messages']);
 });
+
+test('a protected download recognizes an expired JWT returned as a JSON blob', async (t) => {
+  useAuthFixture(t);
+  session('expired-access', 'active-refresh');
+  const file = new Blob(['report'], { type: 'text/csv' });
+  api.defaults.adapter = async (config) => {
+    if (config.url === '/auth/refresh') {
+      return response(config, 200, { success: true, data: { accessToken: 'fresh-access' } });
+    }
+    assert.equal(config.responseType, 'blob');
+    if (config.headers.get('Authorization') === 'Bearer expired-access') {
+      const body = new Blob(['{"code":"ACCESS_TOKEN_EXPIRED"}'], { type: 'application/json' });
+      throw new AxiosError('Expired session', undefined, config, undefined, response(config, 401, body));
+    }
+    assert.equal(config.headers.get('Authorization'), 'Bearer fresh-access');
+    return response(config, 200, file);
+  };
+  assert.equal((await api.get('/reports/operations/export', { responseType: 'blob' })).data, file);
+});

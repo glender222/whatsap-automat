@@ -73,14 +73,19 @@ api.interceptors.response.use(
   },
   async (error) => {
     const request = error?.config as SessionRequest | undefined;
-    const body = error?.response?.data;
-    const expiredAccess = body?.code === 'ACCESS_TOKEN_EXPIRED' ||
-      (body?.error === 'Token invalido o expirado' && body?.details === 'jwt expired');
-    if (error?.response?.status !== 401 || !expiredAccess ||
-        !request || request.authRetryGeneration !== undefined) throw error;
-
+    if (error?.response?.status !== 401 || !request || request.authRetryGeneration !== undefined) throw error;
     const sent = requestSessions.get(request);
     if (!sent) throw error;
+
+    const payload = error.response.data;
+    const body = payload instanceof Blob && payload.size <= 4096 &&
+      /^application\/(?:[\w.+-]+\+)?json(?:;|$)/i.test(payload.type)
+      ? await payload.text().then((value) => JSON.parse(value)).catch(() => null)
+      : payload;
+    const expiredAccess = body?.code === 'ACCESS_TOKEN_EXPIRED' ||
+      (body?.error === 'Token invalido o expirado' && body?.details === 'jwt expired');
+    if (!expiredAccess) throw error;
+
     const current = readSession();
     if (sent.generation !== current.generation) throw error;
     if (!current.refreshToken) {
