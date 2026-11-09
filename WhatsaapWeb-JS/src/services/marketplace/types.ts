@@ -1,12 +1,10 @@
 import {
   ExtensionManifest,
-  MarketplaceListing,
-  ExtensionRating,
-  MarketplaceSearchQuery,
 } from '@whatsap-automat/contracts';
 
 export interface RegisterExtensionOptions {
-  readonly manifest: ExtensionManifest;
+  readonly publisherTenantId: number;
+  readonly manifest: unknown;
   readonly tarballBuffer?: Buffer;
   readonly expectedSha256?: string;
   readonly tarballUrl?: string;
@@ -14,7 +12,6 @@ export interface RegisterExtensionOptions {
   readonly longDescription?: string;
   readonly categories?: string[];
   readonly tags?: string[];
-  readonly verified?: boolean;
 }
 
 export interface SubmitRatingOptions {

@@ -3,11 +3,38 @@ import {
   marketplaceSearchQuerySchema,
   extensionRatingScoreSchema,
 } from '@whatsap-automat/contracts';
+import { requireJwt } from '../middleware/jwtAuth';
+import { tenantContext } from '../middleware/tenantContext';
 import { MarketplaceRegistry } from '../services/marketplace/MarketplaceRegistry';
+
+function resolveActor(req: Request, res: Response) {
+  const context = req.tenantContext;
+  if (context?.userId) {
+    return { tenantId: context.tenantId, userId: context.userId, role: context.role };
+  }
+  res.status(403).json({
+    type: 'https://whatsap-automat.internal/errors/ACTOR_REQUIRED',
+    title: 'User Identity Required',
+    status: 403,
+  });
+  return null;
+}
+
+function readArchive(value: unknown): Buffer | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (typeof value !== 'string') throw new Error('tarballBase64 must be a base64 string.');
+  const archive = Buffer.from(value, 'base64');
+  const canonical = archive.toString('base64');
+  if (!archive.length || (value !== canonical && value !== canonical.replace(/=+$/, ''))) {
+    throw new Error('tarballBase64 must contain a valid base64 archive.');
+  }
+  return archive;
+}
 
 export function createMarketplaceRoutes(registry?: MarketplaceRegistry): Router {
   const router = Router();
   const service = registry || new MarketplaceRegistry();
+  const authenticatedTenant = [requireJwt, tenantContext({ allowSandbox: false })];
 
   // GET /api/v1/marketplace/extensions - Catalog search & listing
   router.get('/extensions', (req: Request, res: Response) => {
@@ -52,7 +79,16 @@ export function createMarketplaceRoutes(registry?: MarketplaceRegistry): Router 
   });
 
   // POST /api/v1/marketplace/extensions - Register / publish extension
-  router.post('/extensions', async (req: Request, res: Response) => {
+  router.post('/extensions', ...authenticatedTenant, async (req: Request, res: Response) => {
+    const actor = resolveActor(req, res);
+    if (!actor) return;
+    if (actor.role !== 'ADMIN') {
+      return res.status(403).json({
+        type: 'https://whatsap-automat.internal/errors/ADMIN_REQUIRED',
+        title: 'Administrator Role Required',
+        status: 403,
+      });
+    }
     try {
       const {
         manifest,
@@ -65,11 +101,10 @@ export function createMarketplaceRoutes(registry?: MarketplaceRegistry): Router 
         tags,
       } = req.body || {};
 
-      const tarballBuffer = tarballBase64 ? Buffer.from(tarballBase64, 'base64') : undefined;
-
       const registered = await service.registerExtension({
+        publisherTenantId: actor.tenantId,
         manifest,
-        tarballBuffer,
+        tarballBuffer: readArchive(tarballBase64),
         expectedSha256,
         tarballUrl,
         displayName,
@@ -95,18 +130,17 @@ export function createMarketplaceRoutes(registry?: MarketplaceRegistry): Router 
   });
 
   // POST /api/v1/marketplace/extensions/:id/rate - Submit rating
-  router.post('/extensions/:id/rate', (req: Request, res: Response) => {
+  router.post('/extensions/:id/rate', ...authenticatedTenant, (req: Request, res: Response) => {
+    const actor = resolveActor(req, res);
+    if (!actor) return;
     try {
       const { score, review } = req.body || {};
       const validatedScore = extensionRatingScoreSchema.parse(score);
 
-      const tenantId = (req as any).user?.company_id || (req as any).tenantId || req.headers['x-tenant-id'] || '1';
-      const userId = (req as any).user?.id || (req as any).userId || req.headers['x-user-id'] || 'agent_anon';
-
       const result = service.submitRating({
         extensionId: String(req.params.id),
-        tenantId: String(tenantId),
-        userId: String(userId),
+        tenantId: String(actor.tenantId),
+        userId: String(actor.userId),
         score: validatedScore,
         review,
       });
@@ -126,9 +160,12 @@ export function createMarketplaceRoutes(registry?: MarketplaceRegistry): Router 
     }
   });
 
-  // GET /api/v1/marketplace/extensions/:id/ratings - List ratings
-  router.get('/extensions/:id/ratings', (req: Request, res: Response) => {
-    const ratings = service.getRatings(String(req.params.id));
+  // GET /api/v1/marketplace/extensions/:id/ratings - List ratings for the authenticated tenant
+  router.get('/extensions/:id/ratings', ...authenticatedTenant, (req: Request, res: Response) => {
+    const actor = resolveActor(req, res);
+    if (!actor) return;
+    const ratings = service.getRatings(String(req.params.id), String(actor.tenantId));
+    res.set('Cache-Control', 'private, no-store');
     return res.json({
       success: true,
       data: ratings,
@@ -137,14 +174,20 @@ export function createMarketplaceRoutes(registry?: MarketplaceRegistry): Router 
 
   // POST /api/v1/marketplace/validate - Dry-run validation
   router.post('/validate', (req: Request, res: Response) => {
-    const { manifest, tarballBase64, expectedSha256 } = req.body || {};
-    const tarballBuffer = tarballBase64 ? Buffer.from(tarballBase64, 'base64') : undefined;
-
-    const report = service.validateManifest(manifest, tarballBuffer, expectedSha256);
-    return res.json({
-      success: report.valid,
-      data: report,
-    });
+    try {
+      const { manifest, tarballBase64, expectedSha256 } = req.body || {};
+      const report = service.validateManifest(manifest, readArchive(tarballBase64), expectedSha256);
+      return res.json({
+        success: report.valid,
+        data: report,
+      });
+    } catch {
+      return res.status(400).json({
+        type: 'https://whatsap-automat.internal/errors/INVALID_ARCHIVE',
+        title: 'Invalid Archive Input',
+        status: 400,
+      });
+    }
   });
 
   // GET /api/v1/marketplace/health - Health check

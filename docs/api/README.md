@@ -84,3 +84,18 @@ Consulte los archivos de especificación formal:
 | `GET` | `/api/v1/approvals` | Cola de aprobaciones pendientes | `Authorization` |
 | `POST` | `/api/v1/approvals/{id}/decision` | Decisión de aprobación (CAS) | `Authorization`, `Idempotency-Key` |
 | `GET` | `/api/v1/operations/executions` | Historial de soporte y reintentos | `Authorization` |
+
+## 4. Marketplace comunitario
+
+Las rutas usan el prefijo `/api/v1/marketplace`.
+
+| Método y ruta | Acceso | Resultado |
+|---|---|---|
+| `GET /extensions` | Público | Catálogo paginado y puntuaciones agregadas. |
+| `GET /extensions/{id}` | Público | Metadatos de una extensión publicada. |
+| `POST /validate` | Público | Validación de manifiesto y comprobación SHA-256 si se proporcionan los bytes y el hash. |
+| `POST /extensions` | Administrador autenticado | Registra o actualiza la extensión de su empresa. Si otra empresa ya registró el identificador o el nombre, devuelve `409`. |
+| `POST /extensions/{id}/rate` | Usuario autenticado | Crea o reemplaza la puntuación del usuario en su empresa. |
+| `GET /extensions/{id}/ratings` | Usuario autenticado | Reseñas y puntuaciones de su empresa. |
+
+El registro comienza vacío. Las publicaciones y reseñas residen en memoria del proceso y se pierden al reiniciar. Las publicaciones comunitarias aparecen sin verificar. Si el editor incluye una URL de descarga, debe alojar el archivo por separado en HTTPS. El servidor usa los bytes enviados para comprobar o calcular el hash del archivo y conserva los metadatos en el catálogo. La instalación de extensiones desde este catálogo requiere integración con el runtime.

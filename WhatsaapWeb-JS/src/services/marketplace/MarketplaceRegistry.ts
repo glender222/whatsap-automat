@@ -1,14 +1,11 @@
 import crypto from 'node:crypto';
-import type { Pool } from 'pg';
 import {
-  ExtensionManifest,
   extensionManifestSchema,
   MarketplaceListing,
   marketplaceListingSchema,
   ExtensionRating,
   extensionRatingSchema,
   MarketplaceSearchQuery,
-  FORBIDDEN_PERMISSION_SCOPES,
   validateMarketplacePermissions,
   validateTarballChecksum,
 } from '@whatsap-automat/contracts';
@@ -18,106 +15,15 @@ import {
   SubmitRatingOptions,
   ExtensionValidationReport,
 } from './types';
-import pool from '../../config/database';
+
+interface CatalogEntry {
+  readonly publisherTenantId: number;
+  listing: MarketplaceListing;
+}
 
 export class MarketplaceRegistry {
-  private readonly db: { query: (text: string | { text: string; values?: unknown[] }, values?: unknown[]) => Promise<any> };
-  private readonly listings = new Map<string, MarketplaceListing>();
+  private readonly listings = new Map<string, CatalogEntry>();
   private readonly ratings = new Map<string, ExtensionRating[]>();
-
-  constructor(customPool?: Pool | { query: (text: string | { text: string; values?: unknown[] }, values?: unknown[]) => Promise<any> }) {
-    this.db = customPool || (pool as unknown as Pool);
-    this.seedOfficialExtensions();
-  }
-
-  /**
-   * Pre-seeds community registry with official verified packages.
-   */
-  private seedOfficialExtensions(): void {
-    const nowIso = new Date().toISOString();
-
-    const officialPackages: Partial<MarketplaceListing>[] = [
-      {
-        id: 'ext_tiktok_channel',
-        extensionId: '@whatsap-automat/channel-tiktok',
-        name: '@whatsap-automat/channel-tiktok',
-        displayName: 'TikTok Business Messaging Connector',
-        version: '1.0.0',
-        type: 'channel',
-        description: 'Official TikTok Business Messaging omnichannel channel adapter for Whatsap-Automat',
-        license: 'MIT',
-        status: 'published',
-        verified: true,
-        categories: ['channels', 'social', 'messaging'],
-        tags: ['tiktok', 'omnichannel', 'official'],
-        tarballSha256: crypto.createHash('sha256').update('@whatsap-automat/channel-tiktok-1.0.0').digest('hex'),
-        permissions: ['channel:inbound', 'channel:send', 'webhook:receive'],
-        manifest: {
-          name: '@whatsap-automat/channel-tiktok',
-          version: '1.0.0',
-          type: 'channel',
-          entrypoint: 'dist/index.js',
-          permissions: ['channel:inbound', 'channel:send', 'webhook:receive'],
-          channel: {
-            kind: 'tiktok',
-            capabilities: ['text', 'image', 'video', 'interactive'],
-            webhookPath: '/api/v1/webhooks/tiktok',
-          },
-          description: 'Official TikTok Business Messaging connector',
-          license: 'MIT',
-          minRuntimeVersion: '^0.4.0',
-          metadata: {},
-        },
-        rating: { average: 5.0, count: 12 },
-        downloadsCount: 1540,
-        publishedAt: nowIso,
-        updatedAt: nowIso,
-      },
-      {
-        id: 'ext_line_channel',
-        extensionId: '@whatsap-automat/channel-line',
-        name: '@whatsap-automat/channel-line',
-        displayName: 'LINE Official Account Connector',
-        version: '1.0.0',
-        type: 'channel',
-        description: 'Official LINE Official Account omnichannel adapter with Reply & Push API dispatch',
-        license: 'MIT',
-        status: 'published',
-        verified: true,
-        categories: ['channels', 'social', 'asia'],
-        tags: ['line', 'messaging', 'official'],
-        tarballSha256: crypto.createHash('sha256').update('@whatsap-automat/channel-line-1.0.0').digest('hex'),
-        permissions: ['channel:inbound', 'channel:send', 'webhook:receive'],
-        manifest: {
-          name: '@whatsap-automat/channel-line',
-          version: '1.0.0',
-          type: 'channel',
-          entrypoint: 'dist/index.js',
-          permissions: ['channel:inbound', 'channel:send', 'webhook:receive'],
-          channel: {
-            kind: 'line',
-            capabilities: ['text', 'image', 'audio', 'video', 'document', 'interactive'],
-            webhookPath: '/api/v1/webhooks/line',
-          },
-          description: 'Official LINE Official Account connector',
-          license: 'MIT',
-          minRuntimeVersion: '^0.4.0',
-          metadata: {},
-        },
-        rating: { average: 4.9, count: 8 },
-        downloadsCount: 920,
-        publishedAt: nowIso,
-        updatedAt: nowIso,
-      },
-    ];
-
-    for (const pkg of officialPackages) {
-      const parsed = marketplaceListingSchema.safeParse(pkg);
-      if (parsed.success) {
-        this.listings.set(parsed.data.extensionId, parsed.data);
-      }
-    }
-  }
 
   /**
    * Validates manifest structure and checks SEC-009 forbidden scopes.
@@ -138,7 +44,9 @@ export class MarketplaceRegistry {
 
     // SEC-009 Forbidden Scope Checks
     if (Array.isArray(manifest.permissions)) {
-      const secCheck = validateMarketplacePermissions(manifest.permissions);
+      const secCheck = validateMarketplacePermissions(
+        manifest.permissions.map((permission) => permission.trim().toLowerCase())
+      );
       if (!secCheck.permitted) {
         for (const scope of secCheck.forbiddenScopes) {
           errors.push(`[SEC-009]: Forbidden permission scope "${scope}" cannot be requested by extensions.`);
@@ -181,18 +89,41 @@ export class MarketplaceRegistry {
     const manifest = validation.manifest;
     const nowIso = new Date().toISOString();
     const extensionId = manifest.id || manifest.name;
+    if ([extensionId, manifest.name].some((name) => name.startsWith('@whatsap-automat/'))) {
+      throw Object.assign(new Error('The official namespace is reserved.'), { statusCode: 403 });
+    }
 
     let computedSha256 = options.expectedSha256;
-    let sizeBytes = options.tarballBuffer ? options.tarballBuffer.length : undefined;
+    const sizeBytes = options.tarballBuffer?.length;
 
     if (options.tarballBuffer && !computedSha256) {
       computedSha256 = crypto.createHash('sha256').update(options.tarballBuffer).digest('hex');
     }
 
-    const existing = this.listings.get(extensionId);
+    const entry = this.listings.get(extensionId);
+    const extensionClaim = this.findEntry(extensionId);
+    const nameClaim = this.findEntry(manifest.name);
+    if (
+      (entry && entry.publisherTenantId !== options.publisherTenantId) ||
+      (entry && entry.listing.name !== manifest.name) ||
+      (extensionClaim && extensionClaim !== entry) ||
+      (nameClaim && nameClaim !== entry)
+    ) {
+      throw Object.assign(new Error('The extension ID or name is already registered.'), { statusCode: 409 });
+    }
 
+    let tarballUrl: string | undefined;
+    if (options.tarballUrl !== undefined) {
+      const url = new URL(options.tarballUrl);
+      if (url.protocol !== 'https:' || url.username || url.password) {
+        throw new Error('Extension archive URL must use HTTPS without embedded credentials.');
+      }
+      tarballUrl = url.href;
+    }
+
+    const existing = entry?.listing;
     const listing: MarketplaceListing = {
-      id: existing?.id || `ext_${crypto.randomUUID().slice(0, 8)}`,
+      id: existing?.id || `ext_${crypto.randomUUID()}`,
       extensionId,
       name: manifest.name,
       displayName: options.displayName || manifest.displayName || manifest.name,
@@ -205,8 +136,8 @@ export class MarketplaceRegistry {
       categories: options.categories || (manifest.metadata?.categories as string[]) || [],
       tags: options.tags || [],
       status: 'published',
-      verified: options.verified !== undefined ? options.verified : (existing?.verified ?? false),
-      tarballUrl: options.tarballUrl,
+      verified: false,
+      tarballUrl,
       tarballSha256: computedSha256,
       tarballSizeBytes: sizeBytes,
       manifest,
@@ -218,7 +149,7 @@ export class MarketplaceRegistry {
     };
 
     const validated = marketplaceListingSchema.parse(listing);
-    this.listings.set(extensionId, validated);
+    this.listings.set(extensionId, { publisherTenantId: options.publisherTenantId, listing: validated });
     return validated;
   }
 
@@ -226,7 +157,7 @@ export class MarketplaceRegistry {
    * Lists catalog extensions with filtering, searching, and pagination.
    */
   listExtensions(query: MarketplaceSearchQuery): { items: MarketplaceListing[]; total: number } {
-    let items = Array.from(this.listings.values());
+    let items = Array.from(this.listings.values(), (entry) => entry.listing);
 
     if (query.type) {
       items = items.filter((item) => item.type === query.type);
@@ -263,28 +194,27 @@ export class MarketplaceRegistry {
    * Retrieves single extension listing by extensionId or ID.
    */
   getExtension(idOrExtensionId: string): MarketplaceListing | null {
-    if (this.listings.has(idOrExtensionId)) {
-      return this.listings.get(idOrExtensionId)!;
-    }
-    for (const listing of this.listings.values()) {
-      if (listing.id === idOrExtensionId) {
-        return listing;
-      }
-    }
-    return null;
+    return this.findEntry(idOrExtensionId)?.listing ?? null;
+  }
+
+  private findEntry(id: string): CatalogEntry | undefined {
+    const direct = this.listings.get(id);
+    if (direct) return direct;
+    return Array.from(this.listings.values()).find(({ listing }) => listing.id === id || listing.name === id);
   }
 
   /**
    * Submits a rating (1-5 stars) and review for an extension.
    */
   submitRating(options: SubmitRatingOptions): { listing: MarketplaceListing; rating: ExtensionRating } {
-    const listing = this.getExtension(options.extensionId);
-    if (!listing) {
+    const entry = this.findEntry(options.extensionId);
+    if (!entry) {
       const err = new Error(`Extension ${options.extensionId} not found`);
       (err as any).statusCode = 404;
       throw err;
     }
 
+    const { listing } = entry;
     const rating: ExtensionRating = {
       id: crypto.randomUUID(),
       extensionId: listing.extensionId,
@@ -322,14 +252,16 @@ export class MarketplaceRegistry {
       updatedAt: new Date().toISOString(),
     };
 
-    this.listings.set(listing.extensionId, updatedListing);
+    entry.listing = updatedListing;
     return { listing: updatedListing, rating: validatedRating };
   }
 
   /**
    * Gets ratings and reviews for an extension.
    */
-  getRatings(extensionId: string): ExtensionRating[] {
-    return this.ratings.get(extensionId) || [];
+  getRatings(extensionId: string, tenantId: string): ExtensionRating[] {
+    const listing = this.getExtension(extensionId);
+    if (!listing) return [];
+    return (this.ratings.get(listing.extensionId) ?? []).filter((rating) => rating.tenantId === tenantId);
   }
 }
