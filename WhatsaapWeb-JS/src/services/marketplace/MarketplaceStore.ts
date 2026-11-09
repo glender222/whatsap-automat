@@ -110,7 +110,7 @@ export class MarketplaceStore {
 
   async listPublications(publisherTenantId: number, limit: number, offset: number) {
     return this.tenantWork.run(publisherTenantId, async (client) => {
-      const { rows } = await client.query<PublicationRow>(`
+      const { rows }: { rows: PublicationRow[] } = await client.query(`
         SELECT listing, withdrawn_at
         FROM marketplace_extensions
         WHERE publisher_tenant_id = $1 AND (withdrawn_at IS NOT NULL OR listing->>'status' = 'published')
@@ -122,7 +122,7 @@ export class MarketplaceStore {
 
   async withdrawPublication(publisherTenantId: number, actorId: number, alias: string): Promise<MarketplacePublication | null> {
     return this.tenantWork.run(publisherTenantId, async (client) => {
-      const { rows: [current] } = await client.query<PublicationRow>(`
+      const { rows: [current] }: { rows: PublicationRow[] } = await client.query(`
         SELECT extension.listing, extension.withdrawn_at
         FROM marketplace_extension_aliases AS aliases
         JOIN marketplace_extensions AS extension ON extension.id = aliases.listing_id
@@ -132,7 +132,7 @@ export class MarketplaceStore {
       `, [alias, publisherTenantId]);
       if (!current) return null;
       if (current.withdrawn_at) return publicationDto(current);
-      const { rows: [updated] } = await client.query<PublicationRow>(`
+      const { rows: [updated] }: { rows: PublicationRow[] } = await client.query(`
         UPDATE marketplace_extensions
         SET listing = jsonb_set(listing, '{status}', '"deprecated"'),
             withdrawn_at = clock_timestamp(), withdrawn_by = $3, updated_at = clock_timestamp()
