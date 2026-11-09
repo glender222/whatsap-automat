@@ -337,14 +337,34 @@ test('real API isolates two companies through auth, signed ingress, inbox, socke
 
   const payments = '/api/payments';
   await api(payments, 403, employeeToken);
-  const createOrder = (tenantId: number) => withTenantTransaction(tenantId, async (db) => {
+  const tenantId = owner.user.companyId;
+  const conversationId = Number(chats[0].conversationId);
+  const { rows: [customerConversation] } = await withTenantTransaction(tenantId, (db) => db.query(
+    'SELECT contact_id FROM conversations WHERE company_id = $1 AND id = $2', [tenantId, conversationId],
+  ));
+  const contactId = customerConversation.contact_id;
+  const createOrder = (companyId: number, stock: number, forCustomer = false) => withTenantTransaction(companyId, async (db) => {
     const { rows: [order] } = await db.query(
-      `INSERT INTO customer_orders (company_id, title, order_type, status)
-       VALUES ($1, 'Pedido QA', 'commercial', 'pending_approval') RETURNING id`, [tenantId]
+      `INSERT INTO customer_orders (company_id, contact_id, conversation_id, title, notes, order_type, status)
+       VALUES ($1, $2, $3, '=QA()', 'Nota <QA>', 'commercial', 'pending_approval') RETURNING id`,
+      [companyId, forCustomer ? contactId : null, forCustomer ? conversationId : null],
+    );
+    const { rows: [product] } = await db.query(
+      "INSERT INTO products (company_id, name, stock_available) VALUES ($1, 'Producto historial QA', $2) RETURNING id",
+      [companyId, stock],
+    );
+    await db.query(
+      `INSERT INTO order_items (company_id, order_id, product_id, commercial_item_id, product_name, quantity, status)
+       VALUES ($1, $2, $3, $3, 'Producto historial QA', 2, 'pending_approval')`,
+      [companyId, order.id, product.id],
     );
     return Number(order.id);
   });
-  const [order, foreignOrder] = await Promise.all([createOrder(owner.user.companyId), createOrder(other.user.companyId)]);
+  const [order, foreignOrder, unavailableOrder] = await Promise.all([
+    createOrder(tenantId, 2, true),
+    createOrder(other.user.companyId, 2),
+    createOrder(tenantId, 1),
+  ]);
   const image = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jQ8sAAAAASUVORK5CYII=', 'base64');
   async function uploadVoucher(orderId: number, amount: string, expectedStatus: number) {
     const body = new FormData();
@@ -373,13 +393,30 @@ test('real API isolates two companies through auth, signed ingress, inbox, socke
   assert.deepEqual(decisionA, decisionB);
   assert.equal(decisionA.status, 'validated');
   await api(`${payments}/${voucher.id}/reject`, 409, owner.accessToken, { rejectionReason: 'Decisión anterior' });
-  const orderAudit = await withTenantTransaction(owner.user.companyId, (db) => db.query(
-    `SELECT o.status, COUNT(a.id)::int AS decisions
-     FROM customer_orders o LEFT JOIN operational_actions a ON a.order_id = o.id AND a.action_type = 'payment_validated'
-     WHERE o.company_id = $1 AND o.id = $2 GROUP BY o.status`,
-    [owner.user.companyId, order]
+  const orderAudit = await withTenantTransaction(tenantId, (db) => db.query(
+    `SELECT o.status, o.confirmed_at IS NOT NULL AS confirmed, o.reserved_at IS NOT NULL AS reserved,
+            p.stock_available, p.stock_reserved,
+            (SELECT COUNT(*)::int FROM operational_actions WHERE company_id = o.company_id AND order_id = o.id AND action_type = 'payment_validated') AS decisions,
+            (SELECT COUNT(*)::int FROM stock_movements WHERE company_id = o.company_id AND order_id = o.id AND movement_type = 'reservation') AS movements
+     FROM customer_orders o JOIN order_items i ON i.company_id = o.company_id AND i.order_id = o.id
+     JOIN products p ON p.company_id = i.company_id AND p.id = i.commercial_item_id
+     WHERE o.company_id = $1 AND o.id = $2`,
+    [tenantId, order]
   ));
-  assert.deepEqual(orderAudit.rows, [{ status: 'confirmed', decisions: 1 }]);
+  assert.deepEqual(orderAudit.rows, [{ status: 'confirmed', confirmed: true, reserved: true, stock_available: 0, stock_reserved: 2, decisions: 1, movements: 1 }]);
+
+  const unreservable = await uploadVoucher(unavailableOrder, '18.50', 201);
+  await api(`${payments}/${unreservable.id}/validate`, 409, owner.accessToken, {});
+  assert.equal((await api(`${payments}/${unreservable.id}`, 200, owner.accessToken)).status, 'pending');
+  const rolledBack = await withTenantTransaction(tenantId, (db) => db.query(
+    `SELECT o.status, p.stock_available, p.stock_reserved,
+            NOT EXISTS (SELECT 1 FROM operational_actions WHERE company_id = o.company_id AND order_id = o.id) AS clean
+     FROM customer_orders o JOIN order_items i ON i.company_id = o.company_id AND i.order_id = o.id
+     JOIN products p ON p.company_id = i.company_id AND p.id = i.commercial_item_id
+     WHERE o.company_id = $1 AND o.id = $2`,
+    [tenantId, unavailableOrder]
+  ));
+  assert.deepEqual(rolledBack.rows, [{ status: 'pending_approval', stock_available: 1, stock_reserved: 0, clean: true }]);
 
   const mediaMessageId = `wamid.${randomUUID()}`;
   const document = JSON.stringify({ entry: [{ changes: [{ field: 'messages', value: {
@@ -397,38 +434,11 @@ test('real API isolates two companies through auth, signed ingress, inbox, socke
   assert.equal(fromMessage.chatId, chatId);
   assert.equal(fromMessage.mimeType, 'application/pdf');
 
-  const tenantId = owner.user.companyId;
-  const conversationId = Number(chats[0].conversationId);
-  const contactId = await withTenantTransaction(tenantId, async (db) => {
-    const { rows: [conversation] } = await db.query(
-      'SELECT contact_id FROM conversations WHERE company_id = $1 AND id = $2',
-      [tenantId, conversationId],
-    );
-    const contact = conversation.contact_id;
-    await db.query(
-      "UPDATE customer_orders SET contact_id = $1, conversation_id = $2, title = '=QA()', notes = 'Nota <QA>' WHERE company_id = $3 AND id = $4",
-      [contact, conversationId, tenantId, order],
-    );
-    const { rows: [product] } = await db.query(
-      "INSERT INTO products (company_id, name) VALUES ($1, 'Producto historial QA') RETURNING id", [tenantId],
-    );
-    await db.query(
-      `INSERT INTO order_items (company_id, order_id, product_id, product_name, quantity, status)
-       VALUES ($1, $2, $3, 'Producto historial QA', 2, 'confirmed')`,
-      [tenantId, order, product.id],
-    );
-    await db.query(
-      `INSERT INTO stock_movements (company_id, product_id, order_id, movement_type, quantity, stock_available_after, stock_reserved_after)
-       VALUES ($1, $2, $3, 'reservation', 2, 0, 2)`,
-      [tenantId, product.id, order],
-    );
-    await db.query(
-      `INSERT INTO operational_actions (company_id, contact_id, order_id, conversation_id, action_type, description)
-       VALUES ($1, $2, $3, $4, 'history_smoke', 'Acción registrada')`,
-      [tenantId, contact, order, conversationId],
-    );
-    return contact;
-  });
+  await withTenantTransaction(tenantId, (db) => db.query(
+    `INSERT INTO operational_actions (company_id, contact_id, order_id, conversation_id, action_type, description)
+     VALUES ($1, $2, $3, $4, 'history_smoke', 'Acción registrada')`,
+    [tenantId, contactId, order, conversationId],
+  ));
   const tagsRoot = '/api/tags';
   const tagsBefore = await api(tagsRoot, 200, owner.accessToken);
   const defaultTag = tagsBefore.find((tag: { is_default: boolean }) => tag.is_default);

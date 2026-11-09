@@ -1,6 +1,7 @@
 import { Pool } from 'pg';
 import { queryInTenantScope, withTenantTransaction } from '../../../../db/TenantScopedUoW';
 import { Queryable } from '../../../../shared/UnitOfWorkPort';
+import { OrderRepositoryPg } from '../../../orders';
 import {
   CreatePaymentVoucherInput,
   MarkFromMessageInput,
@@ -227,7 +228,7 @@ export class PaymentRepositoryPg {
               $8::varchar, $9::bigint, $10::varchar, $11::numeric, $12::varchar, $13::varchar,
               'pending', $14::bigint, $15::text, $16::jsonb
        WHERE ($2::bigint IS NULL OR EXISTS (
-         SELECT 1 FROM customer_orders o WHERE o.company_id = $1 AND o.id = $2
+         SELECT 1 FROM customer_orders o WHERE o.company_id = $1 AND o.id = $2 AND o.order_type = 'commercial'
            AND ($4::integer IS NULL OR o.contact_id IS NULL OR o.contact_id = $4)
            AND ($5::integer IS NULL OR o.conversation_id IS NULL OR o.conversation_id = $5)
        ))
@@ -313,6 +314,13 @@ export class PaymentRepositoryPg {
     rejectionReason?: string | null
   ): Promise<PaymentVoucher | null> {
     return this.inTenant(companyId, async (client) => {
+      const actor = await client.query(
+        `SELECT id FROM usuarios WHERE company_id = $1 AND id = $2 AND rol = 'ADMIN' AND activo FOR SHARE`,
+        [companyId, actorUserId],
+      );
+      if (!actor.rowCount) {
+        throw Object.assign(new Error('La decisión requiere un administrador activo'), { statusCode: 403, code: 'ADMIN_REQUIRED' });
+      }
       const { rows: [voucher] } = await client.query(
         `UPDATE payment_vouchers
          SET status = $3, validated_by = $4, validated_at = NOW(), rejection_reason = $5, updated_at = NOW()
@@ -329,12 +337,11 @@ export class PaymentRepositoryPg {
 
       let orderConfirmed = false;
       if (status === 'validated' && voucher.order_id) {
-        const order = await client.query(
-          `UPDATE customer_orders SET status = 'confirmed', updated_at = NOW()
-           WHERE company_id = $1 AND id = $2 AND status IN ('draft','quoted','pending_handoff','pending_approval')`,
-          [companyId, voucher.order_id]
+        const order = await new OrderRepositoryPg(client).updateStatus(
+          companyId, Number(voucher.order_id), 'confirmed', actorUserId,
         );
-        orderConfirmed = Boolean(order.rowCount);
+        if (!order) throw Object.assign(new Error('Pedido comercial no encontrado'), { statusCode: 404 });
+        orderConfirmed = true;
       }
       await client.query(
         `INSERT INTO operational_actions (
