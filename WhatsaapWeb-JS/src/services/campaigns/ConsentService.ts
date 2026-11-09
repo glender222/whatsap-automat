@@ -157,19 +157,23 @@ export class ConsentService {
   ): Promise<ConsentVerificationResultV1> {
     const normDest = destination.trim().toLowerCase();
     if (!normDest) throw new CampaignRequestError(400, 'INVALID_DESTINATION', 'El destinatario es obligatorio.');
+    const alternateDest = channel === 'whatsapp-cloud' && /^\+?\d+$/.test(normDest)
+      ? normDest.startsWith('+') ? normDest.slice(1) : '+' + normDest
+      : normDest;
     consentPurposeSchema.parse(purpose);
     const records: Array<{ id: string; status: ConsentStatus }> = this.uow
       ? await this.uow.run(tenantId, async (client) => {
           const result = await client.query(
             `SELECT id, status FROM consent_records
-             WHERE tenant_id = $1 AND channel_type = $2 AND LOWER(destination) = $3
+             WHERE tenant_id = $1 AND channel_type = $2 AND LOWER(destination) IN ($3, $5)
                AND purpose IN ($4, 'all')
              ORDER BY CASE WHEN purpose = $4 THEN 0 ELSE 1 END, updated_at DESC`,
-            [tenantId, channel, normDest, purpose]
+            [tenantId, channel, normDest, purpose, alternateDest]
           );
           return result.rows;
         })
-      : ['all', purpose].map((scope) => this.memoryLedger.get(this.memoryKey(tenantId, channel, normDest, scope)))
+      : ['all', purpose].flatMap((scope) => [normDest, alternateDest].map((address) =>
+          this.memoryLedger.get(this.memoryKey(tenantId, channel, address, scope))))
           .filter((record): record is ConsentRecordV1 => Boolean(record));
 
     const suppression = records.find(({ status }) => status === 'suppressed' || status === 'opted_out');

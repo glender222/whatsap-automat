@@ -33,6 +33,12 @@ function resolveTenantId(req: Request): number {
   return Number(id);
 }
 
+function requireCampaignAdmin(req: Request): void {
+  if (req.tenantContext?.role?.toUpperCase() !== 'ADMIN') {
+    throw new CampaignRequestError(403, 'CAMPAIGN_ADMIN_REQUIRED', 'La operación requiere permisos de administración.');
+  }
+}
+
 function respondError(res: Response, error: unknown) {
   if (error instanceof CampaignRequestError) {
     return res.status(error.statusCode).json({ success: false, error: error.code, message: error.message });
@@ -102,6 +108,7 @@ export function createCampaignRoutes(options: CampaignRoutesOptions = {}): Route
   router.post('/:id/dispatch', requireJwt, tenantContext(), async (req: Request, res: Response) => {
     try {
       const tenantId = resolveTenantId(req);
+      requireCampaignAdmin(req);
       const campaignId = String(req.params.id);
       const campaign = await dispatcher.executeCampaign(tenantId, campaignId, req.body?.recipients);
       res.status(200).json({ success: true, data: campaign });
@@ -137,6 +144,7 @@ export function createConsentRoutes(options: CampaignRoutesOptions = {}): Router
   router.post('/', requireJwt, tenantContext(), async (req: Request, res: Response) => {
     try {
       const tenantId = resolveTenantId(req);
+      requireCampaignAdmin(req);
       const parsed = recordConsentInputV1Schema.parse(req.body);
       const record = await consent.recordConsent(tenantId, parsed);
       res.status(201).json({ success: true, data: record });
@@ -179,6 +187,7 @@ export function createConsentRoutes(options: CampaignRoutesOptions = {}): Router
   router.post('/right-to-be-forgotten', requireJwt, tenantContext(), async (req: Request, res: Response) => {
     try {
       const tenantId = resolveTenantId(req);
+      requireCampaignAdmin(req);
       const parsed = rightToBeForgottenCommandV1Schema.parse(req.body);
       const result = await consent.executeRightToBeForgotten(tenantId, parsed.customerId, parsed.destination);
       res.status(200).json({ success: true, data: result });

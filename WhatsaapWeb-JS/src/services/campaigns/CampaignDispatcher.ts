@@ -10,12 +10,14 @@ import { TenantScopedUoW, tenantScopedUoW } from '../../db/TenantScopedUoW';
 import { ConsentService, consentService } from './ConsentService';
 import { SegmentationService, segmentationService, RecipientRecord } from './SegmentationService';
 import { CampaignRequestError } from './CampaignRequestError';
+import { defaultWhatsAppCampaignLanguage, WhatsAppCampaignTransport } from './WhatsAppCampaignTransport';
 
 export interface DispatcherOptions {
   readonly skipPacingDelay?: boolean; // For deterministic unit tests
   readonly channelAdapters?: Map<string, ChannelAdapterV1>;
   readonly eventEmitter?: (event: string, payload: unknown) => void;
   readonly mockServiceWindowExpired?: (destination: string) => boolean;
+  readonly whatsappTransport?: WhatsAppCampaignTransport;
 }
 
 export class CampaignDispatcher {
@@ -289,13 +291,18 @@ export class CampaignDispatcher {
     }
 
     const adapter = this.channelAdapters.get(campaign.channel);
-    if (!adapter) {
+    const whatsapp = this.uow && !adapter && campaign.channel === 'whatsapp-cloud'
+      ? this.options?.whatsappTransport
+      : undefined;
+    let send = adapter?.send.bind(adapter);
+    let whatsappAccountId: string | undefined;
+    if (!send && !whatsapp) {
       throw new CampaignRequestError(409, 'CAMPAIGN_CHANNEL_UNAVAILABLE', 'El canal todavía no tiene un transporte de campañas operativo.');
     }
     if (this.uow && recipientsOverride !== undefined) {
       throw new CampaignRequestError(400, 'CAMPAIGN_RECIPIENT_OVERRIDE', 'Selecciona la audiencia mediante un segmento de esta empresa.');
     }
-    if (this.uow && !campaign.connectionId) {
+    if (this.uow && !whatsapp && !campaign.connectionId) {
       throw new CampaignRequestError(409, 'CAMPAIGN_CONNECTION_REQUIRED', 'La campaña requiere una conexión de canal.');
     }
     if (!campaign.templateId && !campaign.contentBody?.trim()) {
@@ -306,7 +313,8 @@ export class CampaignDispatcher {
     if (recipients.length === 0 && campaign.segmentId) {
       recipients = await this.segments.resolveRecipients(tenantId, campaign.segmentId, 1001, 0, campaign.channel);
     }
-    recipients = [...new Map(recipients.map((recipient) => [recipient.destination, recipient])).values()];
+    const destinationKey = (destination: string) => whatsapp ? destination.trim().replace(/^\+/, '') : destination;
+    recipients = [...new Map(recipients.map((recipient) => [destinationKey(recipient.destination), recipient])).values()];
     if (recipients.length > 1000) {
       throw new CampaignRequestError(409, 'CAMPAIGN_AUDIENCE_LIMIT', 'El segmento supera el límite de 1000 destinatarios.');
     }
@@ -315,9 +323,15 @@ export class CampaignDispatcher {
     if (recipients.length === 0 && existingDeliveries.length === 0) {
       throw new CampaignRequestError(409, 'CAMPAIGN_AUDIENCE_EMPTY', 'El segmento no tiene destinatarios aptos.');
     }
-    const existingByDest = new Map(existingDeliveries.map((delivery) => [delivery.destination, delivery]));
+    const existingByDest = new Map(existingDeliveries.map((delivery) => [destinationKey(delivery.destination), delivery]));
     if (this.uow) {
       await this.uow.run(tenantId, async (client) => {
+        if (whatsapp) {
+          const selected = await whatsapp.resolveConnection(client, tenantId, campaign.connectionId);
+          campaign.connectionId = selected.id;
+          whatsappAccountId = selected.accountId;
+          send = (command) => whatsapp.send(command, selected.accountId);
+        }
         const connection = await client.query(
           `SELECT account_id FROM channel_connections
            WHERE tenant_id = $1 AND id = $2 AND channel = $3 AND status = 'active' FOR SHARE`,
@@ -327,7 +341,10 @@ export class CampaignDispatcher {
           throw new CampaignRequestError(409, 'CAMPAIGN_CONNECTION_UNAVAILABLE', 'La conexión de la campaña no está activa.');
         }
         if (campaign.channel === 'whatsapp-cloud' && campaign.templateId) {
-          const language = campaign.templateVariables.languageCode || 'es_CO';
+          const language = campaign.templateVariables.languageCode ?? defaultWhatsAppCampaignLanguage;
+          if (typeof language !== 'string' || !language.trim()) {
+            throw new CampaignRequestError(409, 'CAMPAIGN_TEMPLATE_LANGUAGE_INVALID', 'El idioma de la plantilla no es válido.');
+          }
           const template = await client.query(
             `SELECT 1 FROM whatsapp_message_templates template
              JOIN whatsapp_business_accounts account
@@ -343,19 +360,22 @@ export class CampaignDispatcher {
           }
         }
         const claim = await client.query(
-          `UPDATE campaigns SET status = 'dispatching', started_at = COALESCE(started_at, NOW()), updated_at = NOW()
+          `UPDATE campaigns SET status = 'dispatching', started_at = COALESCE(started_at, NOW()), connection_id = $4, updated_at = NOW()
            WHERE tenant_id = $1 AND id = $2 AND status = $3 RETURNING id`,
-          [tenantId, campaignId, campaign.status],
+          [tenantId, campaignId, campaign.status, campaign.connectionId],
         );
         if (!claim.rows.length) throw new CampaignRequestError(409, 'CAMPAIGN_ALREADY_CLAIMED', 'La campaña cambió durante el despacho.');
       });
+    }
+    if (!send) {
+      throw new CampaignRequestError(409, 'CAMPAIGN_CHANNEL_UNAVAILABLE', 'El canal no tiene un transporte de campañas operativo.');
     }
 
     campaign.status = 'dispatching';
     campaign.startedAt = campaign.startedAt || new Date().toISOString();
     campaign.completedAt = null;
     campaign.pauseReason = null;
-    campaign.statsTotal = new Set([...existingByDest.keys(), ...recipients.map(({ destination }) => destination)]).size;
+    campaign.statsTotal = new Set([...existingByDest.keys(), ...recipients.map(({ destination }) => destinationKey(destination))]).size;
 
     // Recalculate baseline stats from existing deliveries
     let statsDispatched = 0;
@@ -405,12 +425,13 @@ export class CampaignDispatcher {
 
     for (let i = 0; i < recipients.length; i++) {
       const recipient = recipients[i];
-      const existing = existingByDest.get(recipient.destination);
+      const key = destinationKey(recipient.destination);
+      const existing = existingByDest.get(key);
       // A pending delivery may already have reached the provider before an interruption.
       if (existing) continue;
 
       const deliveryId = `del_${crypto.randomUUID()}`;
-      const idempotencyKey = crypto.createHash('sha256').update(campaign.id + ':' + recipient.destination).digest('hex');
+      const idempotencyKey = crypto.createHash('sha256').update(campaign.id + ':' + key).digest('hex');
 
       // Circuit Breaker check before proceeding
       if (evaluateCircuitBreaker()) {
@@ -452,7 +473,7 @@ export class CampaignDispatcher {
       // 2. WhatsApp 24-Hour Customer Care Window Check
       if (campaign.channel === 'whatsapp-cloud') {
         const isWindowExpired = this.uow
-          ? !await this.hasOpenWhatsAppWindow(tenantId, recipient.destination)
+          ? !campaign.templateId && !await this.hasOpenWhatsAppWindow(tenantId, key, whatsappAccountId)
           : (this.options?.mockServiceWindowExpired?.(recipient.destination) ?? false);
 
         // If window is closed and no approved Meta template is used, block
@@ -499,7 +520,7 @@ export class CampaignDispatcher {
       };
       await this.saveDelivery(tenantId, delivery);
       try {
-        const result = await adapter.send({
+        const result = await send({
           schemaVersion: 1,
           tenantId: String(tenantId),
           connectionId: campaign.connectionId || 'default',
@@ -572,13 +593,20 @@ export class CampaignDispatcher {
     return campaign;
   }
 
-  private async hasOpenWhatsAppWindow(tenantId: number, destination: string): Promise<boolean> {
+  private async hasOpenWhatsAppWindow(tenantId: number, destination: string, phoneNumberId?: string): Promise<boolean> {
     if (!this.uow) return false;
     return this.uow.run(tenantId, async (client) => {
       const result = await client.query(
-        `SELECT 1 FROM conversations WHERE company_id = $1 AND channel = 'whatsapp'
-          AND external_conversation_id = $2 AND service_window_expires_at > NOW() LIMIT 1`,
-        [tenantId, destination],
+        `SELECT 1 FROM conversations conversation WHERE company_id = $1 AND channel = 'whatsapp'
+          AND external_conversation_id = $2 AND service_window_expires_at > NOW()
+          AND ($3::text IS NULL OR EXISTS (
+            SELECT 1 FROM messages message
+            WHERE message.company_id = $1 AND message.conversation_id = conversation.id
+              AND message.direction = 'inbound' AND message.provider = 'meta-cloud'
+              AND message.metadata_json #>> '{metadata,phone_number_id}' = $3
+              AND message.occurred_at BETWEEN NOW() - INTERVAL '24 hours' AND NOW()
+          )) LIMIT 1`,
+        [tenantId, destination, phoneNumberId ?? null],
       );
       return Boolean(result.rows.length);
     });
@@ -642,4 +670,6 @@ export class CampaignDispatcher {
   }
 }
 
-export const campaignDispatcher = new CampaignDispatcher();
+export const campaignDispatcher = new CampaignDispatcher(
+  tenantScopedUoW, consentService, segmentationService, { whatsappTransport: new WhatsAppCampaignTransport() },
+);
