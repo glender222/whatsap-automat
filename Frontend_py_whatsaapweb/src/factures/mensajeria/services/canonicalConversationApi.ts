@@ -27,14 +27,27 @@ export interface CanonicalMessage {
   causedBy?: { type: string };
 }
 
-export interface TextIntent {
+interface SendIntent {
   conversationId: string;
   key: string;
   version: number;
+}
+
+export interface TextIntent extends SendIntent {
   text: string;
 }
 
-export type TextOutcome = { kind: 'accepted' | 'failed' | 'unknown'; deliveryState: string };
+interface AttachmentDraft {
+  file: File;
+  forceDocument: boolean;
+}
+
+export interface AttachmentIntent extends SendIntent, AttachmentDraft {
+  caption: string;
+}
+
+type SendReceipt = { providerMessageId: string | null; accepted: boolean; deliveryState: string };
+type SendOutcome = { kind: 'accepted' | 'failed' | 'unknown'; deliveryState: string };
 type MessageProblem = { reason: string; message: string; uncertain: boolean };
 
 const endpoint = (id: string) => `/v1/conversations/${encodeURIComponent(id)}`;
@@ -93,18 +106,32 @@ export async function readCanonicalHistory(conversation: CanonicalConversation, 
   return data.items;
 }
 
-export async function sendCanonicalText(intent: TextIntent): Promise<TextOutcome> {
-  const { data, status } = await api.post<{
-    providerMessageId: string | null; accepted: boolean; deliveryState: string;
-  }>(endpoint(intent.conversationId) + '/messages', {
+export async function sendCanonicalText(intent: TextIntent): Promise<SendOutcome> {
+  const { data, status } = await api.post<SendReceipt>(endpoint(intent.conversationId) + '/messages', {
     expectedConversationVersion: intent.version,
     message: { kind: 'text', text: intent.text },
   }, { headers: { 'Idempotency-Key': intent.key } });
+  return sendOutcome(status, data);
+}
+
+export async function sendCanonicalAttachment(intent: AttachmentIntent): Promise<SendOutcome> {
+  const form = new FormData();
+  form.set('file', intent.file);
+  form.set('message', intent.caption);
+  form.set('forceDocument', String(intent.forceDocument));
+  form.set('expectedConversationVersion', String(intent.version));
+  const { data, status } = await api.post<SendReceipt>(endpoint(intent.conversationId) + '/messages/attachments', form, {
+    headers: { 'Content-Type': 'multipart/form-data', 'Idempotency-Key': intent.key },
+  });
+  return sendOutcome(status, data);
+}
+
+function sendOutcome(status: number, data: SendReceipt): SendOutcome {
   if (status === 202 && data?.accepted === true && typeof data.providerMessageId === 'string' && data.providerMessageId &&
       ['provider_accepted', 'dispatched', 'delivered', 'read'].includes(data.deliveryState)) {
     return { kind: 'accepted', deliveryState: data.deliveryState };
   }
-  if (status === 202 && data?.deliveryState === 'failed') {
+  if (status === 202 && data?.accepted === false && data.deliveryState === 'failed') {
     return { kind: 'failed', deliveryState: 'failed' };
   }
   return { kind: 'unknown', deliveryState: 'unknown_delivery' };
@@ -122,10 +149,21 @@ const rejectionMessages: Record<string, string> = {
   IDEMPOTENCY_KEY_CONFLICT: 'La clave pertenece a otro intento. Consulta el historial antes de continuar.',
 };
 
-export function messageProblem(cause: unknown): MessageProblem {
+export function messageProblem(cause: unknown, kind?: 'text' | 'attachment'): MessageProblem {
   if (isAxiosError(cause)) {
     const { status, data } = cause.response ?? {};
     const reason = typeof data?.metadata?.reasonCode === 'string' ? data.metadata.reasonCode : '';
+    if (kind === 'attachment' && (status === 413 || status === 415 || status === 422)) {
+      let message = 'WhatsApp no admite este adjunto. Revisa su formato y el pie antes de volver a intentar.';
+      if (status === 413 || reason === 'ATTACHMENT_SIZE_INVALID') {
+        message = 'El archivo está vacío o supera el límite de WhatsApp. Elige un archivo más pequeño y vuelve a intentar.';
+      } else if (reason === 'ATTACHMENT_CAPTION_UNSUPPORTED') {
+        message = 'Los audios no admiten pie. Retíralo y vuelve a enviar el audio.';
+      } else if (reason === 'ATTACHMENT_FILENAME_INVALID') {
+        message = 'El nombre del archivo no es válido. Cámbialo y vuelve a adjuntarlo.';
+      }
+      return { reason, uncertain: false, message };
+    }
     if (status && [400, 401, 403, 404, 409, 422, 429].includes(status)) {
       return { reason, uncertain: false, message: rejectionMessages[reason] ??
         (status === 409 ? 'La versión de la conversación cambió. Actualiza el estado y revisa la asignación.'

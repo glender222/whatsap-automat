@@ -15,22 +15,22 @@ import EmojiPicker from '../extras/EmojiPicker';
 import FilePreviewCard from './FilePreviewCard';
 import QuickReplies from './QuickReplies'; // ✅ NUEVO: Respuestas rápidas
 import { useFileUpload } from '../../hooks/useFileUpload';
-import type { RefObject } from 'react';
+import type { CanonicalComposer } from '../../hooks/useCanonicalComposer';
+import type { WhatsAppMessage } from '../../../../shared/types/wsp';
+import type { Dispatch, RefObject, SetStateAction } from 'react';
 
 interface MessageInputBarProps {
   message: string;
-  setMessage: (msg: string) => void;
+  setMessage: Dispatch<SetStateAction<string>>;
   selectedChat: string | null;
   handleSendMessage: () => Promise<void> | void; // Solo para texto puro
-  canSendText: boolean;
-  canSendFile: boolean;
-  textSending: boolean;
+  composer: CanonicalComposer;
   inputRef: RefObject<HTMLTextAreaElement | null>;
   emojiPickerOpen: boolean;
   setEmojiPickerOpen: React.Dispatch<React.SetStateAction<boolean>>;
   emojiPickerRef: RefObject<HTMLDivElement | null>;
   handleEmojiSelect: (emoji: string) => void;
-  onOptimisticMessage?: (message: any) => void; // ✅ NUEVO: Callback para agregar mensaje optimista
+  onOptimisticMessage?: (message: WhatsAppMessage) => void;
   onMessageSent?: (tempId: string, realId: string) => void; // ✅ NUEVO: Callback cuando se confirma el envío
   onMessageError?: (tempId: string) => void; // ✅ NUEVO: Callback cuando falla el envío
 }
@@ -40,9 +40,7 @@ const MessageInputBar: React.FC<MessageInputBarProps> = ({
   setMessage,
   selectedChat,
   handleSendMessage,
-  canSendText,
-  canSendFile,
-  textSending,
+  composer,
   inputRef,
   emojiPickerOpen,
   setEmojiPickerOpen,
@@ -52,8 +50,11 @@ const MessageInputBar: React.FC<MessageInputBarProps> = ({
   onMessageSent,
   onMessageError,
 }) => {
+  const selectedFile = composer.attachmentDraft;
+  const canSendFile = composer.canAttach;
+  const sending = composer.phase === 'send';
+  const attachmentLocked = composer.attachmentPending;
   const {
-    selectedFile,
     uploading,
     forceAsDocument,
     fileInputRef,
@@ -61,29 +62,36 @@ const MessageInputBar: React.FC<MessageInputBarProps> = ({
     handlePaste,
     handleDrop,
     clearFile,
-    uploadFile,
+    uploadLegacyFile,
     toggleSendAsDocument,
     selectFileAsDocument,
-  } = useFileUpload();
+  } = useFileUpload({
+    selectedFile, setAttachmentDraft: composer.setAttachmentDraft, selectAttachment: composer.selectAttachment,
+  });
 
   const [dragActive, setDragActive] = useState(false);
   const [isAttachMenuOpen, setAttachMenuOpen] = useState(false);
+  const [legacyError, setLegacyError] = useState('');
   const [isQuickRepliesOpen, setQuickRepliesOpen] = useState(false); // ✅ NUEVO: Estado para respuestas rápidas
   const attachMenuRef = useRef<HTMLDivElement>(null);
   const emojiPickerId = useId();
   const fileSendLock = useRef(false);
-  const canSubmit = !uploading && !textSending && Boolean(selectedFile ? canSendFile : canSendText && message.trim());
+  const canSubmit = !uploading && !sending && Boolean(selectedFile ? canSendFile : composer.canSend && message.trim());
 
   // ✅ NUEVO: Manejar envío combinado (archivo + caption)
   const handleCombinedSend = async () => {
     if (!selectedChat || !canSubmit) return;
 
     if (selectedFile) {
+      if (!composer.canSendLegacyAttachment) {
+        await composer.sendAttachment(message);
+        return;
+      }
       if (fileSendLock.current) return;
       fileSendLock.current = true;
-      // ✅ Crear mensaje optimista
+      setLegacyError('');
       const tempId = `temp-file-${Date.now()}`;
-      const optimisticMessage = {
+      const optimisticMessage: WhatsAppMessage = {
         id: tempId,
         body: message || selectedFile.file.name,
         fromMe: true,
@@ -95,23 +103,24 @@ const MessageInputBar: React.FC<MessageInputBarProps> = ({
         mimetype: selectedFile.file.type,
         mediaUrl: selectedFile.preview, // Preview local temporal
         isOptimistic: true,
-        uploadProgress: 0,
       };
 
       // ✅ Mostrar mensaje inmediatamente
       onOptimisticMessage?.(optimisticMessage);
 
-      // ✅ Limpiar input inmediatamente
       const caption = message;
-      setMessage('');
-
-      // ✅ ENVIAR ARCHIVO EN SEGUNDO PLANO
       try {
-        await uploadFile(
+        await uploadLegacyFile(
           selectedChat,
           caption,
-          (realMessageId: string) => onMessageSent?.(tempId, realMessageId),
-          () => onMessageError?.(tempId),
+          (realMessageId) => {
+            setMessage((current) => current === caption ? '' : current);
+            onMessageSent?.(tempId, realMessageId);
+          },
+          (error) => {
+            setLegacyError(error);
+            onMessageError?.(tempId);
+          },
         );
       } finally {
         fileSendLock.current = false;
@@ -158,6 +167,7 @@ const MessageInputBar: React.FC<MessageInputBarProps> = ({
   // Abrir diálogo solo para "Fotos y videos"
   const openMediaDialog = () => {
     if (fileInputRef.current) {
+      selectFileAsDocument(false);
       fileInputRef.current.accept =
         'image/*,video/mp4,video/mpeg,video/quicktime,video/x-msvideo,video/webm,audio/*';
       fileInputRef.current.click();
@@ -168,6 +178,7 @@ const MessageInputBar: React.FC<MessageInputBarProps> = ({
   // Abrir diálogo solo para "Documentos"
   const openDocumentDialog = () => {
     if (fileInputRef.current) {
+      selectFileAsDocument(false);
       fileInputRef.current.accept =
         '.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip,.rar';
       fileInputRef.current.click();
@@ -180,7 +191,7 @@ const MessageInputBar: React.FC<MessageInputBarProps> = ({
     if (fileInputRef.current) {
       fileInputRef.current.accept =
         'video/mp4,video/mpeg,video/quicktime,video/x-msvideo,video/webm,video/mov,video/avi,video/mkv';
-      selectFileAsDocument(); // ✅ Marcar que el próximo archivo debe ser documento
+      selectFileAsDocument(true);
       fileInputRef.current.click();
     }
     setAttachMenuOpen(false);
@@ -223,7 +234,7 @@ const MessageInputBar: React.FC<MessageInputBarProps> = ({
 
       {/* ✅ NUEVO: Panel de Respuestas Rápidas */}
       <QuickReplies
-        isOpen={isQuickRepliesOpen}
+        isOpen={isQuickRepliesOpen && !attachmentLocked}
         onClose={() => setQuickRepliesOpen(false)}
         onSelectReply={(text) => setMessage(text)}
       />
@@ -233,7 +244,8 @@ const MessageInputBar: React.FC<MessageInputBarProps> = ({
         <FilePreviewCard
           filePreview={selectedFile}
           forceAsDocument={forceAsDocument}
-          onRemove={clearFile}
+          disabled={uploading || sending || attachmentLocked}
+          onRemove={() => clearFile()}
           onToggleSendMode={toggleSendAsDocument}
         />
       )}
@@ -244,6 +256,7 @@ const MessageInputBar: React.FC<MessageInputBarProps> = ({
         type="file"
         accept="image/*,video/mp4,video/mpeg,video/quicktime,video/x-msvideo,video/webm,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.txt"
         onChange={handleFileSelect}
+        disabled={uploading || !canSendFile}
         className="hidden"
       />
 
@@ -252,7 +265,9 @@ const MessageInputBar: React.FC<MessageInputBarProps> = ({
         {/* ✅ MODIFICADO: Botón adjuntar archivo (AHORA CON MENÚ) */}
         <div className="relative" ref={attachMenuRef}>
           <button
-            onClick={handleAttachClick} // ✅ CAMBIADO
+            type="button"
+            onClick={handleAttachClick}
+            aria-label="Adjuntar"
             disabled={uploading || !canSendFile}
             className="p-2 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             title="Adjuntar"
@@ -261,7 +276,7 @@ const MessageInputBar: React.FC<MessageInputBarProps> = ({
           </button>
 
           {/* ✅ NUEVO: Menú desplegable */}
-          {isAttachMenuOpen && (
+          {isAttachMenuOpen && canSendFile && !uploading && (
             <div className="absolute bottom-full left-0 mb-2 w-60 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-100 dark:border-gray-700 z-20 py-1 overflow-hidden">
               <button
                 onClick={openMediaDialog}
@@ -291,7 +306,7 @@ const MessageInputBar: React.FC<MessageInputBarProps> = ({
         {/* ✅ NUEVO: Botón respuestas rápidas */}
         <button
           onClick={() => setQuickRepliesOpen((prev) => !prev)}
-          disabled={uploading || !selectedChat}
+          disabled={uploading || attachmentLocked || !selectedChat}
           className={`p-2 rounded-lg transition-colors ${isQuickRepliesOpen
             ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
             : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700'
@@ -311,7 +326,7 @@ const MessageInputBar: React.FC<MessageInputBarProps> = ({
             aria-expanded={emojiPickerOpen}
             aria-haspopup="dialog"
             aria-controls={emojiPickerOpen ? emojiPickerId : undefined}
-            disabled={uploading || !selectedChat}
+            disabled={uploading || attachmentLocked || !selectedChat}
           >
             <Smile size={20} />
           </button>
@@ -345,6 +360,7 @@ const MessageInputBar: React.FC<MessageInputBarProps> = ({
               target.style.height = Math.min(target.scrollHeight, 120) + 'px';
             }}
             disabled={uploading || !selectedChat}
+            readOnly={attachmentLocked && Boolean(selectedFile)}
           />
         </div>
 
@@ -359,7 +375,7 @@ const MessageInputBar: React.FC<MessageInputBarProps> = ({
             : 'bg-gray-200 dark:bg-gray-700 text-gray-400 dark:text-gray-500 cursor-not-allowed'
             }`}
         >
-          {uploading || textSending ? (
+          {uploading || sending ? (
             <Loader2 size={20} className="animate-spin" />
           ) : (
             <Send size={20} />
@@ -374,6 +390,7 @@ const MessageInputBar: React.FC<MessageInputBarProps> = ({
           Enviando archivo...
         </div>
       )}
+      {legacyError && <p role="alert" className="mt-2 text-sm text-red-700 dark:text-red-300">{legacyError}</p>}
 
     </div>
   );

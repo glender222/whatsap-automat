@@ -3,7 +3,8 @@ import { test, type TestContext } from 'node:test';
 import { AxiosError, type InternalAxiosRequestConfig } from 'axios';
 import { api } from '../shared/axios/http';
 import {
-  deliveryLabel, inboxActor, messageProblem, resolveCanonicalChat, sendCanonicalText, takeConversationControl,
+  deliveryLabel, inboxActor, messageProblem, readCanonicalHistory, resolveCanonicalChat, sendCanonicalAttachment,
+  sendCanonicalText, takeConversationControl,
 } from '../factures/mensajeria/services/canonicalConversationApi';
 
 Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: () => null } });
@@ -35,6 +36,18 @@ test('the Inbox resolves external chat identity before verifying its tenant-owne
   assert.deepEqual(await resolveCanonicalChat('51999999999', undefined, actor, signal), conversation);
   tenantId = '28';
   await assert.rejects(resolveCanonicalChat('51999999999', '321', actor, signal), /esta empresa/);
+});
+
+test('the legacy file route requires an explicitly identified Web.js chat', async (context) => {
+  let reason: string | undefined = 'legacy_webjs';
+  mockResponse(context, (request) => {
+    assert.equal(request.url, '/chats/51999999999%40c.us/session/status');
+    return { status: 200, data: { success: true, reason } };
+  });
+  const signal = new AbortController().signal;
+  assert.equal(await resolveCanonicalChat('51999999999@c.us', undefined, actor, signal), null);
+  reason = undefined;
+  await assert.rejects(resolveCanonicalChat('51999999999@c.us', undefined, actor, signal), /identidad de envío verificable/);
 });
 
 test('takeover must confirm the requested version and the exact same signed operator', async (context) => {
@@ -80,4 +93,59 @@ test('transport uncertainty is separate from a definitive stale-state rejection'
   const problem = messageProblem(new AxiosError('Conflict', undefined, undefined, undefined, response));
   assert.equal(problem.uncertain, false);
   assert.match(problem.message, /La conversación cambió/);
+});
+
+test('attachment retries keep the same File, caption, flags, version and key in the canonical multipart request', async (context) => {
+  const file = new File([new Uint8Array([37, 80, 68, 70])], 'fixture.pdf', { type: 'application/pdf' });
+  const intent = { key: 'attachment-key', conversationId: '321', version: 5, caption: '  Pie exacto\n', forceDocument: true, file };
+  let receipt: { accepted: boolean; providerMessageId: string | null; deliveryState: string } =
+    { accepted: true, providerMessageId: 'wamid.fixture-file', deliveryState: 'provider_accepted' };
+  mockResponse(context, (request) => {
+    assert.equal(request.method, 'post');
+    assert.equal(request.url, '/v1/conversations/321/messages/attachments');
+    assert.equal(request.headers.get('Idempotency-Key'), intent.key);
+    assert.equal(request.headers.get('Content-Type'), 'multipart/form-data');
+    assert.ok(request.data instanceof FormData);
+    assert.equal(request.data.get('file'), file);
+    assert.deepEqual([...request.data.entries()].filter(([field]) => field !== 'file'), [
+      ['message', intent.caption], ['forceDocument', 'true'], ['expectedConversationVersion', '5'],
+    ]);
+    return { status: 202, data: receipt };
+  });
+  assert.deepEqual(await sendCanonicalAttachment(intent), { kind: 'accepted', deliveryState: 'provider_accepted' });
+  receipt = { accepted: false, providerMessageId: null, deliveryState: 'unknown_delivery' };
+  assert.deepEqual(await sendCanonicalAttachment(intent), { kind: 'unknown', deliveryState: 'unknown_delivery' });
+  receipt = { accepted: false, providerMessageId: null, deliveryState: 'failed' };
+  assert.deepEqual(await sendCanonicalAttachment(intent), { kind: 'failed', deliveryState: 'failed' });
+  receipt = { ...receipt, accepted: true };
+  assert.equal((await sendCanonicalAttachment(intent)).kind, 'unknown');
+});
+
+test('attachment rejection 413 and 422 are definitive and provide a next action', () => {
+  for (const [status, expected] of [[413, /archivo más pequeño/], [422, /formato y el pie/]] as const) {
+    const response = { status, statusText: 'Fixture', config: {} as InternalAxiosRequestConfig, headers: {}, data: {} };
+    const problem = messageProblem(new AxiosError('Fixture', undefined, undefined, undefined, response), 'attachment');
+    assert.equal(problem.uncertain, false);
+    assert.match(problem.message, expected);
+  }
+  const response = {
+    status: 422, statusText: 'Fixture', config: {} as InternalAxiosRequestConfig, headers: {},
+    data: { metadata: { reasonCode: 'ATTACHMENT_CAPTION_UNSUPPORTED' } },
+  };
+  const problem = messageProblem(new AxiosError('Fixture', undefined, undefined, undefined, response), 'attachment');
+  assert.equal(problem.uncertain, false);
+  assert.match(problem.message, /Los audios no admiten pie/);
+});
+
+test('recovery queries the canonical history by clientRequestId outside the latest page', async (context) => {
+  const item = {
+    id: 'older', conversationId: conversation.id, tenantId: actor.tenantId, direction: 'outbound',
+    deliveryState: 'delivered', clientRequestId: 'attachment-key', causedBy: { type: 'human' },
+  };
+  mockResponse(context, (request) => {
+    assert.equal(request.url, '/v1/conversations/321/messages');
+    assert.deepEqual(request.params, { limit: 1, clientRequestId: 'attachment-key' });
+    return { status: 200, data: { items: [item] } };
+  });
+  assert.deepEqual(await readCanonicalHistory(conversation, new AbortController().signal, 'attachment-key'), [item]);
 });

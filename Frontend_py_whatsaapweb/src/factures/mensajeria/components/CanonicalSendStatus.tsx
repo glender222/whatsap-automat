@@ -11,6 +11,7 @@ export default function CanonicalSendStatus({ composer }: { composer: CanonicalC
   else if (error) message = error;
   else if (unresolved) message = notice?.tone === 'unknown' ? notice.message : 'Hay un envío sin confirmar. Actualiza el estado para comprobar si llegó una confirmación.';
   else if (loading) message = 'Verificando la conversación…';
+  else if (composer.canSendLegacyAttachment) message = 'Puedes adjuntar archivos en esta conversación.';
   else if (!conversation || conversation.channel !== 'whatsapp-cloud') message = 'El envío de texto requiere una conversación de WhatsApp Cloud verificada.';
   else if (conversation.status !== 'open') message = 'La conversación está cerrada.';
   else if (!windowOpen) message = 'Ventana de atención de 24 horas cerrada.';

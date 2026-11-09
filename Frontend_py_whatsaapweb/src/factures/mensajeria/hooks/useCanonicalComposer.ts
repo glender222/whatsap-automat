@@ -1,20 +1,28 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type SetStateAction } from 'react';
 import {
-  deliveryLabel, messageProblem, readCanonicalHistory, resolveCanonicalChat, sendCanonicalText, takeConversationControl,
-  type CanonicalConversation, type CanonicalMessage, type InboxActor, type TextIntent,
+  deliveryLabel, messageProblem, readCanonicalHistory, resolveCanonicalChat, sendCanonicalAttachment, sendCanonicalText,
+  takeConversationControl, type AttachmentIntent, type CanonicalConversation, type CanonicalMessage,
+  type InboxActor, type TextIntent,
 } from '../services/canonicalConversationApi';
+import type { SelectedAttachment } from './useFileUpload';
 
-type Pending = Omit<TextIntent, 'text'> & { phase: 'unconfirmed' | 'unknown' };
+type Intent = (TextIntent & { kind: 'text' }) | (AttachmentIntent & { kind: 'attachment' });
+type Pending = Pick<Intent, 'conversationId' | 'key' | 'version' | 'kind'> & { phase: 'unconfirmed' | 'unknown' };
 type Snapshot = { scope: string; requestNumber: number; inboundId?: string; conversation: CanonicalConversation | null; unresolved: boolean };
+type RetryVerification = Pick<Snapshot, 'requestNumber' | 'inboundId'> & { key: string };
 type Notice = { tone: 'status' | 'error' | 'unknown'; message: string };
+// Keep the existing storage namespace so prior text attempts still reconcile.
 const storageKey = (scope: string, id: string) => 'inbox-pending-text/' + scope.split('/', 2).join('/') + '/' + id;
 const outcomeUncertain = 'La entrega sigue sin confirmar. Actualiza el estado para comprobar si llegó una confirmación de WhatsApp.';
 
 function readPending(scope: string, id: string): Pending | null {
   try {
-    const value = JSON.parse(sessionStorage.getItem(storageKey(scope, id)) ?? 'null') as Pending | null;
-    return value && typeof value.key === 'string' && /^[A-Za-z0-9_.:-]{1,128}$/.test(value.key) && typeof value.conversationId === 'string' &&
-      Number.isSafeInteger(value.version) && ['unconfirmed', 'unknown'].includes(value.phase) ? value : null;
+    const value = JSON.parse(sessionStorage.getItem(storageKey(scope, id)) ?? 'null') as Partial<Pending> | null;
+    if (!value || typeof value.key !== 'string' || !/^[A-Za-z0-9_.:-]{1,128}$/.test(value.key) ||
+        value.conversationId !== id || typeof value.version !== 'number' || !Number.isSafeInteger(value.version) ||
+        (value.phase !== 'unconfirmed' && value.phase !== 'unknown') ||
+        (value.kind !== undefined && value.kind !== 'text' && value.kind !== 'attachment')) return null;
+    return { conversationId: id, key: value.key, version: value.version, phase: value.phase, kind: value.kind ?? 'text' };
   } catch {
     return null;
   }
@@ -46,14 +54,62 @@ export function useCanonicalComposer({
   const [pending, setPending] = useState<Record<string, Pending | null>>({});
   const [notices, setNotices] = useState<Record<string, Notice>>({});
   const [proof, setProof] = useState<Record<string, string>>({});
+  const [attachmentDrafts, setAttachmentDrafts] = useState<Record<string, SelectedAttachment | null>>({});
   const [busy, setBusy] = useState<Record<string, 'takeover' | 'send' | undefined>>({});
-  const [retryable, setRetryable] = useState<Record<string, boolean>>({});
+  const [retryable, setRetryable] = useState<Record<string, RetryVerification | undefined>>({});
   const [serverUnresolved, setServerUnresolved] = useState<Record<string, boolean>>({});
   const [closedWindow, setClosedWindow] = useState<Record<string, number>>({});
   const locks = useRef(new Set<string>());
-  const exactIntents = useRef(new Map<string, TextIntent>());
+  const exactIntents = useRef(new Map<string, Intent>());
   const savedIntents = useRef(new Map<string, Pending>());
+  const attachmentUrls = useRef(new Set<string>());
   const [clock, setClock] = useState(Date.now);
+
+  const setAttachmentDraft = useCallback((update: SetStateAction<SelectedAttachment | null>) => {
+    if (!scope) return;
+    setAttachmentDrafts((previous) => {
+      const current = previous[scope] ?? null;
+      const next = typeof update === 'function' ? update(current) : update;
+      return next === current ? previous : { ...previous, [scope]: next };
+    });
+  }, [scope]);
+
+  const selectAttachment = useCallback((file: File, type: SelectedAttachment['type'], forceDocument: boolean) => {
+    if (!scope) return;
+    const preview = URL.createObjectURL(file);
+    attachmentUrls.current.add(preview);
+    setAttachmentDraft({ file, preview, type, forceDocument });
+  }, [scope, setAttachmentDraft]);
+
+  useEffect(() => {
+    const live = new Set(Object.values(attachmentDrafts).map((draft) => draft?.preview));
+    for (const url of attachmentUrls.current) {
+      if (live.has(url)) continue;
+      URL.revokeObjectURL(url);
+      attachmentUrls.current.delete(url);
+    }
+  }, [attachmentDrafts]);
+
+  useEffect(() => {
+    const urls = attachmentUrls.current;
+    return () => {
+      for (const url of urls) URL.revokeObjectURL(url);
+      urls.clear();
+    };
+  }, []);
+
+  const acceptIntent = useCallback((target: string, chat: string, intent: Intent) => {
+    if (intent.kind === 'text') {
+      acceptDraft(chat, intent.text);
+      return;
+    }
+    acceptDraft(chat, intent.caption);
+    setAttachmentDrafts((previous) => {
+      const draft = previous[target];
+      return draft?.file === intent.file && draft.forceDocument === intent.forceDocument
+        ? { ...previous, [target]: null } : previous;
+    });
+  }, [acceptDraft]);
 
   const showNotice = useCallback((target: string, notice: Notice) => {
     setNotices((previous) => ({ ...previous, [target]: notice }));
@@ -95,19 +151,25 @@ export function useCanonicalComposer({
           (await readCanonicalHistory(conversation, request.signal, previous.key)).find(matchesAttempt);
         if (request.signal.aborted || locks.current.has(scope)) return;
         if (recorded && ['provider_accepted', 'dispatched', 'delivered', 'read', 'failed'].includes(recorded.deliveryState)) {
-          const text = exactIntents.current.get(scope)?.text;
-          if (text && recorded.deliveryState !== 'failed') acceptDraft(chatId, text);
+          const intent = exactIntents.current.get(scope);
+          if (intent?.key === previous.key && recorded.deliveryState !== 'failed') acceptIntent(scope, chatId, intent);
           exactIntents.current.delete(scope);
           remember(scope, conversation.id, null);
-          setRetryable((value) => ({ ...value, [scope]: false }));
+          setRetryable((value) => ({ ...value, [scope]: undefined }));
           showNotice(scope, { tone: recorded.deliveryState === 'failed' ? 'error' : 'status',
             message: deliveryLabel(recorded.deliveryState) ?? 'Resultado confirmado en el historial.' });
         } else if (recorded?.deliveryState === 'unknown_delivery') {
           remember(scope, conversation.id, { ...previous, phase: 'unknown' });
-          setRetryable((value) => ({ ...value, [scope]: false }));
+          setRetryable((value) => ({ ...value, [scope]: undefined }));
           showNotice(scope, { tone: 'unknown', message: outcomeUncertain });
         } else {
           remember(scope, conversation.id, previous);
+          const canRetry = !recorded && previous.phase === 'unconfirmed' && exactIntents.current.get(scope)?.key === previous.key;
+          setRetryable((value) => ({ ...value, [scope]: canRetry ? { key: previous.key, requestNumber, inboundId } : undefined }));
+          if (!recorded && previous.kind === 'attachment' && !exactIntents.current.has(scope)) {
+            showNotice(scope, { tone: 'unknown',
+              message: 'El archivo original ya no está en memoria. Actualiza el estado para confirmar este intento.' });
+          }
         }
       })
       .catch((cause: unknown) => {
@@ -117,7 +179,7 @@ export function useCanonicalComposer({
         }
       });
     return () => request.abort();
-  }, [acceptDraft, actor, chatId, conversationId, inboundId, remember, requestNumber, scope, showNotice]);
+  }, [acceptIntent, actor, chatId, conversationId, inboundId, remember, requestNumber, scope, showNotice]);
 
   const current = snapshot?.scope === scope ? snapshot : undefined;
   const fresh = current?.requestNumber === requestNumber && current?.inboundId === inboundId &&
@@ -142,10 +204,13 @@ export function useCanonicalComposer({
     conversation.assignedUserId === actor?.id && conversation.assignedAgentId === null && conversation.aiPaused);
   const canSend = Boolean(fresh && verifiedConversation && windowOpen && owns && !error && !phase && !unresolved);
   const canTakeover = Boolean(fresh && verifiedConversation && windowOpen && !assignedElsewhere && !owns && !error && !phase && !unresolved);
-  const canAttach = Boolean(scope && fresh && !phase && !error && !unresolved &&
-    (canSend || (current && conversation === null)));
+  const canSendLegacyAttachment = Boolean(scope && fresh && !phase && !error && !unresolved && conversation === null);
+  const canAttach = canSend || canSendLegacyAttachment;
+  const retry = retryable[scope];
   const canRetryExact = Boolean(fresh && attempt?.phase === 'unconfirmed' && attempt.conversationId === conversation?.id &&
-    retryable[scope] && !error && !phase && !current?.unresolved && !serverUnresolved[scope]);
+    retry?.key === attempt.key && retry.requestNumber === requestNumber && retry.inboundId === inboundId &&
+    !error && !phase && !current?.unresolved && !serverUnresolved[scope] &&
+    (attempt.kind !== 'attachment' || (verifiedConversation && windowOpen && owns)));
 
   async function takeover() {
     if (!canTakeover || !conversation || !actor || locks.current.has(scope) || expiresAt <= Date.now()) return;
@@ -165,16 +230,16 @@ export function useCanonicalComposer({
     }
   }
 
-  async function execute(intent: TextIntent) {
+  async function execute(intent: Intent) {
     if (!chatId || !scope || locks.current.has(scope)) return;
     locks.current.add(scope);
     exactIntents.current.set(scope, intent);
-    const meta = { conversationId: intent.conversationId, key: intent.key, version: intent.version };
+    const meta = { conversationId: intent.conversationId, key: intent.key, version: intent.version, kind: intent.kind };
     remember(scope, intent.conversationId, { ...meta, phase: 'unconfirmed' });
-    setRetryable((value) => ({ ...value, [scope]: false }));
+    setRetryable((value) => ({ ...value, [scope]: undefined }));
     setBusy((value) => ({ ...value, [scope]: 'send' }));
     try {
-      const result = await sendCanonicalText(intent);
+      const result = await (intent.kind === 'attachment' ? sendCanonicalAttachment(intent) : sendCanonicalText(intent));
       if (result.kind === 'unknown') {
         remember(scope, intent.conversationId, { ...meta, phase: 'unknown' });
         showNotice(scope, { tone: 'unknown', message: outcomeUncertain });
@@ -182,14 +247,13 @@ export function useCanonicalComposer({
       }
       remember(scope, intent.conversationId, null);
       exactIntents.current.delete(scope);
-      if (result.kind === 'accepted') acceptDraft(chatId, intent.text);
+      if (result.kind === 'accepted') acceptIntent(scope, chatId, intent);
       showNotice(scope, { tone: result.kind === 'accepted' ? 'status' : 'error',
         message: result.kind === 'accepted' ? deliveryLabel(result.deliveryState) ?? 'Aceptado por WhatsApp'
           : 'WhatsApp rechazó el envío o venció la ventana de atención. El borrador se conservó.' });
     } catch (cause) {
-      const problem = messageProblem(cause);
+      const problem = messageProblem(cause, intent.kind);
       if (problem.uncertain) {
-        setRetryable((value) => ({ ...value, [scope]: true }));
         showNotice(scope, { tone: 'unknown', message: problem.message });
       } else {
         remember(scope, intent.conversationId, null);
@@ -210,25 +274,43 @@ export function useCanonicalComposer({
     }
   }
 
+  function intentFor(conversation: CanonicalConversation) {
+    const key = Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, '0')).join('');
+    return { conversationId: conversation.id, version: conversation.stateVersion, key };
+  }
+
   async function send(text: string) {
     if (!canSend || !conversation || expiresAt <= Date.now() || !text.trim() || locks.current.has(scope)) return;
     if (text.length > 4096 || text.includes('\u0000') || /[\uD800-\uDFFF]/u.test(text)) {
       showNotice(scope, { tone: 'error', message: 'El mensaje debe tener hasta 4096 caracteres válidos.' });
       return;
     }
-    const key = Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, '0')).join('');
-    await execute({ conversationId: conversation.id, version: conversation.stateVersion, key, text });
+    await execute({ ...intentFor(conversation), kind: 'text', text });
+  }
+
+  async function sendAttachment(caption: string) {
+    const draft = attachmentDrafts[scope];
+    if (!canSend || !conversation || expiresAt <= Date.now() || !draft || locks.current.has(scope)) return;
+    if (caption.length > 1024 || caption.includes('\u0000') || /[\uD800-\uDFFF]/u.test(caption)) {
+      showNotice(scope, { tone: 'error', message: 'El pie del archivo admite hasta 1024 caracteres válidos.' });
+      return;
+    }
+    await execute({
+      ...intentFor(conversation), file: draft.file, forceDocument: draft.forceDocument, kind: 'attachment', caption,
+    });
   }
 
   async function retryExact() {
     const intent = exactIntents.current.get(scope);
-    if (canRetryExact && intent && intent.key === attempt?.key) await execute(intent);
+    if (canRetryExact && intent && intent.key === attempt?.key &&
+        (intent.kind !== 'attachment' || expiresAt > Date.now())) await execute(intent);
   }
 
   return {
     conversation, error, loading: Boolean(scope && !fresh && !error), phase, notice: notices[scope],
-    windowOpen, owns, assignedElsewhere, unresolved, canSend, canAttach, canTakeover, canRetryExact,
-    takeover, refresh, send, retryExact,
+    windowOpen, owns, assignedElsewhere, unresolved, canSend, canAttach, canSendLegacyAttachment, canTakeover, canRetryExact,
+    attachmentDraft: attachmentDrafts[scope] ?? null, attachmentPending: attempt?.kind === 'attachment',
+    setAttachmentDraft, selectAttachment, takeover, refresh, send, sendAttachment, retryExact,
   };
 }
 

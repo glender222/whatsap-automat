@@ -6,14 +6,16 @@ import type { FilePreview } from '../../../../shared/types/wsp';
 
 interface FilePreviewCardProps {
   filePreview: FilePreview;
-  forceAsDocument?: boolean; // ✅ NUEVO: Si se enviará como documento
+  forceAsDocument?: boolean;
+  disabled?: boolean;
   onRemove: () => void;
   onToggleSendMode?: () => void; // ✅ NUEVO: Función para alternar modo
 }
 
 const FilePreviewCard: React.FC<FilePreviewCardProps> = ({ 
   filePreview, 
-  forceAsDocument = false, 
+  forceAsDocument = false,
+  disabled = false,
   onRemove,
   onToggleSendMode
 }) => {
@@ -21,7 +23,7 @@ const FilePreviewCard: React.FC<FilePreviewCardProps> = ({
 
   // ✅ NUEVO: Verificar si el archivo puede enviarse como media o documento
   const canToggleSendMode = type === 'video' || type === 'image';
-  const willSendAsDocument = forceAsDocument || type === 'document' || type === 'audio';
+  const willSendAsDocument = forceAsDocument || type === 'document';
 
   const formatFileSize = (bytes: number): string => {
     if (bytes === 0) return '0 Bytes';
@@ -120,8 +122,10 @@ const FilePreviewCard: React.FC<FilePreviewCardProps> = ({
       {/* ✅ NUEVO: Botón para alternar modo de envío (solo para imágenes y videos) */}
       {canToggleSendMode && onToggleSendMode && (
         <button
+          type="button"
           onClick={onToggleSendMode}
-          className="flex-shrink-0 p-1 hover:bg-gray-200 rounded-full transition-colors mr-1"
+          disabled={disabled}
+          className="flex-shrink-0 p-1 hover:bg-gray-200 rounded-full transition-colors disabled:opacity-50 mr-1"
           aria-label={forceAsDocument ? 'Enviar como media' : 'Enviar como documento'}
           title={forceAsDocument ? 'Cambiar a reproducible' : 'Cambiar a documento'}
         >
@@ -135,8 +139,10 @@ const FilePreviewCard: React.FC<FilePreviewCardProps> = ({
 
       {/* Botón eliminar */}
       <button
+        type="button"
         onClick={onRemove}
-        className="flex-shrink-0 p-1 hover:bg-gray-200 rounded-full transition-colors"
+        disabled={disabled}
+        className="flex-shrink-0 p-1 hover:bg-gray-200 rounded-full transition-colors disabled:opacity-50"
         aria-label="Eliminar archivo"
       >
         <X size={20} className="text-gray-600" />

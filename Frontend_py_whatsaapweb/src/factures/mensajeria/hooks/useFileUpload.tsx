@@ -1,223 +1,124 @@
-// src/factures/mensajeria/hooks/useFileUpload.tsx
-
-import { useState, useRef, useCallback } from 'react';
-import { api } from '../../../shared/axios/http'; // Usar cliente compartido con token
+import { useCallback, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type SetStateAction } from 'react';
+import { isAxiosError } from 'axios';
+import { api } from '../../../shared/axios/http';
 import type { FilePreview } from '../../../shared/types/wsp';
 import { getMediaErrorMessage } from '../services/mediaService';
 
-export function useFileUpload() {
-  const [selectedFile, setSelectedFile] = useState<FilePreview | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const [forceAsDocument, setForceAsDocument] = useState(false); // ✅ NUEVO: Forzar como documento
-  const [nextFileAsDocument, setNextFileAsDocument] = useState(false); // ✅ NUEVO: Marcar próximo archivo como documento
-  const fileInputRef = useRef<HTMLInputElement>(null);
+export type SelectedAttachment = FilePreview & { forceDocument: boolean };
 
-  // Determinar el tipo de archivo
-  const getFileType = (file: File): FilePreview['type'] => {
-    if (file.type.startsWith('image/')) return 'image';
-    if (file.type.startsWith('video/')) return 'video';
-    if (file.type.startsWith('audio/')) return 'audio';
-    return 'document';
-  };
+function getFileType(file: File): FilePreview['type'] {
+  if (file.type.startsWith('image/')) return 'image';
+  if (file.type.startsWith('video/')) return 'video';
+  if (file.type.startsWith('audio/')) return 'audio';
+  return 'document';
+}
 
-  // TODO  Validar archivo de glender
-const validateFile = (file: File): string | null => {
-  const maxSize = 100 * 1024 * 1024; 
-  if (file.size > maxSize) {
-    return 'El archivo es demasiado grande (máximo 100MB)';
+function validateFile(file: File) {
+  if (file.size > 100 * 1024 * 1024) return 'El archivo es demasiado grande (máximo 100 MB).';
+  if (file.type.startsWith('image/') && !['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/bmp'].includes(file.type)) {
+    return 'Formato de imagen no soportado. Usa JPEG, PNG, GIF, WEBP o BMP.';
   }
-  
-  // ✅ VALIDACIONES MÁS FLEXIBLES PARA VIDEOS
-  const validVideoTypes = [
-    'video/mp4', 'video/mpeg', 'video/quicktime', 'video/x-msvideo', 
-    'video/webm', 'video/3gpp', 'video/mov', 'video/avi', 'video/mkv',
-    'video/x-ms-wmv', 'video/x-flv'
-  ];
-  const validImageTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/bmp'];
-  const validAudioTypes = ['audio/mpeg', 'audio/ogg', 'audio/wav', 'audio/mp3', 'audio/aac'];
-  
-  // ✅ PERMITIR TODOS LOS VIDEOS - Si no está en la lista, lo enviamos como documento
-  if (file.type.startsWith('video/') && !validVideoTypes.includes(file.type)) {
-    console.log(`⚠️ Video de tipo ${file.type} no reconocido, se enviará como documento`);
-    // NO retornar error, simplemente se enviará como documento
+  if (file.type.startsWith('audio/') && !['audio/mpeg', 'audio/ogg', 'audio/wav', 'audio/mp3', 'audio/aac'].includes(file.type)) {
+    return 'Formato de audio no soportado. Usa MP3, OGG, WAV o AAC.';
   }
-
-  if (file.type.startsWith('image/') && !validImageTypes.includes(file.type)) {
-    return 'Formato de imagen no soportado. Usa JPEG, PNG, GIF, WEBP o BMP';
-  }
-
-  if (file.type.startsWith('audio/') && !validAudioTypes.includes(file.type)) {
-    return 'Formato de audio no soportado. Usa MP3, OGG, WAV o AAC';
-  }
-  
   return null;
-};
+}
 
-  // Seleccionar archivo desde input
-  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+export function useFileUpload({
+  selectedFile, setAttachmentDraft, selectAttachment,
+}: {
+  selectedFile: SelectedAttachment | null;
+  setAttachmentDraft: (update: SetStateAction<SelectedAttachment | null>) => void;
+  selectAttachment: (file: File, type: FilePreview['type'], forceDocument: boolean) => void;
+}) {
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const nextFileAsDocument = useRef(false);
+  const forceAsDocument = selectedFile?.forceDocument ?? false;
 
+  function chooseFile(file: File, forceDocument = false) {
     const error = validateFile(file);
     if (error) {
-      alert(error);
+      window.alert(error);
       return;
     }
+    selectAttachment(file, getFileType(file), forceDocument);
+  }
 
-    const preview = URL.createObjectURL(file);
-    const type = getFileType(file);
+  function handleFileSelect(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    const force = nextFileAsDocument.current;
+    nextFileAsDocument.current = false;
+    event.target.value = '';
+    if (file) chooseFile(file, force);
+  }
 
-    setSelectedFile({ file, preview, type });
-
-    // ✅ NUEVO: Si se marcó el próximo archivo como documento, aplicar esa configuración
-    if (nextFileAsDocument) {
-      setForceAsDocument(true);
-      setNextFileAsDocument(false); // Resetear para próxima selección
+  function handlePaste(event: ClipboardEvent) {
+    for (const item of event.clipboardData.items) {
+      if (!item.type.startsWith('image/')) continue;
+      const file = item.getAsFile();
+      if (!file) continue;
+      event.preventDefault();
+      chooseFile(file);
+      break;
     }
-  }, [nextFileAsDocument]);
+  }
 
-  // Pegar archivo desde portapapeles (Ctrl+V)
-  const handlePaste = useCallback(async (e: React.ClipboardEvent) => {
-    const items = Array.from(e.clipboardData.items);
+  function handleDrop(event: DragEvent) {
+    event.preventDefault();
+    event.stopPropagation();
+    const file = event.dataTransfer.files?.[0];
+    if (file) chooseFile(file);
+  }
 
-    for (const item of items) {
-      // Solo procesar imágenes pegadas
-      if (item.type.startsWith('image/')) {
-        e.preventDefault();
-        const file = item.getAsFile();
-        if (!file) continue;
+  const clearFile = useCallback((expected?: File) => {
+    setAttachmentDraft((current) => expected && current?.file !== expected ? current : null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  }, [setAttachmentDraft]);
 
-        const error = validateFile(file);
-        if (error) {
-          alert(error);
-          continue;
-        }
+  function toggleSendAsDocument() {
+    setAttachmentDraft((current) => current ? { ...current, forceDocument: !current.forceDocument } : current);
+  }
 
-        const preview = URL.createObjectURL(file);
-        setSelectedFile({
-          file,
-          preview,
-          type: 'image'
-        });
-        break;
-      }
-    }
-  }, []);
+  function selectFileAsDocument(force: boolean) {
+    nextFileAsDocument.current = force;
+  }
 
-  // Arrastrar y soltar (Drag & Drop)
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-
-    const file = e.dataTransfer.files?.[0];
-    if (!file) return;
-
-    const error = validateFile(file);
-    if (error) {
-      alert(error);
-      return;
-    }
-
-    const preview = URL.createObjectURL(file);
-    const type = getFileType(file);
-
-    setSelectedFile({ file, preview, type });
-  }, []);
-
-  // Cancelar selección
-  const clearFile = useCallback(() => {
-    if (selectedFile?.preview) {
-      URL.revokeObjectURL(selectedFile.preview);
-    }
-    setSelectedFile(null);
-    setForceAsDocument(false); // ✅ Resetear también el estado de documento
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
-  }, [selectedFile]);
-
-  // ✅ NUEVA FUNCIÓN: Alternar modo de envío (media vs documento)
-  const toggleSendAsDocument = useCallback(() => {
-    setForceAsDocument(prev => !prev);
-  }, []);
-
-  // ✅ NUEVA FUNCIÓN: Marcar el próximo archivo a seleccionar como documento
-  const selectFileAsDocument = useCallback(() => {
-    setNextFileAsDocument(true);
-  }, []);
-
-  // Enviar archivo
-  const uploadFile = useCallback(async (
+  async function uploadLegacyFile(
     chatId: string,
     message: string,
-    onSuccess?: (messageId: string) => void,
-    onError?: (error: string) => void
-  ) => {
+    onSuccess: (messageId: string) => void,
+    onError: (error: string) => void,
+  ) {
     const file = selectedFile?.file;
-    if (!(file instanceof File)) {
-      onError?.('Selecciona un archivo válido antes de enviar.');
-      return;
-    }
+    if (!file) return;
     setUploading(true);
-
     try {
-      const formData = new FormData();
-      if (message) formData.append('message', message);
-      formData.append('forceDocument', String(forceAsDocument));
-      formData.append('file', file, file.name);
-
-      const endpoint = `/chats/${encodeURIComponent(chatId)}/messages`;
-      const response = await api.post(endpoint, formData, {
+      const form = new FormData();
+      if (message) form.set('message', message);
+      form.set('forceDocument', String(forceAsDocument));
+      form.set('file', file);
+      const { data } = await api.post(`/chats/${encodeURIComponent(chatId)}/messages`, form, {
         headers: { 'Content-Type': 'multipart/form-data' },
-        transformRequest: [(data) => data],
       });
-      const messageId = response.data?.messageId ?? response.data?.data?.messageId ?? response.data?.id;
-      if (response.data?.success !== true ||
+      const messageId = data?.messageId ?? data?.data?.messageId ?? data?.id;
+      if (data?.success !== true ||
           !(typeof messageId === 'string' && messageId || typeof messageId === 'number' && Number.isSafeInteger(messageId) && messageId > 0)) {
         throw new Error('El servidor no confirmó el envío del archivo.');
       }
-
-      clearFile();
+      clearFile(file);
+      onSuccess(String(messageId));
+    } catch (error) {
+      const message = isAxiosError(error) && error.response ? getMediaErrorMessage(error)
+        : error instanceof Error ? error.message : 'No se pudo enviar el archivo.';
+      onError(message);
+    } finally {
       setUploading(false);
-      onSuccess?.(String(messageId));
-      return response.data;
-      
-    } catch (error: any) {
-      setUploading(false);
-      console.error('❌ Error enviando archivo:', error);
-      
-      let errorMessage = 'Error desconocido';
-      if (error.response) {
-        const { status, data } = error.response;
-        console.error('📊 Detalles del error:', { status, data });
-        errorMessage = getMediaErrorMessage(error);
-      } else if (error.request) {
-        errorMessage = 'Error de conexión con el servidor';
-      } else {
-        errorMessage = error.message || 'Error desconocido';
-      }
-      
-      if (onError) {
-        onError(errorMessage);
-      } else {
-        console.error('Error uploading file:', error);
-        alert(`Error al enviar archivo: ${errorMessage}`);
-      }
     }
-  }, [selectedFile, clearFile, forceAsDocument]);
+  }
 
   return {
-    selectedFile,
-    uploading,
-    forceAsDocument,
-    fileInputRef,
-    handleFileSelect,
-    handlePaste,
-    handleDrop,
-    clearFile,
-    uploadFile,
-    toggleSendAsDocument,
-    selectFileAsDocument,
-    openFileDialog: () => fileInputRef.current?.click(),
+    uploading, forceAsDocument, fileInputRef, handleFileSelect, handlePaste, handleDrop, clearFile,
+    uploadLegacyFile, toggleSendAsDocument, selectFileAsDocument,
   };
 }

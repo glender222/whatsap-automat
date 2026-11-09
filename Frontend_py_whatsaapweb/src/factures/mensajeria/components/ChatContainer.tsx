@@ -475,9 +475,7 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
           setMessage={setMessage}
           selectedChat={selectedChat}
           handleSendMessage={handleSendMessage}
-          canSendText={composer.canSend}
-          canSendFile={composer.canAttach}
-          textSending={composer.phase === 'send'}
+          composer={composer}
           inputRef={composerInputRef}
           emojiPickerOpen={emojiPickerOpen}
           setEmojiPickerOpen={setEmojiPickerOpen}
