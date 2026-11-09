@@ -29,6 +29,7 @@ import createAiRoutes from './routes/ai.routes';
 import createAgentStudioRoutes from './routes/agentStudioRoutes';
 import createApprovalRoutes from './routes/approvalRoutes';
 import createChannelConnectionRoutes from './routes/channelConnectionRoutes';
+import createOperationExecutionRoutes from './routes/operationExecutionRoutes';
 import createAdminRoutes from './routes/adminRoutes';
 import { createCampaignRoutes, createConsentRoutes, createSegmentRoutes } from './routes/campaigns.routes';
 import createOpenApiRoutes from './routes/openapiRoutes';
@@ -38,6 +39,7 @@ import { requireChatTenantAccess, requireMediaTenantAccess, requireVoucherTenant
 import { coreModel } from './core/coreModel';
 import config from './config/index';
 import swaggerSpec from './config/swagger';
+import { Migrator } from './db/Migrator';
 import { setSocketIo } from './sockets/socketEmitter';
 
 import { SocketHandler } from './sockets/socketHandler';
@@ -236,6 +238,7 @@ export class App {
     this.app.use('/api/v1/agent-graphs', createAgentStudioRoutes());
     this.app.use('/api/v1/approvals', createApprovalRoutes());
     this.app.use('/api/v1/channel-connections', createChannelConnectionRoutes());
+    this.app.use('/api/v1/operations', createOperationExecutionRoutes());
     this.app.use('/api/v1/admin', createAdminRoutes());
     this.app.use('/api/v1/campaigns', createCampaignRoutes());
     this.app.use('/api/v1/consent', createConsentRoutes());
@@ -263,6 +266,19 @@ export class App {
           && Boolean(config.meta.phoneNumberId && config.meta.accessToken && config.meta.appSecret),
         timestamp: new Date().toISOString(),
       });
+    });
+    const migrator = new Migrator();
+    this.app.get('/ready', async (_req: Request, res: Response) => {
+      res.setHeader('Cache-Control', 'no-store');
+      try {
+        const migrations = await migrator.listMigrations();
+        if (migrations.length > 0 && migrations.every((migration) => migration.applied)) {
+          return res.status(200).json({ status: 'ready' });
+        }
+      } catch {
+        // The probe only returns aggregate readiness to unauthenticated callers.
+      }
+      return res.status(503).json({ status: 'unavailable' });
     });
   }
 
@@ -348,7 +364,7 @@ export class App {
       this.setupSocketIO();
       this.setupErrorHandling();
 
-      this.server.listen(config.server.port, () => {
+      this.server.listen(config.server.port, config.server.host, () => {
         console.log(`🚀 API + Socket.IO corriendo en http://${config.server.host}:${config.server.port}`);
         console.log(`📱 WhatsApp provider: ${this.whatsappService.provider}`);
         console.log(`🔐 JWT WhatsApp API: ${config.security.whatsappApiRequireJwt ? 'activado' : 'desactivado en desarrollo'}`);

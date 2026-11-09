@@ -7,6 +7,7 @@ const pool = new Pool({
   database: config.database.name,
   user: config.database.user,
   password: config.database.password,
+  connectionTimeoutMillis: 5000,
 });
 
 pool.on('error', (err: any) => {

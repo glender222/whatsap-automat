@@ -4,11 +4,12 @@ import { OutboxRelayDaemon } from '../outbox/OutboxRelayDaemon';
 import { AUTOMATION_TASK_QUEUE, WorkflowDispatchService } from '../workflows/WorkflowDispatchService';
 import { recordWorkflowRunCheckpointActivity } from './activities/recordWorkflowRunCheckpointActivity';
 import { getTemporalClient, temporalClientFactory } from './TemporalClientFactory';
+import { temporalTlsFromEnvironment } from './temporalTls';
 
 async function main(): Promise<void> {
   const address = process.env.TEMPORAL_ADDRESS || '127.0.0.1:7233';
   const namespace = process.env.TEMPORAL_NAMESPACE || 'default';
-  const tls = process.env.TEMPORAL_TLS === 'true' ? true : undefined;
+  const tls = temporalTlsFromEnvironment();
   const connection = await NativeConnection.connect({ address, tls });
   const relay = new OutboxRelayDaemon({
     batchSize: 1,

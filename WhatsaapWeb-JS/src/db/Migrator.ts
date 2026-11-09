@@ -55,9 +55,8 @@ export class Migrator {
 
     let appliedSet = new Set<string>();
     try {
-      const { rows } = await this.pool.query<{ version: string }>(
-        'SELECT version FROM schema_migrations'
-      );
+      const query = { text: 'SELECT version FROM schema_migrations', query_timeout: 3000 };
+      const { rows } = await this.pool.query<{ version: string }>(query);
       appliedSet = new Set(rows.map(r => r.version));
     } catch (err: any) {
       throw err;

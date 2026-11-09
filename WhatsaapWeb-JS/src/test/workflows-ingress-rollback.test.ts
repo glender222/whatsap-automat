@@ -16,6 +16,7 @@ import createWorkflowRoutes from '../routes/workflowRoutes';
 import { OutboxRelayDaemon } from '../services/outbox/OutboxRelayDaemon';
 import { OutboxRepository } from '../services/outbox/OutboxRepository';
 import { TemporalClientFactory } from '../services/temporal/TemporalClientFactory';
+import { temporalTlsFromEnvironment } from '../services/temporal/temporalTls';
 import { WorkflowDispatchService } from '../services/workflows/WorkflowDispatchService';
 import { WorkflowRevisionService } from '../services/workflows/WorkflowRevisionService';
 import { WorkflowTriggerService } from '../services/workflows/WorkflowTriggerService';
@@ -305,7 +306,7 @@ describe('Durable workflow HTTP, PostgreSQL and Temporal integration', {
       const recovered = await outbox.findById(tenantA, outboxId);
       return recovered?.status === 'dispatched' ? recovered : undefined;
     }, 'Relay did not reconcile the already completed Temporal execution.');
-    const connection = await Connection.connect({ address: temporalAddress });
+    const connection = await Connection.connect({ address: temporalAddress, tls: temporalTlsFromEnvironment() });
     try {
       const temporal = new Client({ connection, namespace });
       const latest = await temporal.workflow.getHandle(completedFirst.temporalWorkflowId).describe();

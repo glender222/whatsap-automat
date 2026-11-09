@@ -3,6 +3,8 @@
  * Specification: Fase F4 (PR-F4-01, WAA-011, ADR-006, PROD-001)
  */
 
+import type { TLSConfig } from '@temporalio/client';
+
 export interface TemporalConnectionOptions {
   /**
    * Address of the Temporal gRPC Frontend service (e.g., 'localhost:7233').
@@ -12,7 +14,7 @@ export interface TemporalConnectionOptions {
   /**
    * Optional TLS credentials configuration or boolean flag.
    */
-  tls?: boolean | Record<string, unknown> | null;
+  tls?: boolean | TLSConfig | null;
 
   /**
    * Optional connection timeout in milliseconds.

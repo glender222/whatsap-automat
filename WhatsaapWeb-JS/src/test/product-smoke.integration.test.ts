@@ -47,6 +47,7 @@ test('real API isolates two companies through auth, signed ingress, inbox, socke
   assert.match(config.database.name, /_smoke$/);
   assert.equal(config.whatsapp.provider, 'meta-cloud');
   t.after(() => pool.end());
+  assert.deepEqual(await api('/ready', 200), { status: 'ready' });
 
   const accounts = ['Alfa', 'Bravo'].map((nombre) => ({
     nombre, email: `${randomUUID()}@example.invalid`, password: randomUUID(),
@@ -275,6 +276,11 @@ test('real API isolates two companies through auth, signed ingress, inbox, socke
   await api(`${graphs}/${graphId}/publish`, 501, owner.accessToken, {});
 
   await api('/api/v1/admin/health/diagnostics', 403, employeeToken);
+  const executions = '/api/v1/operations/executions';
+  await api(executions, 403, employeeToken);
+  assert.deepEqual(await api(`${executions}?limit=5`, 200, owner.accessToken), {
+    items: [], nextCursor: null, pageSummary: { retryCount: 0, deliveryUnknownCount: 0 },
+  });
   await api(`/api/v1/channel-connections/${connectionId}/validate`, 403, employeeToken, {});
   const createApproval = (expiresInSeconds: number) => hitlApprovalService.createApprovalRequest({
     tenantId: owner.user.companyId, runId: randomUUID(), toolName: 'test-review', risk: 'financial',

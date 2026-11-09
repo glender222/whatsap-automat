@@ -161,15 +161,18 @@ Sin túnel:
 npm run dev
 ```
 
-Comprueba el proceso:
+Comprueba el proceso y que PostgreSQL tenga todas las migraciones del build.
 
 ```bash
-curl http://localhost:3000/health
+curl --fail http://127.0.0.1:3000/health
+curl --fail http://127.0.0.1:3000/ready
 ```
+
+`/health` comprueba que el proceso responde. `/ready` devuelve `503` si PostgreSQL no está disponible o falta una migración. El diagnóstico autenticado comprueba también las dependencias configuradas. Usa `HOST=127.0.0.1` para desarrollo local. En un contenedor detrás de un proxy, configura `HOST=0.0.0.0`.
 
 ## Automatizaciones duraderas por webhook
 
-Aplica la migración `033_durable_workflow_dispatch.sql` con `npm run db:migrate` y compila con `npm run build`. El backend acepta los webhooks y guarda la ejecución con su revisión publicada. Un proceso independiente lee el outbox, inicia el workflow en Temporal y guarda sus estados en PostgreSQL. Ambos procesos usan las mismas variables de PostgreSQL. El worker admite `TEMPORAL_ADDRESS`, `TEMPORAL_NAMESPACE` y `TEMPORAL_TLS`.
+Aplica la migración `033_durable_workflow_dispatch.sql` con `npm run db:migrate` y compila con `npm run build`. El backend acepta los webhooks y guarda la ejecución con su revisión publicada. Un proceso independiente lee el outbox, inicia el workflow en Temporal y guarda sus estados en PostgreSQL. Ambos procesos usan las mismas variables de PostgreSQL. Configura `TEMPORAL_ADDRESS` y `TEMPORAL_NAMESPACE` para el worker. Para TLS, usa `TEMPORAL_TLS=true`. Con una CA privada o mTLS, monta los archivos y configura `TEMPORAL_TLS_CA_FILE`, `TEMPORAL_TLS_CERT_FILE` y `TEMPORAL_TLS_KEY_FILE`. El relay y el worker comparten la misma configuración de conexión.
 
 Para una prueba local, inicia Temporal en una terminal y el worker en otra. Mantén también el backend en ejecución.
 

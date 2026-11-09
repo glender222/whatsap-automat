@@ -1,4 +1,4 @@
-import path from 'path';
+import { Client, Connection } from '@temporalio/client';
 import {
   ITemporalClient,
   TemporalClientOptions,
@@ -41,24 +41,6 @@ export class TemporalClientFactory {
   }
 
   /**
-   * Dynamically loads the @temporalio/client package if available.
-   */
-  private resolveTemporalSdk(): any {
-    try {
-      // 1. Try standard module resolution
-      return require('@temporalio/client');
-    } catch {
-      // 2. Try known spike/workspace path if running in local monorepo
-      const spikePath = path.resolve(__dirname, '../../../../spikes/temporal/node_modules/@temporalio/client');
-      try {
-        return require(spikePath);
-      } catch {
-        return null;
-      }
-    }
-  }
-
-  /**
    * Gets or initializes the singleton Temporal client.
    */
   async getClient(options?: TemporalClientOptions): Promise<ITemporalClient> {
@@ -85,15 +67,6 @@ export class TemporalClientFactory {
       return await this.customProvider(options);
     }
 
-    const sdk = this.resolveTemporalSdk();
-    if (!sdk) {
-      throw new TemporalConnectionError(
-        'Temporal SDK (@temporalio/client) is not installed in the runtime environment. ' +
-        'Please install @temporalio/client or register a mock client via TemporalClientFactory.setMockClient().'
-      );
-    }
-
-    const { Connection, Client } = sdk;
     const address = options?.address || process.env.TEMPORAL_ADDRESS || this.defaultAddress;
     const namespace = options?.namespace || process.env.TEMPORAL_NAMESPACE || this.defaultNamespace;
     const identity = options?.identity || process.env.TEMPORAL_CLIENT_IDENTITY || this.defaultIdentity;

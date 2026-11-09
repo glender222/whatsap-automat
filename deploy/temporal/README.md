@@ -65,25 +65,21 @@ environment:
   TEMPORAL_TLS_SERVER_CA_CERT: /etc/temporal/certs/ca.cert
 ```
 
-### 2.3 Configuración en el Worker TypeScript con mTLS
-Para conectar los trabajadores TypeScript con mTLS:
+### 2.3 Worker de automatizaciones con mTLS
 
-```typescript
-import { NativeConnection, Worker } from '@temporalio/worker';
-import fs from 'node:fs';
+Ejecuta el worker compilado de `WhatsaapWeb-JS` con la misma configuración de PostgreSQL que el backend. El proceso ejecuta el relay del outbox y el worker. Monta los certificados como archivos de solo lectura.
 
-const connection = await NativeConnection.connect({
-  address: process.env.TEMPORAL_ADDRESS!, // e.g. temporal.internal:7233
-  tls: {
-    serverRootCACertificate: fs.readFileSync('/certs/ca.cert'),
-    clientCertPair: {
-      crt: fs.readFileSync('/certs/client.cert'),
-      key: fs.readFileSync('/certs/client.key'),
-    },
-    serverNameOverride: 'temporal-cluster', // Nombre SNI esperado
-  },
-});
+```sh
+TEMPORAL_ADDRESS=temporal.internal:7233 \
+TEMPORAL_NAMESPACE=default \
+TEMPORAL_TLS=true \
+TEMPORAL_TLS_CA_FILE=/certs/ca.cert \
+TEMPORAL_TLS_CERT_FILE=/certs/client.cert \
+TEMPORAL_TLS_KEY_FILE=/certs/client.key \
+node dist/services/temporal/automationWorker.js
 ```
+
+Usa `TEMPORAL_TLS_SERVER_NAME` si el nombre del certificado difiere del nombre de conexión por un proxy. El proceso exige ambos archivos del certificado de cliente cuando se configura mTLS. Si se configura `TEMPORAL_TLS=true` con una CA pública, los archivos son opcionales.
 
 ---
 

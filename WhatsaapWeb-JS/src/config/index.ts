@@ -68,7 +68,7 @@ if (aiProvider === 'openai') {
 const config = {
   server: {
     port: parseInteger('PORT', 3000),
-    host: envValue('HOST') || 'localhost',
+    host: envValue('HOST') || '0.0.0.0',
   },
 
   whatsapp: {
