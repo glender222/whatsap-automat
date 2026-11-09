@@ -160,9 +160,13 @@ export function ApprovalDetailScreen({ route, navigation }: NativeStackScreenPro
   }, [approvalAttempts, approvalId]);
 
   useEffect(() => {
-    if (attempt && approval && approval.status !== 'pending' && !submitting) {
+    if (!attempt || !approval || submitting) return;
+    if (approval.status !== 'pending') {
       clearAttempt(attempt);
       setNotice(`Estado actualizado. La solicitud figura como ${statusLabels[approval.status].toLowerCase()}.`);
+    } else if (approval.policyVersion > attempt.expectedVersion) {
+      clearAttempt(attempt);
+      setNotice('La solicitud cambió. Revisa los datos actualizados y confirma una nueva decisión.');
     }
   }, [approval, attempt, clearAttempt, submitting]);
 
