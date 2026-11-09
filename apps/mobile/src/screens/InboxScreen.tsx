@@ -1,454 +1,241 @@
-/**
- * Mobile Inbox Screen
- * Conversation list with unread badges, filter tabs (All, Mine, Unassigned),
- * search bar, pull-to-refresh, and live WebSocket streaming updates.
- */
-
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
-  View,
-  Text,
+  ActivityIndicator,
   FlatList,
-  TextInput,
-  TouchableOpacity,
+  Pressable,
   RefreshControl,
   StyleSheet,
-  SafeAreaView,
-  StatusBar,
+  Text,
+  TextInput,
+  View,
 } from 'react-native';
-import {
-  Search,
-  MessageSquare,
-  Bot,
-  User,
-} from 'lucide-react-native';
-import { ConversationV1 } from '@whatsap-automat/contracts';
-import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { apiClient } from '../services/apiClient';
-import { socketService } from '../services/socketService';
-import { authStorage } from '../services/authStorage';
-import { RootStackParamList, DARK_THEME } from '../types/navigation';
-
-type FilterTab = 'all' | 'mine' | 'unassigned';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { LogOut, MessageSquare, Search } from 'lucide-react-native';
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { apiClient, type MobileConversation } from '../services/apiClient';
+import { useSession } from '../services/sessionContext';
+import { useRefreshOnFocus } from '../services/useRefreshOnFocus';
+import { DARK_THEME as colors, type RootStackParamList } from '../types/navigation';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Inbox'>;
 
-export const InboxScreen: React.FC<Props> = ({ navigation }) => {
-  const [conversations, setConversations] = useState<ConversationV1[]>([]);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [activeTab, setActiveTab] = useState<FilterTab>('all');
-  const [isLoading, setIsLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [activeUserId, setActiveUserId] = useState<string>('');
+const filters = [
+  { id: 'all', label: 'Todos' },
+  { id: 'mine', label: 'Asignados a mí' },
+  { id: 'unassigned', label: 'Sin asignar' },
+] as const;
 
-  // Load User & Conversations
-  const loadConversations = useCallback(async () => {
+type Filter = (typeof filters)[number]['id'];
+
+function timeLabel(timestamp?: number) {
+  if (!timestamp) return '';
+  const date = new Date(timestamp < 1e12 ? timestamp * 1000 : timestamp);
+  if (date.toDateString() === new Date().toDateString()) {
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+  return date.toLocaleDateString([], { day: 'numeric', month: 'short' });
+}
+
+export function InboxScreen({ navigation }: Props) {
+  const { session, signOut } = useSession();
+  const [conversations, setConversations] = useState<MobileConversation[]>([]);
+  const [search, setSearch] = useState('');
+  const [filter, setFilter] = useState<Filter>('all');
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [canLoadMore, setCanLoadMore] = useState(false);
+  const [error, setError] = useState('');
+  const offset = useRef(0);
+
+  const load = useCallback(async () => {
     try {
-      const uid = (await authStorage.getUserId()) || 'agent_mobile_1';
-      setActiveUserId(uid);
-
-      const res = await apiClient.listConversations({ limit: 50 });
-      setConversations(res.items || []);
-    } catch (err) {
-      console.error('[InboxScreen] Failed to load conversations:', err);
+      const page = await apiClient.listConversations();
+      if (offset.current <= 50) {
+        offset.current = page.length;
+        setCanLoadMore(page.length === 50);
+      }
+      setConversations((current) => {
+        if (offset.current <= 50) return page;
+        const latestIds = new Set(page.map((item) => item.id));
+        return [...page, ...current.filter((item) => !latestIds.has(item.id))];
+      });
+      setError('');
+    } catch {
+      setError('No pudimos cargar las conversaciones. Revisa tu conexión y vuelve a intentar.');
     } finally {
-      setIsLoading(false);
-      setIsRefreshing(false);
+      setLoading(false);
     }
   }, []);
+  const refresh = useRefreshOnFocus(load);
 
-  useEffect(() => {
-    loadConversations();
+  async function refreshList() {
+    setRefreshing(true);
+    offset.current = 0;
+    await refresh();
+    setRefreshing(false);
+  }
 
-    // Connect WebSocket & Subscribe to Live Updates
-    socketService.connect().then(() => {
-      const unsubUpdate = socketService.onConversationUpdated((event) => {
-        setConversations((prev) =>
-          prev.map((conv) => {
-            if (conv.id === event.conversationId) {
-              return {
-                ...conv,
-                stateVersion: event.version,
-                updatedAt: new Date().toISOString(),
-              };
-            }
-            return conv;
-          })
-        );
+  async function loadMore() {
+    if (loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const page = await apiClient.listConversations(offset.current);
+      offset.current += page.length;
+      setCanLoadMore(page.length === 50);
+      setConversations((current) => {
+        const ids = new Set(current.map((item) => item.id));
+        return [...current, ...page.filter((item) => !ids.has(item.id))];
       });
-
-      return () => {
-        unsubUpdate();
-      };
-    });
-  }, [loadConversations]);
-
-  const onRefresh = useCallback(() => {
-    setIsRefreshing(true);
-    loadConversations();
-  }, [loadConversations]);
-
-  // Filtered & Searched List
-  const filteredConversations = useMemo(() => {
-    return conversations.filter((c) => {
-      // 1. Tab Filtering
-      if (activeTab === 'mine' && c.assignedUserId !== activeUserId) {
-        return false;
-      }
-      if (activeTab === 'unassigned' && c.assignedUserId !== null) {
-        return false;
-      }
-
-      // 2. Search Query Filtering
-      if (searchQuery.trim().length > 0) {
-        const q = searchQuery.toLowerCase();
-        const titleMatch = (c.title || '').toLowerCase().includes(q);
-        const externalIdMatch = (c.externalConversationId || '').toLowerCase().includes(q);
-        const channelMatch = (c.channel || '').toLowerCase().includes(q);
-        return titleMatch || externalIdMatch || channelMatch;
-      }
-
-      return true;
-    });
-  }, [conversations, activeTab, activeUserId, searchQuery]);
-
-  // Channel Badge Color
-  const getChannelBadgeColor = (channel: string) => {
-    switch (channel) {
-      case 'whatsapp-cloud':
-      case 'whatsapp':
-        return '#25d366';
-      case 'instagram':
-        return '#e1306c';
-      case 'telegram':
-        return '#0088cc';
-      case 'tiktok':
-        return '#fe2c55';
-      case 'line':
-        return '#06c755';
-      case 'email':
-        return '#f59e0b';
-      default:
-        return DARK_THEME.primary;
+      setError('');
+    } catch {
+      setError('No se pudo cargar la siguiente página. Puedes volver a intentarlo.');
+    } finally {
+      setLoadingMore(false);
     }
-  };
+  }
 
-  const renderConversationItem = ({ item }: { item: ConversationV1 }) => {
-    const isAiHandling = !item.aiPaused && !item.assignedUserId;
-    const channelColor = getChannelBadgeColor(item.channel);
-
-    return (
-      <TouchableOpacity
-        style={styles.card}
-        activeOpacity={0.7}
-        onPress={() =>
-          navigation.navigate('ChatDetail', {
-            conversationId: item.id,
-            conversationTitle: item.title || item.externalConversationId,
-            channel: item.channel,
-            initialConversation: item,
-          })
-        }
-      >
-        <View style={styles.cardHeader}>
-          <View style={styles.cardTitleContainer}>
-            <Text style={styles.contactTitle} numberOfLines={1}>
-              {item.title || item.externalConversationId}
-            </Text>
-            <View
-              style={[
-                styles.channelPill,
-                { backgroundColor: `${channelColor}20`, borderColor: channelColor },
-              ]}
-            >
-              <Text style={[styles.channelPillText, { color: channelColor }]}>
-                {item.channel}
-              </Text>
-            </View>
-          </View>
-          <Text style={styles.timeText}>
-            {item.lastMessageAt
-              ? new Date(item.lastMessageAt).toLocaleTimeString([], {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                })
-              : 'New'}
-          </Text>
-        </View>
-
-        <Text style={styles.externalIdText} numberOfLines={1}>
-          {item.externalConversationId} • Stage: {item.stage}
-        </Text>
-
-        <View style={styles.cardFooter}>
-          <View style={styles.statusPills}>
-            {isAiHandling ? (
-              <View style={[styles.badge, styles.badgeAi]}>
-                <Bot size={12} color="#ffffff" />
-                <Text style={styles.badgeText}>AI Handling</Text>
-              </View>
-            ) : (
-              <View style={[styles.badge, styles.badgeHuman]}>
-                <User size={12} color="#ffffff" />
-                <Text style={styles.badgeText}>
-                  {item.assignedUserId === activeUserId
-                    ? 'Assigned to You'
-                    : `Agent ${item.assignedUserId || 'Manual'}`}
-                </Text>
-              </View>
-            )}
-            <View style={styles.versionPill}>
-              <Text style={styles.versionText}>CAS v{item.stateVersion}</Text>
-            </View>
-          </View>
-
-          {item.status === 'open' && (
-            <View style={styles.unreadIndicator}>
-              <Text style={styles.unreadText}>Open</Text>
-            </View>
-          )}
-        </View>
-      </TouchableOpacity>
-    );
-  };
+  const visible = useMemo(() => {
+    const query = search.trim().toLocaleLowerCase();
+    return conversations.filter((item) => {
+      const assigned = item.assignedUserId == null ? null : String(item.assignedUserId);
+      if (filter === 'mine' && assigned !== session.userId) return false;
+      if (filter === 'unassigned' && assigned !== null) return false;
+      return [item.name, item.id, item.lastMessagePreview].some((text) => text?.toLocaleLowerCase().includes(query));
+    });
+  }, [conversations, filter, search, session.userId]);
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={DARK_THEME.background} />
-
-      {/* Screen Header */}
+    <SafeAreaView style={styles.screen}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Operational Inbox</Text>
-        <View style={styles.searchBox}>
-          <Search size={18} color={DARK_THEME.textMuted} />
+        <View style={styles.titleRow}>
+          <View style={styles.titleGroup}>
+            <Text style={styles.eyebrow}>WHATSAP AUTOMAT</Text>
+            <Text style={styles.title} accessibilityRole="header">Bandeja de entrada</Text>
+          </View>
+          <Pressable style={styles.iconButton} accessibilityRole="button" accessibilityLabel="Cerrar sesión" onPress={signOut}>
+            <LogOut size={20} color={colors.textSecondary} />
+          </Pressable>
+        </View>
+
+        <View style={styles.search}>
+          <Search color={colors.textMuted} size={18} />
           <TextInput
             style={styles.searchInput}
-            placeholder="Search conversations, phones..."
-            placeholderTextColor={DARK_THEME.textMuted}
-            value={searchQuery}
-            onChangeText={setSearchQuery}
+            accessibilityLabel="Buscar conversaciones"
+            placeholder="Buscar por nombre o número"
+            placeholderTextColor={colors.textMuted}
+            value={search}
+            onChangeText={setSearch}
           />
         </View>
       </View>
 
-      {/* Filter Tabs */}
-      <View style={styles.tabContainer}>
-        {(['all', 'mine', 'unassigned'] as FilterTab[]).map((tab) => (
-          <TouchableOpacity
-            key={tab}
-            style={[styles.tabButton, activeTab === tab && styles.tabButtonActive]}
-            onPress={() => setActiveTab(tab)}
+      <View style={styles.filters} accessibilityRole="tablist">
+        {filters.map((item) => (
+          <Pressable
+            key={item.id}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: filter === item.id }}
+            onPress={() => setFilter(item.id)}
+            style={[styles.filter, filter === item.id && styles.selectedFilter]}
           >
-            <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
-              {tab.charAt(0).toUpperCase() + tab.slice(1)}
-            </Text>
-          </TouchableOpacity>
+            <Text style={[styles.filterLabel, filter === item.id && styles.selectedLabel]}>{item.label}</Text>
+          </Pressable>
         ))}
       </View>
 
-      {/* Conversations List */}
-      <FlatList
-        data={filteredConversations}
-        keyExtractor={(item) => item.id}
-        renderItem={renderConversationItem}
-        contentContainerStyle={styles.listContent}
-        refreshControl={
-          <RefreshControl
-            refreshing={isRefreshing}
-            onRefresh={onRefresh}
-            tintColor={DARK_THEME.primary}
-            colors={[DARK_THEME.primary]}
-          />
-        }
-        ListEmptyComponent={
-          !isLoading ? (
-            <View style={styles.emptyContainer}>
-              <MessageSquare size={48} color={DARK_THEME.border} />
-              <Text style={styles.emptyTitle}>No conversations found</Text>
-              <Text style={styles.emptySubtitle}>
-                Try adjusting your search query or switching filters.
+      {error ? (
+        <View style={styles.notice}>
+          <Text accessibilityRole="alert" style={styles.noticeText}>{error}</Text>
+          <Pressable accessibilityRole="button" onPress={() => void refreshList()} style={styles.textButton}>
+            <Text style={styles.action}>Actualizar bandeja</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
+      {loading ? (
+        <View style={styles.empty}>
+          <ActivityIndicator size="large" color={colors.accent} />
+          <Text style={styles.secondary}>Cargando conversaciones…</Text>
+        </View>
+      ) : (
+        <FlatList
+          data={visible}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.list}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refreshList} tintColor={colors.accent} colors={[colors.accent]} />}
+          renderItem={({ item }) => {
+            const title = item.name?.trim() || item.id;
+            const unread = item.unreadCount ?? 0;
+            return (
+              <Pressable
+                style={styles.row}
+                accessibilityRole="button"
+                accessibilityLabel={unread > 0 ? `${title}, ${unread} sin leer` : title}
+                onPress={() => navigation.navigate('ChatDetail', { chat: item })}
+              >
+                <View style={styles.avatar}><Text style={styles.avatarText}>{title.slice(0, 2).toUpperCase()}</Text></View>
+                <View style={styles.rowContent}>
+                  <Text style={styles.contact} numberOfLines={1}>{title}</Text>
+                  <Text style={styles.secondary} numberOfLines={1}>{item.lastMessagePreview || 'Sin vista previa'}</Text>
+                </View>
+                <View style={styles.rowMeta}>
+                  <Text style={styles.timestamp}>{timeLabel(item.lastMessageTimestamp)}</Text>
+                  {unread > 0 ? <Text style={styles.unread}>{unread > 99 ? '99+' : unread}</Text> : null}
+                </View>
+              </Pressable>
+            );
+          }}
+          ListEmptyComponent={!error ? (
+            <View style={styles.empty}>
+              <MessageSquare size={32} color={colors.textMuted} />
+              <Text style={styles.contact}>No hay conversaciones</Text>
+              <Text style={styles.secondary}>
+                {search || filter !== 'all' ? 'Prueba otro filtro o término de búsqueda.' : 'Los mensajes nuevos aparecerán aquí.'}
               </Text>
             </View>
-          ) : null
-        }
-      />
+          ) : null}
+          ListFooterComponent={canLoadMore ? (
+            <Pressable style={styles.more} accessibilityRole="button" disabled={loadingMore} onPress={() => void loadMore()}>
+              <Text style={styles.action}>{loadingMore ? 'Cargando…' : 'Cargar más conversaciones'}</Text>
+            </Pressable>
+          ) : null}
+        />
+      )}
     </SafeAreaView>
   );
-};
+}
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: DARK_THEME.background,
-  },
-  header: {
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 8,
-  },
-  headerTitle: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: DARK_THEME.textPrimary,
-    marginBottom: 10,
-  },
-  searchBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: DARK_THEME.surface,
-    borderWidth: 1,
-    borderColor: DARK_THEME.border,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    height: 42,
-    gap: 8,
-  },
-  searchInput: {
-    flex: 1,
-    color: DARK_THEME.textPrimary,
-    fontSize: 14,
-  },
-  tabContainer: {
-    flexDirection: 'row',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    gap: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: DARK_THEME.border,
-  },
-  tabButton: {
-    paddingVertical: 6,
-    paddingHorizontal: 14,
-    borderRadius: 20,
-    backgroundColor: DARK_THEME.surface,
-  },
-  tabButtonActive: {
-    backgroundColor: DARK_THEME.primary,
-  },
-  tabText: {
-    fontSize: 13,
-    color: DARK_THEME.textSecondary,
-    fontWeight: '500',
-  },
-  tabTextActive: {
-    color: '#ffffff',
-    fontWeight: '600',
-  },
-  listContent: {
-    padding: 16,
-    gap: 12,
-  },
-  card: {
-    backgroundColor: DARK_THEME.surface,
-    borderWidth: 1,
-    borderColor: DARK_THEME.border,
-    borderRadius: 12,
-    padding: 14,
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 4,
-  },
-  cardTitleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    flex: 1,
-  },
-  contactTitle: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: DARK_THEME.textPrimary,
-    maxWidth: '65%',
-  },
-  channelPill: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-    borderWidth: 1,
-  },
-  channelPillText: {
-    fontSize: 10,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-  },
-  timeText: {
-    fontSize: 11,
-    color: DARK_THEME.textMuted,
-  },
-  externalIdText: {
-    fontSize: 12,
-    color: DARK_THEME.textMuted,
-    marginBottom: 10,
-  },
-  cardFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  statusPills: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  badge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-  badgeAi: {
-    backgroundColor: DARK_THEME.badgeAi,
-  },
-  badgeHuman: {
-    backgroundColor: DARK_THEME.badgeHuman,
-  },
-  badgeText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#ffffff',
-  },
-  versionPill: {
-    backgroundColor: DARK_THEME.surfaceLight,
-    paddingHorizontal: 6,
-    paddingVertical: 3,
-    borderRadius: 4,
-  },
-  versionText: {
-    fontSize: 10,
-    color: DARK_THEME.textSecondary,
-    fontFamily: 'monospace',
-  },
-  unreadIndicator: {
-    backgroundColor: 'rgba(13, 148, 136, 0.2)',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 10,
-  },
-  unreadText: {
-    fontSize: 11,
-    color: DARK_THEME.accent,
-    fontWeight: '600',
-  },
-  emptyContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 60,
-    gap: 12,
-  },
-  emptyTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: DARK_THEME.textSecondary,
-  },
-  emptySubtitle: {
-    fontSize: 13,
-    color: DARK_THEME.textMuted,
-    textAlign: 'center',
-    maxWidth: 250,
-  },
+  screen: { flex: 1, backgroundColor: colors.background },
+  header: { paddingHorizontal: 16, paddingTop: 12, gap: 14 },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  titleGroup: { flex: 1, gap: 4 },
+  eyebrow: { color: colors.accent, fontSize: 11, fontWeight: '700', letterSpacing: 1.7 },
+  title: { color: colors.textPrimary, fontSize: 25, fontWeight: '800' },
+  iconButton: { width: 44, height: 44, borderRadius: 10, backgroundColor: colors.surface, justifyContent: 'center', alignItems: 'center' },
+  search: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, minHeight: 46, backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1, borderRadius: 10 },
+  searchInput: { flex: 1, minHeight: 44, color: colors.textPrimary, fontSize: 16 },
+  filters: { flexDirection: 'row', flexWrap: 'wrap', paddingVertical: 12, paddingHorizontal: 16, gap: 8 },
+  filter: { justifyContent: 'center', minHeight: 44, paddingHorizontal: 12, borderRadius: 12, backgroundColor: colors.surface },
+  selectedFilter: { backgroundColor: colors.surfaceLight, borderWidth: 1, borderColor: colors.primary },
+  filterLabel: { fontSize: 13, color: colors.textSecondary, fontWeight: '600' },
+  selectedLabel: { color: colors.textPrimary },
+  list: { paddingHorizontal: 16, paddingBottom: 20, gap: 8 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, minHeight: 66, borderRadius: 12, backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 },
+  avatar: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surfaceLight },
+  avatarText: { color: colors.accent, fontWeight: '800', fontSize: 13 },
+  rowContent: { flex: 1, gap: 4 },
+  contact: { color: colors.textPrimary, fontSize: 15, fontWeight: '700' },
+  rowMeta: { alignItems: 'flex-end', gap: 6 },
+  secondary: { color: colors.textSecondary, fontSize: 13, lineHeight: 19 },
+  timestamp: { color: colors.textMuted, fontSize: 12 },
+  unread: { color: colors.textPrimary, fontSize: 12, fontWeight: '700', paddingHorizontal: 7, paddingVertical: 2, borderRadius: 10, backgroundColor: colors.primaryHover },
+  notice: { paddingHorizontal: 16, paddingVertical: 8 },
+  noticeText: { color: '#fda4af', lineHeight: 20 },
+  textButton: { minHeight: 44, justifyContent: 'center' },
+  action: { color: colors.accent, fontWeight: '700' },
+  empty: { minHeight: 160, padding: 24, alignItems: 'center', justifyContent: 'center', gap: 8 },
+  more: { minHeight: 44, alignItems: 'center', justifyContent: 'center' },
 });

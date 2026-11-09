@@ -1,86 +1,119 @@
-/**
- * Root Application Component for Whatsap-Automat Mobile
- * Provides Navigation Container, Theme Styling, and Auth Guard.
- */
-
-import React, { useState, useEffect } from 'react';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
-import { NavigationContainer } from '@react-navigation/native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { DarkTheme, NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { authStorage } from './src/services/authStorage';
+import { apiClient, handleUnauthorized } from './src/services/apiClient';
+import { authStorage, type AuthSession } from './src/services/authStorage';
+import { SessionContext } from './src/services/sessionContext';
+import { SignInScreen } from './src/screens/SignInScreen';
 import { InboxScreen } from './src/screens/InboxScreen';
 import { ChatDetailScreen } from './src/screens/ChatDetailScreen';
-import { RootStackParamList, DARK_THEME } from './src/types/navigation';
+import { DARK_THEME as colors, type RootStackParamList } from './src/types/navigation';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
-export default function App() {
-  const [isReady, setIsReady] = useState(false);
+const navigationTheme = {
+  ...DarkTheme,
+  colors: {
+    primary: colors.primary,
+    background: colors.background,
+    card: colors.surface,
+    text: colors.textPrimary,
+    border: colors.border,
+    notification: colors.danger,
+  },
+};
 
-  useEffect(() => {
-    async function initSession() {
-      const isAuthed = await authStorage.isAuthenticated();
-      if (!isAuthed) {
-        // Seed default development / test session for instant mobile inbox evaluation
-        await authStorage.saveAuthSession({
-          accessToken: 'mock_jwt_mobile_agent_token',
-          refreshToken: 'mock_refresh_token',
-          tenantId: '1',
-          userId: '101',
-          apiUrl: 'http://localhost:3000/api/v1',
-        });
-      }
-      setIsReady(true);
-    }
-    initSession();
+export default function App() {
+  const [session, setSession] = useState<AuthSession | null | undefined>(undefined);
+  const [storageError, setStorageError] = useState<'read' | 'clear' | null>(null);
+  const [signInNotice, setSignInNotice] = useState('');
+  const currentSession = useRef<AuthSession | null>(null);
+
+  function updateSession(value: AuthSession | null) {
+    currentSession.current = value;
+    setSession(value);
+  }
+
+  const restoreSession = useCallback(() => {
+    setStorageError(null);
+    authStorage.getAuthSession().then(updateSession).catch(() => setStorageError('read'));
   }, []);
 
-  if (!isReady) {
-    return (
-      <View style={styles.splash}>
-        <ActivityIndicator size="large" color={DARK_THEME.primary} />
+  useEffect(restoreSession, [restoreSession]);
+
+  const clearSession = useCallback(async () => {
+    currentSession.current = null;
+    setSession(undefined);
+    setStorageError(null);
+    try {
+      await authStorage.clearAuthSession();
+      updateSession(null);
+    } catch {
+      setStorageError('clear');
+    }
+  }, []);
+
+  useEffect(() => handleUnauthorized((token) => {
+    if (currentSession.current?.accessToken === token) {
+      setSignInNotice('Tu sesión terminó. Inicia sesión para continuar.');
+      void clearSession();
+    }
+  }), [clearSession]);
+
+  async function signIn(value: AuthSession) {
+    await authStorage.saveAuthSession(value);
+    updateSession(value);
+  }
+
+  function signOut() {
+    const previous = currentSession.current;
+    setSignInNotice('');
+    void clearSession();
+    if (previous) void apiClient.signOut(previous).catch(() => undefined);
+  }
+
+  let screen = (
+    <View style={styles.center}>
+      <ActivityIndicator accessibilityLabel="Abriendo Whatsap Automat" size="large" color={colors.accent} />
+    </View>
+  );
+  if (storageError) {
+    screen = (
+      <View style={styles.center}>
+        <Text accessibilityRole="alert" style={styles.label}>No se pudo acceder al almacenamiento seguro.</Text>
+        <Pressable accessibilityRole="button" style={styles.retry} onPress={storageError === 'read' ? restoreSession : () => void clearSession()}>
+          <Text style={styles.label}>Volver a intentar</Text>
+        </Pressable>
       </View>
+    );
+  } else if (session === null) {
+    screen = <SignInScreen onSignIn={signIn} notice={signInNotice} />;
+  } else if (session) {
+    screen = (
+      <SessionContext.Provider value={{ session, signOut }}>
+        <NavigationContainer theme={navigationTheme}>
+          <Stack.Navigator screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="Inbox" component={InboxScreen} />
+            <Stack.Screen name="ChatDetail" component={ChatDetailScreen} />
+          </Stack.Navigator>
+        </NavigationContainer>
+      </SessionContext.Provider>
     );
   }
 
   return (
     <SafeAreaProvider>
-      <StatusBar style="light" backgroundColor={DARK_THEME.background} />
-      <NavigationContainer
-        theme={{
-          dark: true,
-          colors: {
-            primary: DARK_THEME.primary,
-            background: DARK_THEME.background,
-            card: DARK_THEME.surface,
-            text: DARK_THEME.textPrimary,
-            border: DARK_THEME.border,
-            notification: DARK_THEME.danger,
-          },
-        }}
-      >
-        <Stack.Navigator
-          initialRouteName="Inbox"
-          screenOptions={{
-            headerShown: false,
-            contentStyle: { backgroundColor: DARK_THEME.background },
-          }}
-        >
-          <Stack.Screen name="Inbox" component={InboxScreen} />
-          <Stack.Screen name="ChatDetail" component={ChatDetailScreen} />
-        </Stack.Navigator>
-      </NavigationContainer>
+      <StatusBar style="light" />
+      {screen}
     </SafeAreaProvider>
   );
 }
 
 const styles = StyleSheet.create({
-  splash: {
-    flex: 1,
-    backgroundColor: DARK_THEME.background,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 12, backgroundColor: colors.background },
+  label: { color: colors.textPrimary, textAlign: 'center', fontSize: 15 },
+  retry: { backgroundColor: colors.primaryHover, padding: 12, borderRadius: 8 },
 });
