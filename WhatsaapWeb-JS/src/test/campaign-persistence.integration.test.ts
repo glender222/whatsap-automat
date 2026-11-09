@@ -8,7 +8,7 @@ import { Pool } from 'pg';
 
 test('campaign API persists scoped drafts, real counts, suppression and acknowledged delivery', {
   skip: process.env.CAMPAIGN_SMOKE !== '1' && 'Use a dedicated migrated *_smoke database and set CAMPAIGN_SMOKE=1',
-  timeout: 15000,
+  timeout: 40000,
 }, async (context) => {
   const { default: config } = await import('../config');
   const { default: pool } = await import('../config/database');
@@ -191,11 +191,13 @@ test('campaign API persists scoped drafts, real counts, suppression and acknowle
   let releaseMeta!: () => void;
   const holdFirstProviderResponse = new Promise<void>((resolve) => { releaseMeta = resolve; });
   let confirmMeta = true;
+  let rejectMeta = false;
   const realFetch = globalThis.fetch;
   const fetchFixture: typeof fetch = async (input, init) => {
     const url = new URL(String(input));
     if (url.origin === base) return realFetch(input, init);
     assert.equal(url.origin, 'https://graph.facebook.com');
+    assert.equal(init?.redirect, 'error');
     metaRequests.push({
       url: url.href,
       authorization: new Headers(init?.headers).get('Authorization'),
@@ -203,6 +205,7 @@ test('campaign API persists scoped drafts, real counts, suppression and acknowle
     });
     const number = metaRequests.length;
     if (number === 1) await holdFirstProviderResponse;
+    if (rejectMeta) return Response.json({ error: { code: 100, message: 'Fixture rejection' } }, { status: 400 });
     return Response.json(confirmMeta ? { messages: [{ id: `wamid.smoke.${number}` }] } : {});
   };
   globalThis.fetch = fetchFixture;
@@ -298,14 +301,41 @@ test('campaign API persists scoped drafts, real counts, suppression and acknowle
   });
   assert.equal((await request(`/production/campaigns/${openWindow.id}/dispatch`, tenant, 200, {})).data.statsDispatched, 1);
   assert.equal(metaRequests[1].body.type, 'text');
+  await consent.recordOptIn(tenant, {
+    contactId: contacts[1], channelType: 'whatsapp-cloud', destination: '+51987571123',
+    purpose: 'marketing', evidenceType: 'manual', evidenceProof: {},
+  });
+  await setContacts([contacts[0], contacts[1]]);
   confirmMeta = false;
   const { data: missingAck } = await request('/production/campaigns', tenant, 201, {
-    ...whatsappInput, name: 'Sin acuse de Meta', connectionId: sentWhatsApp.connectionId,
+    ...whatsappInput, name: 'Sin acuse de Meta', connectionId: sentWhatsApp.connectionId, templateId: 'aviso',
   });
+  const attemptedBeforePause = metaRequests.length;
   const unconfirmed = await request(`/production/campaigns/${missingAck.id}/dispatch`, tenant, 200, {});
-  assert.equal(unconfirmed.data.status, 'failed');
+  assert.equal(unconfirmed.data.status, 'paused');
   assert.equal(unconfirmed.data.statsDispatched, 0);
-  assert.equal((await dispatcher.getDeliveries(missingAck.id, tenant))[0]?.errorCode, 'CAMPAIGN_PROVIDER_ACK_MISSING');
+  assert.equal(unconfirmed.data.statsFailed, 0);
+  const [unconfirmedDelivery] = await dispatcher.getDeliveries(missingAck.id, tenant);
+  assert.equal(unconfirmedDelivery.status, 'pending');
+  assert.equal(unconfirmedDelivery.errorCode, 'CAMPAIGN_PROVIDER_ACK_MISSING');
+  const pendingReview = await request(`/production/campaigns/${missingAck.id}/dispatch-review`, tenant, 200);
+  assert.equal(pendingReview.data.blockedByUnconfirmedDelivery, true);
+  assert.equal(pendingReview.data.unattemptedCount, 1);
+  const attemptedBeforeReplay = metaRequests.length;
+  assert.equal(attemptedBeforeReplay, attemptedBeforePause + 1);
+  const replay = await request(`/production/campaigns/${missingAck.id}/dispatch`, tenant, 409, {});
+  assert.equal(replay.error, 'CAMPAIGN_DELIVERY_UNCONFIRMED');
+  assert.equal(metaRequests.length, attemptedBeforeReplay);
+
+  await setContacts([contacts[0]]);
+  rejectMeta = true;
+  const { data: rejectedCampaign } = await request('/production/campaigns', tenant, 201, {
+    ...whatsappInput, name: 'Rechazo explícito de Meta', connectionId: sentWhatsApp.connectionId,
+  });
+  const rejected = await request(`/production/campaigns/${rejectedCampaign.id}/dispatch`, tenant, 200, {});
+  assert.equal(rejected.data.status, 'failed');
+  assert.equal(rejected.data.statsFailed, 1);
+  assert.equal((await dispatcher.getDeliveries(rejectedCampaign.id, tenant))[0]?.errorCode, 'CAMPAIGN_PROVIDER_REJECTED');
   await consent.recordOptOut(tenant, {
     channelType: 'whatsapp-cloud', destination: '51987570123', purpose: 'all',
     evidenceType: 'manual', evidenceProof: {},

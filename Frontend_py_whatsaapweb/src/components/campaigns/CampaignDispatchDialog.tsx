@@ -37,7 +37,8 @@ export default function CampaignDispatchDialog({ campaign, onCancel, onConfirm }
   }, [campaign.id]);
 
   const dispatchable = Boolean(review && isDispatchableStatus(review.campaignStatus) &&
-    !review.limitExceeded && review.unattemptedCount > 0 && (review.templateName || review.contentBody?.trim()));
+    !review.blockedByUnconfirmedDelivery && !review.limitExceeded && review.unattemptedCount > 0 &&
+    (review.templateName || review.contentBody?.trim()));
 
   return (
     <dialog
@@ -73,7 +74,9 @@ export default function CampaignDispatchDialog({ campaign, onCancel, onConfirm }
             </dl>
             <p>El sistema vuelve a comprobar la audiencia y el consentimiento al enviar. El proveedor puede aceptar menos mensajes que el total revisado.</p>
             {!isDispatchableStatus(review.campaignStatus) && <p role="status">La campaña cambió de estado. Actualiza el listado.</p>}
-            {!review.limitExceeded && review.unattemptedCount === 0 && <p role="status">No hay números pendientes de procesar.</p>}
+            {review.blockedByUnconfirmedDelivery
+              ? <p role="status">La campaña está en pausa hasta que se confirme el resultado en WhatsApp.</p>
+              : !review.limitExceeded && review.unattemptedCount === 0 && <p role="status">No hay números pendientes de procesar.</p>}
           </div>
         ) : <p role="status" className="text-sm">Comprobando la audiencia…</p>}
         <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">

@@ -14,6 +14,7 @@ import { CampaignRequestError } from './CampaignRequestError';
 import { defaultWhatsAppCampaignLanguage, WhatsAppCampaignTransport } from './WhatsAppCampaignTransport';
 
 const audienceLimit = 1000;
+const unconfirmedDeliveryMessage = 'Hay entregas sin confirmar que requieren conciliación.';
 
 export interface DispatcherOptions {
   readonly skipPacingDelay?: boolean; // For deterministic unit tests
@@ -323,6 +324,9 @@ export class CampaignDispatcher {
     }
 
     const existingDeliveries = await this.getDeliveries(campaign.id, tenantId);
+    if (whatsapp && existingDeliveries.some(({ status }) => status === 'pending')) {
+      throw new CampaignRequestError(409, 'CAMPAIGN_DELIVERY_UNCONFIRMED', unconfirmedDeliveryMessage);
+    }
     if (recipients.length === 0 && existingDeliveries.length === 0) {
       throw new CampaignRequestError(409, 'CAMPAIGN_AUDIENCE_EMPTY', 'El segmento no tiene destinatarios aptos.');
     }
@@ -547,11 +551,17 @@ export class CampaignDispatcher {
         campaign.statsDispatched++;
         attemptDispatched++;
       } catch (error) {
-        delivery.status = 'failed';
         delivery.errorCode = error instanceof CampaignRequestError ? error.code : 'SEND_ERROR';
         delivery.errorMessage = 'No se confirmó el envío al proveedor.';
-        campaign.statsFailed++;
-        attemptFailed++;
+        if (whatsapp && ['CAMPAIGN_PROVIDER_ACK_MISSING', 'CAMPAIGN_PROVIDER_OUTCOME_UNKNOWN'].includes(delivery.errorCode)) {
+          campaign.status = 'paused';
+          campaign.pauseReason = unconfirmedDeliveryMessage;
+        } else {
+          delivery.status = 'failed';
+          if (delivery.errorCode === 'CAMPAIGN_PROVIDER_REJECTED') delivery.errorMessage = 'El proveedor rechazó el envío.';
+          campaign.statsFailed++;
+          attemptFailed++;
+        }
       }
       await this.saveDelivery(tenantId, delivery);
       if (evaluateCircuitBreaker()) break;
@@ -567,7 +577,7 @@ export class CampaignDispatcher {
     if (campaign.status === 'dispatching') {
       if (existingDeliveries.some(({ status }) => status === 'pending')) {
         campaign.status = 'paused';
-        campaign.pauseReason = 'Hay entregas sin confirmar que requieren conciliación.';
+        campaign.pauseReason = unconfirmedDeliveryMessage;
       } else if (campaign.statsTotal > 0 && campaign.statsDispatched === 0 && campaign.statsFailed > 0) {
         campaign.status = 'failed';
       } else {
@@ -609,6 +619,7 @@ export class CampaignDispatcher {
       segmentName: segment?.name ?? null,
       audienceCount: recipients.length,
       unattemptedCount: recipients.filter(({ destination }) => !attempted.has(this.destinationKey(campaign, destination))).length,
+      blockedByUnconfirmedDelivery: campaign.channel === 'whatsapp-cloud' && deliveries.some(({ status }) => status === 'pending'),
       audienceLimit,
       limitExceeded: recipients.length > audienceLimit,
       reviewKey: this.reviewKey(campaign, recipients),

@@ -35,6 +35,7 @@ export interface DispatchReview {
   segmentName: string | null;
   audienceCount: number;
   unattemptedCount: number;
+  blockedByUnconfirmedDelivery?: boolean;
   audienceLimit: number;
   limitExceeded: boolean;
   reviewKey: string;
@@ -125,6 +126,7 @@ export async function reviewCampaignDispatch(campaignId: string, signal: AbortSi
       !Number.isSafeInteger(review.audienceCount) || review.audienceCount < 0 ||
       !Number.isSafeInteger(review.unattemptedCount) || review.unattemptedCount < 0 ||
       review.unattemptedCount > review.audienceCount ||
+      (review.blockedByUnconfirmedDelivery !== undefined && typeof review.blockedByUnconfirmedDelivery !== 'boolean') ||
       !Number.isSafeInteger(review.audienceLimit) || review.audienceLimit < 1 ||
       review.limitExceeded !== (review.audienceCount > review.audienceLimit) ||
       typeof review.reviewKey !== 'string' || !/^[a-f0-9]{64}$/.test(review.reviewKey)) {

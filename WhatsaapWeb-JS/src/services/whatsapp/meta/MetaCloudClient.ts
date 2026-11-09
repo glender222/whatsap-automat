@@ -80,6 +80,13 @@ export interface MetaDownloadResult {
   raw: Record<string, unknown>;
 }
 
+export function isDefiniteMetaMessageRejection(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const provider = error as { providerStatusCode?: number; meta?: { error?: { code?: unknown } } };
+  return [400, 401, 403, 404].includes(provider.providerStatusCode ?? 0) &&
+    Number.isSafeInteger(provider.meta?.error?.code);
+}
+
 export class MetaCloudClient {
   private readonly baseUrl: string;
 
@@ -295,7 +302,8 @@ export class MetaCloudClient {
     to: string,
     templateName: string,
     languageCode = 'en_US',
-    components?: unknown[]
+    components?: unknown[],
+    options: { redirect?: RequestRedirect } = {},
   ): Promise<MetaSendResult> {
     const template: Record<string, unknown> = {
       name: templateName,
@@ -305,6 +313,7 @@ export class MetaCloudClient {
 
     const result = await this.request(`/${this.config.phoneNumberId}/messages`, {
       method: 'POST',
+      redirect: options.redirect,
       body: {
         messaging_product: 'whatsapp',
         to: this.normalizeRecipient(to),

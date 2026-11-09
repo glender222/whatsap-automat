@@ -4,7 +4,7 @@ import config from '../../config/index';
 import { TenantScopedUoW, tenantScopedUoW } from '../../db/TenantScopedUoW';
 import type { Queryable } from '../../shared/UnitOfWorkPort';
 import MetaAccountStore from '../whatsapp/meta/MetaAccountStore';
-import { MetaCloudClient } from '../whatsapp/meta/MetaCloudClient';
+import { isDefiniteMetaMessageRejection, MetaCloudClient } from '../whatsapp/meta/MetaCloudClient';
 import { inspectConversationAttachment, uploadConversationAttachment, type AttachmentFile, type UploadedAttachment } from './ConversationAttachment';
 import { applyCanonicalMetaStatuses, lockMetaReceipt, refreshConversationPreview } from '../whatsapp/meta/MetaCanonicalReceipt';
 
@@ -64,13 +64,6 @@ function replay(claim: ClaimRow, command: SendIdentity, hash: string): SendMessa
   if (claim.state === 'failed') return failedDelivery;
   const status = claim.message_status ?? 'accepted';
   return { providerMessageId: claim.provider_message_id, accepted: true, rawStatus: status, deliveryState: toCanonicalDeliveryState(status) };
-}
-
-function definiteGraphRejection(error: unknown): boolean {
-  if (!error || typeof error !== 'object') return false;
-  const provider = error as { providerStatusCode?: number; meta?: { error?: { code?: unknown } } };
-  return [400, 401, 403, 404].includes(provider.providerStatusCode ?? 0) &&
-    Number.isSafeInteger(provider.meta?.error?.code);
 }
 
 async function getClaim(db: Queryable, tenantId: number, key: string): Promise<ClaimRow | undefined> {
@@ -141,7 +134,7 @@ export class ConversationSendService {
       });
       receipt = sent.providerMessageId;
     } catch (error) {
-      if (definiteGraphRejection(error)) return this.complete(command, reserved, hash, null, 'META_REJECTED');
+      if (isDefiniteMetaMessageRejection(error)) return this.complete(command, reserved, hash, null, 'META_REJECTED');
       return this.readOutcome(command, hash);
     }
     if (typeof receipt !== 'string' || !/^wamid\.[A-Za-z0-9+/_=-]{1,249}$/.test(receipt)) return this.readOutcome(command, hash);

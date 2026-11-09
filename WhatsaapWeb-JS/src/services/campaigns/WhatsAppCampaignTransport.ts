@@ -2,7 +2,7 @@ import { SendMessageCommandV1, SendMessageResultV1 } from '@whatsap-automat/cont
 import { TenantScopedUoW, tenantScopedUoW } from '../../db/TenantScopedUoW';
 import { Queryable } from '../../shared/UnitOfWorkPort';
 import MetaAccountStore from '../whatsapp/meta/MetaAccountStore';
-import { MetaCloudClient } from '../whatsapp/meta/MetaCloudClient';
+import { isDefiniteMetaMessageRejection, MetaCloudClient, type MetaSendResult } from '../whatsapp/meta/MetaCloudClient';
 import { CampaignRequestError } from './CampaignRequestError';
 
 export const defaultWhatsAppCampaignLanguage = 'es_CO';
@@ -61,17 +61,26 @@ export class WhatsAppCampaignTransport {
     if (message.kind !== 'text' && (message.kind !== 'template' || !message.templateId)) {
       throw new CampaignRequestError(400, 'INVALID_WHATSAPP_MESSAGE', 'Usa un mensaje de texto o una plantilla de WhatsApp.');
     }
-    const result = message.kind === 'template' && message.templateId
-      ? await client.sendTemplate(
+    let result: MetaSendResult;
+    try {
+      result = message.kind === 'template' && message.templateId
+        ? await client.sendTemplate(
           recipient,
           message.templateId,
           typeof message.parameters?.languageCode === 'string'
             ? message.parameters.languageCode
             : defaultWhatsAppCampaignLanguage,
           Array.isArray(message.parameters?.components) ? message.parameters.components : undefined,
+          { redirect: 'error' },
         )
-      : await client.sendText(recipient, message.text || '');
-    if (!result.providerMessageId) {
+        : await client.sendText(recipient, message.text || '', { redirect: 'error' });
+    } catch (error) {
+      if (isDefiniteMetaMessageRejection(error)) {
+        throw new CampaignRequestError(502, 'CAMPAIGN_PROVIDER_REJECTED', 'WhatsApp rechazó el mensaje.');
+      }
+      throw new CampaignRequestError(502, 'CAMPAIGN_PROVIDER_OUTCOME_UNKNOWN', 'No se confirmó el resultado del envío a WhatsApp.');
+    }
+    if (typeof result.providerMessageId !== 'string' || !result.providerMessageId.trim()) {
       throw new CampaignRequestError(502, 'CAMPAIGN_PROVIDER_ACK_MISSING', 'El proveedor no devolvió un identificador de envío.');
     }
     return {
