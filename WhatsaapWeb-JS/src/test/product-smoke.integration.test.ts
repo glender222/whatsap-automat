@@ -395,4 +395,59 @@ test('real API isolates two companies through auth, signed ingress, inbox, socke
   assert.equal(fromMessage.fileUrl, `/api/media/${mediaMessageId}`);
   assert.equal(fromMessage.chatId, chatId);
   assert.equal(fromMessage.mimeType, 'application/pdf');
+
+  const tenantId = owner.user.companyId;
+  const conversationId = Number(chats[0].conversationId);
+  const contactId = await withTenantTransaction(tenantId, async (db) => {
+    const { rows: [conversation] } = await db.query(
+      'SELECT contact_id FROM conversations WHERE company_id = $1 AND id = $2',
+      [tenantId, conversationId],
+    );
+    const contact = conversation.contact_id;
+    await db.query('UPDATE customer_orders SET contact_id = $1, conversation_id = $2 WHERE company_id = $3 AND id = $4',
+      [contact, conversationId, tenantId, order]);
+    const { rows: [product] } = await db.query(
+      "INSERT INTO products (company_id, name) VALUES ($1, 'Producto historial QA') RETURNING id", [tenantId],
+    );
+    await db.query(
+      `INSERT INTO order_items (company_id, order_id, product_id, product_name, quantity, status)
+       VALUES ($1, $2, $3, 'Producto historial QA', 2, 'confirmed')`,
+      [tenantId, order, product.id],
+    );
+    await db.query(
+      `INSERT INTO stock_movements (company_id, product_id, order_id, movement_type, quantity, stock_available_after, stock_reserved_after)
+       VALUES ($1, $2, $3, 'reservation', 2, 0, 2)`,
+      [tenantId, product.id, order],
+    );
+    const { rows: [tag] } = await db.query(
+      "INSERT INTO tags (company_id, name) VALUES ($1, 'Seguimiento QA') RETURNING id", [tenantId],
+    );
+    await db.query('INSERT INTO tag_chats (company_id, tag_id, conversation_id, chat_id) VALUES ($1, $2, $3, $4)',
+      [tenantId, tag.id, conversationId, chatId]);
+    await db.query(
+      `INSERT INTO operational_actions (company_id, contact_id, order_id, conversation_id, action_type, description)
+       VALUES ($1, $2, $3, $4, 'history_smoke', 'Acción registrada')`,
+      [tenantId, contact, order, conversationId],
+    );
+    return contact;
+  });
+  const historyRoot = '/api/customer-history';
+  const history = await api(`${historyRoot}/chats/${encodeURIComponent(chatId + '@c.us')}?messageLimit=1&conversationLimit=1`, 200, owner.accessToken);
+  assert.equal(history.contact.id, contactId);
+  assert.deepEqual(history.conversations.map((entry: { id: number }) => entry.id), [conversationId]);
+  assert.equal(history.recentMessages.length, 1);
+  assert.equal(history.recentMessages[0].providerMessageId, mediaMessageId);
+  assert.equal(history.recentMessages[0].hasAttachments, true);
+  assert.ok(history.tags.some((tag: { name: string }) => tag.name === 'Seguimiento QA'));
+  assert.equal(history.orders[0].id, order);
+  assert.equal(history.orders[0].items[0].quantity, 2);
+  assert.equal(history.orders[0].stockMovements[0].movementType, 'reservation');
+  assert.equal(history.actions[0].description, 'Acción registrada');
+  const byContact = await api(`${historyRoot}/contacts/${contactId}?messageLimit=1000`, 200, employeeToken);
+  assert.equal(byContact.contact.id, contactId);
+  assert.equal(byContact.meta.messageLimit, 100);
+  await api(`${historyRoot}/contacts/${contactId}`, 404, other.accessToken);
+  await api(`${historyRoot}/chats/${chatId}`, 404, other.accessToken);
+  await api(`${historyRoot}/chats/reference-${chatId}`, 404, owner.accessToken);
+
 });

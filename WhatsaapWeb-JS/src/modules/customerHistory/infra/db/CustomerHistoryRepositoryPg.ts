@@ -1,3 +1,5 @@
+import { Pool } from 'pg';
+import { withTenantTransaction } from '../../../../db/TenantScopedUoW';
 import { Queryable } from '../../../../shared/UnitOfWorkPort';
 import {
   CustomerHistory,
@@ -14,28 +16,35 @@ import { CustomerHistoryRepositoryPort } from '../../application/ports/CustomerH
 type Row = Record<string, any>;
 
 export class CustomerHistoryRepositoryPg implements CustomerHistoryRepositoryPort {
-  constructor(private readonly pool: Queryable) {}
+  constructor(private readonly pool: Pool) {}
 
   async findByContactId(companyId: number, contactId: number, limits: CustomerHistoryLimits): Promise<CustomerHistory | null> {
-    const contact = await this.findContactById(companyId, contactId);
-    if (!contact) return null;
-    return this.buildHistory(companyId, contact, limits);
+    return this.readHistory(companyId, limits, (db) => this.findContactById(db, companyId, contactId));
   }
 
   async findByChatId(companyId: number, chatId: string, limits: CustomerHistoryLimits): Promise<CustomerHistory | null> {
-    const contact = await this.findContactByChatId(companyId, this.buildChatLookupValues(chatId));
-    if (!contact) return null;
-    return this.buildHistory(companyId, contact, limits);
+    return this.readHistory(companyId, limits, (db) => this.findContactByChatId(db, companyId, this.buildChatLookupValues(chatId)));
   }
 
-  private async buildHistory(companyId: number, contact: CustomerHistoryContact, limits: CustomerHistoryLimits): Promise<CustomerHistory> {
-    const conversations = await this.listConversations(companyId, contact.id, limits.conversationLimit);
-    const [recentMessages, tags, orders, actions] = await Promise.all([
-      this.listRecentMessages(companyId, contact.id, limits.messageLimit),
-      this.listTags(companyId, conversations),
-      this.listOrders(companyId, contact.id, limits.conversationLimit),
-      this.listActions(companyId, contact.id, limits.messageLimit),
-    ]);
+  private async readHistory(
+    companyId: number,
+    limits: CustomerHistoryLimits,
+    findContact: (db: Queryable) => Promise<CustomerHistoryContact | null>,
+  ): Promise<CustomerHistory | null> {
+    return withTenantTransaction(companyId, async (db) => {
+      await db.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY');
+      const contact = await findContact(db);
+      if (!contact) return null;
+      return this.buildHistory(db, companyId, contact, limits);
+    }, this.pool);
+  }
+
+  private async buildHistory(db: Queryable, companyId: number, contact: CustomerHistoryContact, limits: CustomerHistoryLimits): Promise<CustomerHistory> {
+    const conversations = await this.listConversations(db, companyId, contact.id, limits.conversationLimit);
+    const recentMessages = await this.listRecentMessages(db, companyId, contact.id, limits.messageLimit);
+    const tags = await this.listTags(db, companyId, conversations);
+    const orders = await this.listOrders(db, companyId, contact.id, limits.conversationLimit);
+    const actions = await this.listActions(db, companyId, contact.id, limits.messageLimit);
 
     return {
       contact,
@@ -53,8 +62,8 @@ export class CustomerHistoryRepositoryPg implements CustomerHistoryRepositoryPor
     };
   }
 
-  private async findContactById(companyId: number, contactId: number): Promise<CustomerHistoryContact | null> {
-    const result = await this.pool.query(
+  private async findContactById(db: Queryable, companyId: number, contactId: number): Promise<CustomerHistoryContact | null> {
+    const result = await db.query(
       `SELECT id, external_contact_id, phone, name, display_name, profile_name, wa_id,
               first_seen_at, last_seen_at, created_at, updated_at
        FROM contacts
@@ -65,8 +74,8 @@ export class CustomerHistoryRepositoryPg implements CustomerHistoryRepositoryPor
     return result.rows[0] ? this.mapContact(result.rows[0]) : null;
   }
 
-  private async findContactByChatId(companyId: number, chatLookupValues: string[]): Promise<CustomerHistoryContact | null> {
-    const result = await this.pool.query(
+  private async findContactByChatId(db: Queryable, companyId: number, chatLookupValues: string[]): Promise<CustomerHistoryContact | null> {
+    const result = await db.query(
       `SELECT ct.id, ct.external_contact_id, ct.phone, ct.name, ct.display_name, ct.profile_name, ct.wa_id,
               ct.first_seen_at, ct.last_seen_at, ct.created_at, ct.updated_at
        FROM contacts ct
@@ -82,15 +91,16 @@ export class CustomerHistoryRepositoryPg implements CustomerHistoryRepositoryPor
            OR ct.wa_id = ANY($2::varchar[])
            OR ct.phone = ANY($2::varchar[])
          )
-       ORDER BY c.last_message_at DESC NULLS LAST, ct.updated_at DESC, ct.id DESC
+       ORDER BY (c.external_conversation_id = ($2::varchar[])[1]) DESC NULLS LAST,
+                c.last_message_at DESC NULLS LAST, ct.updated_at DESC, ct.id DESC
        LIMIT 1`,
       [companyId, chatLookupValues]
     );
     return result.rows[0] ? this.mapContact(result.rows[0]) : null;
   }
 
-  private async listConversations(companyId: number, contactId: number, limit: number): Promise<CustomerHistoryConversation[]> {
-    const result = await this.pool.query(
+  private async listConversations(db: Queryable, companyId: number, contactId: number, limit: number): Promise<CustomerHistoryConversation[]> {
+    const result = await db.query(
       `SELECT id, external_conversation_id, title, status, unread_count,
               last_message_at, last_message_preview, last_message_direction,
               service_window_expires_at, archived_at, closed_at
@@ -103,8 +113,8 @@ export class CustomerHistoryRepositoryPg implements CustomerHistoryRepositoryPor
     return result.rows.map((row) => this.mapConversation(row));
   }
 
-  private async listRecentMessages(companyId: number, contactId: number, limit: number): Promise<CustomerHistoryMessage[]> {
-    const result = await this.pool.query(
+  private async listRecentMessages(db: Queryable, companyId: number, contactId: number, limit: number): Promise<CustomerHistoryMessage[]> {
+    const result = await db.query(
       `SELECT m.id, m.provider_message_id, m.conversation_id, c.external_conversation_id AS chat_id,
               m.direction, m.body, m.message_type, m.status, m.occurred_at,
               EXISTS (
@@ -122,12 +132,12 @@ export class CustomerHistoryRepositoryPg implements CustomerHistoryRepositoryPor
     return result.rows.map((row) => this.mapMessage(row));
   }
 
-  private async listTags(companyId: number, conversations: CustomerHistoryConversation[]): Promise<CustomerHistoryTag[]> {
+  private async listTags(db: Queryable, companyId: number, conversations: CustomerHistoryConversation[]): Promise<CustomerHistoryTag[]> {
     if (conversations.length === 0) return [];
 
     const conversationIds = conversations.map((conversation) => conversation.id);
     const chatIds = conversations.map((conversation) => conversation.chatId);
-    const result = await this.pool.query(
+    const result = await db.query(
       `SELECT t.id, t.name, t.color, t.is_default,
               COALESCE(array_agg(DISTINCT tc.chat_id) FILTER (WHERE tc.chat_id IS NOT NULL), ARRAY[]::varchar[]) AS chat_ids
        FROM tags t
@@ -135,7 +145,7 @@ export class CustomerHistoryRepositoryPg implements CustomerHistoryRepositoryPor
        WHERE t.company_id = $1
          AND (
            tc.conversation_id = ANY($2::int[])
-           OR tc.chat_id = ANY($3::varchar[])
+           OR (tc.conversation_id IS NULL AND tc.chat_id = ANY($3::varchar[]))
          )
        GROUP BY t.id
        ORDER BY t.is_default DESC, LOWER(t.name) ASC`,
@@ -144,8 +154,8 @@ export class CustomerHistoryRepositoryPg implements CustomerHistoryRepositoryPor
     return result.rows.map((row) => this.mapTag(row));
   }
 
-  private async listOrders(companyId: number, contactId: number, limit: number): Promise<CustomerHistoryOrder[]> {
-    const result = await this.pool.query(
+  private async listOrders(db: Queryable, companyId: number, contactId: number, limit: number): Promise<CustomerHistoryOrder[]> {
+    const result = await db.query(
       `SELECT id, title, service_type, COALESCE(order_type, 'service') AS order_type,
               status, notes, created_by, agent_id, conversation_id,
               occurred_at, confirmed_at, reserved_at, created_at, updated_at
@@ -167,23 +177,21 @@ export class CustomerHistoryRepositoryPg implements CustomerHistoryRepositoryPor
     if (orders.length === 0) return orders;
 
     const orderIds = orders.map((order) => order.id);
-    const [itemsResult, movementsResult] = await Promise.all([
-      this.pool.query(
-        `SELECT id, order_id, product_id, commercial_item_id, product_name, sku, quantity,
-                unit_price, currency, status, item_type_snapshot, availability_status
-         FROM order_items
-         WHERE company_id = $1 AND order_id = ANY($2::bigint[])
-         ORDER BY id ASC`,
-        [companyId, orderIds]
-      ),
-      this.pool.query(
-        `SELECT id, order_id, product_id, commercial_item_id, movement_type, quantity, occurred_at
-         FROM stock_movements
-         WHERE company_id = $1 AND order_id = ANY($2::bigint[])
-         ORDER BY occurred_at DESC, id DESC`,
-        [companyId, orderIds]
-      ),
-    ]);
+    const itemsResult = await db.query(
+      `SELECT id, order_id, product_id, commercial_item_id, product_name, sku, quantity,
+              unit_price, currency, status, item_type_snapshot, availability_status
+       FROM order_items
+       WHERE company_id = $1 AND order_id = ANY($2::bigint[])
+       ORDER BY id ASC`,
+      [companyId, orderIds]
+    );
+    const movementsResult = await db.query(
+      `SELECT id, order_id, product_id, commercial_item_id, movement_type, quantity, occurred_at
+       FROM stock_movements
+       WHERE company_id = $1 AND order_id = ANY($2::bigint[])
+       ORDER BY occurred_at DESC, id DESC`,
+      [companyId, orderIds]
+    );
 
     const itemsByOrder = new Map<number, Row[]>();
     for (const row of itemsResult.rows) {
@@ -222,8 +230,8 @@ export class CustomerHistoryRepositoryPg implements CustomerHistoryRepositoryPor
     }));
   }
 
-  private async listActions(companyId: number, contactId: number, limit: number): Promise<CustomerHistoryAction[]> {
-    const result = await this.pool.query(
+  private async listActions(db: Queryable, companyId: number, contactId: number, limit: number): Promise<CustomerHistoryAction[]> {
+    const result = await db.query(
       `SELECT id, order_id, action_type, status, description, actor_user_id,
               conversation_id, message_id, occurred_at, created_at
        FROM operational_actions
@@ -238,10 +246,8 @@ export class CustomerHistoryRepositoryPg implements CustomerHistoryRepositoryPor
 
   private buildChatLookupValues(value: string): string[] {
     const raw = String(value || '').trim();
-    const normalized = raw
-      .replace('@c.us', '')
-      .replace('@s.whatsapp.net', '')
-      .replace(/[^\d]/g, '');
+    const phone = /^\+?([\d ()-]+)(?:@c\.us|@s\.whatsapp\.net)?$/.exec(raw);
+    const normalized = phone?.[1].replace(/\D/g, '') || '';
 
     return Array.from(new Set([
       raw,
