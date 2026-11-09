@@ -295,13 +295,32 @@ paths:
   /channel-connections:
     get:
       summary: Listar conexiones de canales y salud
-      description: Lista las conexiones configuradas para el tenant sin exponer tokens ni secretos.
+      description: Lista las conexiones guardadas del tenant sin exponer credenciales. Las conexiones sin transporte operativo muestran un estado no disponible.
       operationId: listChannelConnections
       security:
         - BearerAuth: []
+      parameters:
+        - name: after
+          in: query
+          description: Identificador del último elemento de la página anterior. Decodifica el encabezado X-Next-Cursor antes de pasarlo como valor.
+          schema:
+            type: string
+            maxLength: 255
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
       responses:
         '200':
           description: Conexiones del tenant
+          headers:
+            X-Next-Cursor:
+              description: Cursor codificado para la siguiente página. Se omite al final de la lista.
+              schema:
+                type: string
           content:
             application/json:
               schema:
@@ -312,11 +331,42 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /channel-connections/{id}:
+    get:
+      summary: Obtener conexión y estado
+      description: Devuelve la conexión del tenant y su último diagnóstico disponible.
+      operationId: getChannelConnection
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Conexión del tenant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelConnection'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
 
   /channel-connections/{id}/validate:
     post:
       summary: Diagnosticar y validar conexión de canal
-      description: Ejecuta verificación de credenciales y permisos en el proveedor sin registrar mensajes de prueba.
+      description: Requiere rol ADMIN. Comprueba el acceso de lectura a la cuenta de WhatsApp en Graph. El diagnóstico no envía mensajes.
       operationId: validateChannelConnection
       security:
         - BearerAuth: []
@@ -335,8 +385,12 @@ paths:
                 $ref: '#/components/schemas/ChannelConnectionHealth'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
 
   /agent-graphs:
     get:
@@ -1272,7 +1326,8 @@ components:
           type: string
           nullable: true
         lastCheckedAt:
-          type: string
+          description: Fecha de la última comprobación en Graph. Null cuando aún no se comprobó.
+          type: [string, 'null']
           format: date-time
 
     ChannelConnection:

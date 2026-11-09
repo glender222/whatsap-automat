@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createHmac, randomUUID } from 'node:crypto';
+import { createHmac, randomInt, randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { test } from 'node:test';
 import { io, Socket } from 'socket.io-client';
@@ -69,7 +69,7 @@ test('real API isolates two companies through auth, signed ingress, inbox, socke
   ownerSocket.on('message', (message) => ownerMessages.push(message));
   otherSocket.on('message', (message) => otherMessages.push(message));
 
-  const phoneNumberId = randomUUID();
+  const phoneNumberId = String(randomInt(100_000_000_000_000, 200_000_000_000_000));
   await new MetaAccountStore().upsertConnection(owner.user.companyId, { phoneNumberId, status: 'configured' });
   const chatId = '51987654321';
   const messageId = `wamid.${randomUUID()}`;
@@ -144,6 +144,15 @@ test('real API isolates two companies through auth, signed ingress, inbox, socke
   assert.equal(earlier.nextCursor, null);
   assert.deepEqual(forward, latest);
   const client = new AutomatClient({ baseUrl: `${base}/api/v1`, token: owner.accessToken });
+  const connectionId = `wa-meta-${owner.user.companyId}-${phoneNumberId}`;
+  const [connection] = await client.channels.list({ limit: 1 });
+  assert.equal(connection.id, connectionId);
+  assert.equal(connection.externalAccountId, phoneNumberId);
+  assert.deepEqual(await client.channels.get(connectionId), connection);
+  assert.deepEqual(await client.channels.validate(connectionId), {
+    configured: false, authorized: false, lastErrorCode: 'META_CREDENTIAL_MISSING', lastCheckedAt: null,
+  });
+  await api(`/api/v1/channel-connections/${connectionId}`, 404, other.accessToken);
   assert.deepEqual(await client.conversations.list({ limit: 1 }).all(), [await client.conversations.get(canonical.id)]);
   assert.deepEqual((await client.conversations.listMessages(canonical.id, { limit: 1 }).all()).map((item) => item.body), [
     'Segundo mensaje de prueba', 'Mensaje de prueba',
@@ -239,6 +248,7 @@ test('real API isolates two companies through auth, signed ingress, inbox, socke
   await api(`${graphs}/${graphId}/publish`, 501, owner.accessToken, {});
 
   await api('/api/v1/admin/health/diagnostics', 403, employeeToken);
+  await api(`/api/v1/channel-connections/${connectionId}/validate`, 403, employeeToken, {});
   const createApproval = (expiresInSeconds: number) => hitlApprovalService.createApprovalRequest({
     tenantId: owner.user.companyId, runId: randomUUID(), toolName: 'test-review', risk: 'financial',
     effectKey: randomUUID(), proposedActionHash: 'synthetic-action-hash', expiresInSeconds,

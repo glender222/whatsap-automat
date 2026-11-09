@@ -76,7 +76,8 @@ Consulte los archivos de especificación formal:
 | `POST` | `/api/v1/conversations/{id}/pause-ai` | Pausa de IA conversacional (CAS) | `Authorization` |
 | `POST` | `/api/v1/conversations/{id}/resume-ai` | Reanudar IA conversacional (CAS) | `Authorization` |
 | `GET` | `/api/v1/channel-connections` | Conexiones y salud | `Authorization` |
-| `POST` | `/api/v1/channel-connections/{id}/validate` | Diagnóstico sin secretos | `Authorization` |
+| `GET` | `/api/v1/channel-connections/{id}` | Detalle y último diagnóstico | `Authorization` |
+| `POST` | `/api/v1/channel-connections/{id}/validate` | Comprobación de lectura de WhatsApp Cloud, rol ADMIN | `Authorization` |
 | `GET` | `/api/v1/agent-graphs` | Listar borradores por tenant | `Authorization`, rol `ADMIN` |
 | `POST` | `/api/v1/agent-graphs` | Crear borrador de grafo | `Authorization`, rol `ADMIN` |
 | `GET` | `/api/v1/agent-graphs/{id}` | Leer una revisión guardada | `Authorization`, rol `ADMIN` |

@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import random
 import time
+from urllib.parse import quote
 from uuid import uuid4
 from dataclasses import dataclass
 from typing import Any, Dict, List, Literal, Mapping, Optional, TypeVar, Union
@@ -162,17 +163,20 @@ class ChannelsResource:
     def __init__(self, client: AutomatClient):
         self._client = client
 
-    def list(self) -> List[ChannelConnection]:
-        res = self._client._request("GET", "/channel-connections")
+    def list(self, after: Optional[str] = None, limit: int = 50) -> List[ChannelConnection]:
+        params: Dict[str, Any] = {"limit": limit}
+        if after is not None:
+            params["after"] = after
+        res = self._client._request("GET", "/channel-connections", params=params)
         items = res.get("items", []) if isinstance(res, dict) else res
         return [ChannelConnection.model_validate(x) for x in items]
 
     def get(self, connection_id: str) -> ChannelConnection:
-        data = self._client._request("GET", f"/channel-connections/{connection_id}")
+        data = self._client._request("GET", f"/channel-connections/{quote(connection_id, safe='')}")
         return ChannelConnection.model_validate(data)
 
     def validate(self, connection_id: str) -> ChannelConnectionHealth:
-        data = self._client._request("POST", f"/channel-connections/{connection_id}/validate")
+        data = self._client._request("POST", f"/channel-connections/{quote(connection_id, safe='')}/validate")
         return ChannelConnectionHealth.model_validate(data)
 
 
@@ -492,17 +496,20 @@ class AsyncChannelsResource:
     def __init__(self, client: AsyncAutomatClient):
         self._client = client
 
-    async def list(self) -> List[ChannelConnection]:
-        res = await self._client._request("GET", "/channel-connections")
+    async def list(self, after: Optional[str] = None, limit: int = 50) -> List[ChannelConnection]:
+        params: Dict[str, Any] = {"limit": limit}
+        if after is not None:
+            params["after"] = after
+        res = await self._client._request("GET", "/channel-connections", params=params)
         items = res.get("items", []) if isinstance(res, dict) else res
         return [ChannelConnection.model_validate(x) for x in items]
 
     async def get(self, connection_id: str) -> ChannelConnection:
-        data = await self._client._request("GET", f"/channel-connections/{connection_id}")
+        data = await self._client._request("GET", f"/channel-connections/{quote(connection_id, safe='')}")
         return ChannelConnection.model_validate(data)
 
     async def validate(self, connection_id: str) -> ChannelConnectionHealth:
-        data = await self._client._request("POST", f"/channel-connections/{connection_id}/validate")
+        data = await self._client._request("POST", f"/channel-connections/{quote(connection_id, safe='')}/validate")
         return ChannelConnectionHealth.model_validate(data)
 
 
