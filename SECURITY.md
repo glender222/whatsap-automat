@@ -66,3 +66,5 @@ Whatsap-Automat implementa una estrategia de **defensa en profundidad**:
    Las credenciales de canales y tokens de Meta se almacenan cifradas con claves simétricas gestionadas (`META_TOKEN_ENCRYPTION_KEY`).
 5. **Policy Engine y Sandbox de Agentes IA:**  
    Las llamadas a herramientas de agentes IA clasificadas como de riesgo medio o alto requieren validación de políticas y aprobación explícita.
+
+El catálogo de extensiones admite fichas y reseñas. La instalación queda deshabilitada hasta verificar la firma y los permisos de cada artefacto y aislar el acceso de su código a archivos y red.

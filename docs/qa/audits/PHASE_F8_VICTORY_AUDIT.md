@@ -8,6 +8,8 @@
 **Integrity Mode**: Development (per `ORIGINAL_REQUEST.md`, Line 8)  
 **Verdict**: **VERDICT: VICTORY CONFIRMED**
 
+> Revisión del 9 de noviembre de 2026. Los resultados de este informe pertenecen a su revisión histórica. El candidato actual usa el [plan de validación](../../roadmap/PRODUCT_VALIDATION_PLAN.md) y un SBOM reproducible desde los archivos de bloqueo.
+
 ---
 
 ## 1. Executive Summary

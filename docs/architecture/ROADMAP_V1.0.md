@@ -758,7 +758,7 @@ La implementación del Blueprint v1.0 se divide en **10 fases secuenciales e ind
 - `packages/sdk/` (Nuevo paquete).
 - `packages/channel-sdk/`, `packages/connector-sdk/`, `packages/agent-tool-sdk/`, `packages/ui-extension-sdk/` (Nuevos paquetes).
 - `packages/cli/` (Nuevo paquete CLI `automat`).
-- `WhatsaapWeb-JS/src/services/extensions/ExtensionHost.ts`.
+- Host de ejecución de extensiones con aislamiento del sistema operativo, pendiente de implementación.
 - `WhatsaapWeb-JS/src/services/webhooks/OutboundWebhookSigner.ts`.
 - `Frontend_py_whatsaapweb/src/components/extensions/SandboxedExtensionIframe.tsx`.
 
@@ -788,7 +788,7 @@ La implementación del Blueprint v1.0 se divide en **10 fases secuenciales e ind
 - La creación de la CLI (`PR-F7-02`) y la publicación del SDK cliente (`PR-F7-01`) pueden realizarse en paralelo con el host de sandboxing (`PR-F7-03`).
 
 #### 8. Estrategia y cobertura de pruebas
-- Pruebas adversariales de plugins maliciosos: Un plugin que intenta leer el sistema de archivos (`/etc/passwd`), variables de entorno o consumir 100% de CPU es terminado inmediatamente por el `ExtensionHost` sin afectar al servidor principal.
+- Las pruebas adversariales deben verificar que un plugin carece de acceso a los archivos y secretos del servidor, que solo puede acceder a la red según sus permisos y que sus límites de CPU y memoria protegen al proceso principal.
 - Pruebas de extensiones de UI: Código JavaScript en el iframe no puede acceder a `window.parent`, cookies o local storage del host central.
 - Pruebas de verificación de firma HMAC en webhooks salientes.
 

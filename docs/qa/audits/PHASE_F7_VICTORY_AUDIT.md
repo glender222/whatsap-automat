@@ -8,6 +8,8 @@
 **Integrity Mode**: Development (per `ORIGINAL_REQUEST.md`)  
 **Verdict**: **VERDICT: VICTORY CONFIRMED**
 
+> Revisión del 9 de noviembre de 2026. Una prueba posterior reprodujo la lectura de un archivo del host desde el proceso invitado. El prototipo de ejecución y sus pruebas se retiraron del backend. La validación de aislamiento y la instalación de extensiones siguen pendientes en el [plan de validación](../../roadmap/PRODUCT_VALIDATION_PLAN.md).
+
 ---
 
 ## 1. Executive Summary
