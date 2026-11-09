@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { requireJwt } from '../middleware/jwtAuth';
+import { JwtRequest, requireJwt } from '../middleware/jwtAuth';
 import { tenantContext } from '../middleware/tenantContext';
 import {
   ByokService,
@@ -19,7 +19,6 @@ import {
   knowledgeQueryRequestV1Schema,
   ragPurgeRequestV1Schema,
   evalSimulateRequestV1Schema,
-  agentGraphVersionV1Schema,
 } from '@whatsap-automat/contracts';
 import {
   ToolBroker,
@@ -37,7 +36,20 @@ import {
   AgentEvalService,
   agentEvalService as defaultEvalService,
 } from '../services/ai/eval/AgentEvalService';
-import { PublicationGate } from '../services/ai/eval/PublicationGate';
+
+function resolveActor(req: JwtRequest) {
+  const user = req.user;
+  const identity = user?.userId ?? user?.id ?? user?.sub;
+  const id = typeof identity === 'string' || typeof identity === 'number' ? String(identity).trim() : '';
+  const roles = [user?.rol, user?.role, ...(Array.isArray(user?.roles) ? user.roles : [])]
+    .filter((role): role is string => typeof role === 'string' && role.trim().length > 0)
+    .map((role) => role.trim().toLowerCase());
+  return { id, roles: [...new Set(roles)] };
+}
+
+function approverRole(roles: string[]): string | undefined {
+  return roles.find((role) => ['admin', 'owner', 'supervisor'].includes(role));
+}
 
 export interface AiRoutesOptions {
   gateway?: ModelGateway;
@@ -278,11 +290,16 @@ export default function createAiRoutes(options: AiRoutesOptions = {}): Router {
   router.post('/tools/execute', requireJwt, tenantContext(), async (req: Request, res: Response) => {
     try {
       const tenantId = resolveTenantId(req);
+      const actor = resolveActor(req);
+      if (!actor.id || actor.roles.length === 0) {
+        res.status(403).json({ success: false, error: 'POLICY_DENIED', message: 'Tool execution requires an authenticated actor and role' });
+        return;
+      }
       const parsed = toolExecutionRequestV1Schema.safeParse({
         ...req.body,
         tenantId,
-        actorId: (req as any).user?.id ? String((req as any).user.id) : req.body.actorId,
-        actorRoles: (req as any).user?.roles || req.body.actorRoles || ['agent'],
+        actorId: actor.id,
+        actorRoles: actor.roles,
       });
 
       if (!parsed.success) {
@@ -321,6 +338,11 @@ export default function createAiRoutes(options: AiRoutesOptions = {}): Router {
   router.get('/approvals', requireJwt, tenantContext(), async (req: Request, res: Response) => {
     try {
       const tenantId = resolveTenantId(req);
+      const actor = resolveActor(req);
+      if (!actor.id || !approverRole(actor.roles)) {
+        res.status(403).json({ success: false, error: 'POLICY_DENIED', message: 'Approval access requires an authorized reviewer' });
+        return;
+      }
       const limit = req.query.limit ? Number(req.query.limit) : 50;
       const offset = req.query.offset ? Number(req.query.offset) : 0;
 
@@ -340,6 +362,12 @@ export default function createAiRoutes(options: AiRoutesOptions = {}): Router {
     try {
       const tenantId = resolveTenantId(req);
       const approvalId = String(req.params.id);
+      const actor = resolveActor(req);
+      const actorRole = approverRole(actor.roles);
+      if (!actor.id || !actorRole) {
+        res.status(403).json({ success: false, error: 'POLICY_DENIED', message: 'Approval decisions require an authorized reviewer' });
+        return;
+      }
       const { decision, reason, expectedVersion } = req.body;
 
       if (!decision || (decision !== 'approved' && decision !== 'rejected')) {
@@ -351,7 +379,7 @@ export default function createAiRoutes(options: AiRoutesOptions = {}): Router {
         return;
       }
 
-      if (expectedVersion === undefined || expectedVersion === null || Number(expectedVersion) < 1) {
+      if (!Number.isSafeInteger(Number(expectedVersion)) || Number(expectedVersion) < 1) {
         res.status(400).json({
           success: false,
           error: 'VALIDATION_ERROR',
@@ -360,16 +388,13 @@ export default function createAiRoutes(options: AiRoutesOptions = {}): Router {
         return;
       }
 
-      const actorId = (req as any).user?.id ? String((req as any).user.id) : 'supervisor_1';
-      const actorRole = (req as any).user?.role || 'supervisor';
-
       const result = await hitl.decideApproval({
         tenantId,
         approvalId,
         decision,
         reason,
         expectedVersion: Number(expectedVersion),
-        actorId,
+        actorId: actor.id,
         actorRole,
       });
 
@@ -599,53 +624,12 @@ export default function createAiRoutes(options: AiRoutesOptions = {}): Router {
     }
   });
 
-  // 19. POST /api/v1/ai/agents/:id/publish - Pre-deploy publication gate validation & commit
-  router.post('/agents/:id/publish', requireJwt, tenantContext(), async (req: Request, res: Response) => {
-    try {
-      const tenantId = resolveTenantId(req);
-      const agentGraphId = String(req.params.id);
-      const { graph, scorecard } = req.body;
-
-      const parsedGraph = agentGraphVersionV1Schema.safeParse(graph);
-      if (!parsedGraph.success) {
-        res.status(400).json({
-          success: false,
-          error: 'VALIDATION_ERROR',
-          message: 'Invalid agent graph version payload',
-          details: parsedGraph.error.issues,
-        });
-        return;
-      }
-
-      // Run Pre-Deploy Publication Gate Check
-      const gateResult = PublicationGate.validate(parsedGraph.data, scorecard || null);
-      if (!gateResult.allowed) {
-        res.status(422).json({
-          success: false,
-          error: 'PUBLICATION_GATE_BLOCKED',
-          message: 'Publication blocked by Pre-Deploy Quality & Security Gate.',
-          gateResult,
-        });
-        return;
-      }
-
-      res.status(200).json({
-        success: true,
-        message: `Agent '${agentGraphId}' revision v${parsedGraph.data.version} successfully published.`,
-        data: {
-          agentGraphId,
-          version: parsedGraph.data.version,
-          specHash: gateResult.computedSpecHash,
-          publishedAt: new Date().toISOString(),
-        },
-      });
-    } catch (err: any) {
-      res.status(err.statusCode || 500).json({
-        success: false,
-        error: err.code || 'INTERNAL_ERROR',
-        message: err.message,
-      });
-    }
+  router.post('/agents/:id/publish', requireJwt, tenantContext(), (_req: Request, res: Response) => {
+    res.status(501).json({
+      success: false,
+      error: 'PUBLICATION_UNAVAILABLE',
+      message: 'Agent publication requires a persisted revision and a server-verified evaluation',
+    });
   });
 
   return router;

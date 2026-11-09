@@ -8,6 +8,7 @@ import { describe, test, beforeEach } from 'node:test';
 const jwt = require('jsonwebtoken');
 
 const createAiRoutes = require('../routes/ai.routes').default as typeof import('../routes/ai.routes').default;
+const { createBrokerFixtureRegistry } = require('./fixtures/brokerTools') as typeof import('./fixtures/brokerTools');
 const {
   ToolBroker,
   ToolRegistry,
@@ -271,7 +272,7 @@ describe('PR-F5-02: AI ToolBroker Express Routes Integration (/api/v1/ai/tools &
 
   beforeEach(() => {
     mockUow = createMockUow();
-    registry = new ToolRegistry(mockUow);
+    registry = createBrokerFixtureRegistry(mockUow);
     hitlService = new HitlApprovalService(mockUow);
     casService = new ConversationCasService(mockUow);
     effectCache = new EffectCache(mockUow);
@@ -317,6 +318,24 @@ describe('PR-F5-02: AI ToolBroker Express Routes Integration (/api/v1/ai/tools &
   });
 
   describe('Route: POST /tools/execute', () => {
+    test('rejects caller-supplied actor roles for a restricted tool', async () => {
+      const token = createValidToken(1, 'operator');
+      const res = await invokeExpressRoute(router, 'post', '/tools/execute', {
+        token,
+        body: {
+          agentGraphId: 'graph_01',
+          runId: 'run_01',
+          toolName: 'http_request',
+          input: { url: 'https://example.invalid' },
+          actorId: 'pretend_admin',
+          actorRoles: ['admin'],
+        },
+      });
+
+      assert.equal(res.status, 403);
+      assert.equal(res.body.data.status, 'unauthorized');
+    });
+
     test('returns 400 VALIDATION_ERROR on malformed request body', async () => {
       const token = createValidToken(1, 'agent');
       const res = await invokeExpressRoute(router, 'post', '/tools/execute', {
@@ -433,6 +452,18 @@ describe('PR-F5-02: AI ToolBroker Express Routes Integration (/api/v1/ai/tools &
   });
 
   describe('Route: GET /approvals & POST /approvals/:id/decision', () => {
+    test('requires an authorized approver instead of trusting the body', async () => {
+      const token = createValidToken(1, 'operator');
+      const res = await invokeExpressRoute(router, 'post', '/approvals/:id/decision', {
+        token,
+        params: { id: 'approval_not_accessible' },
+        body: { decision: 'approved', expectedVersion: 1, actorRole: 'admin' },
+      });
+
+      assert.equal(res.status, 403);
+      assert.equal(res.body.error, 'POLICY_DENIED');
+    });
+
     test('lists pending approvals for tenant', async () => {
       const token = createValidToken(1, 'supervisor');
 

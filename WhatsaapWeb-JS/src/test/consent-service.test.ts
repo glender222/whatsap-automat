@@ -1,6 +1,7 @@
 import './fixtures/testEnv';
 
 import assert from 'node:assert/strict';
+const { createMemoryKnowledgeBaseService } = require('./fixtures/embeddingGateway') as typeof import('./fixtures/embeddingGateway');
 import { describe, it, beforeEach } from 'node:test';
 import { ConsentService } from '../services/campaigns/ConsentService';
 import { KnowledgeBaseService } from '../services/ai/rag/KnowledgeBaseService';
@@ -11,7 +12,7 @@ describe('PR-F6-03: ConsentService & GDPR Right to be Forgotten Verification', (
   const tenantId = 101;
 
   beforeEach(() => {
-    ragService = new KnowledgeBaseService();
+    ragService = createMemoryKnowledgeBaseService();
     consentService = new ConsentService(undefined as any, ragService);
   });
 

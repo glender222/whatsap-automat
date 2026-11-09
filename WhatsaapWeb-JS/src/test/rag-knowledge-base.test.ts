@@ -4,6 +4,7 @@ process.env.DB_PASSWORD = 'test-only-database-password';
 process.env.META_TOKEN_ENCRYPTION_KEY = 'test-encryption-key-with-at-least-32-chars-for-aes256';
 
 import assert from 'node:assert/strict';
+const { createFixtureAccessToken, createMemoryKnowledgeBaseService } = require('./fixtures/embeddingGateway') as typeof import('./fixtures/embeddingGateway');
 import { describe, it } from 'node:test';
 import { DocumentParser } from '../services/ai/rag/DocumentParser';
 import { TextChunker } from '../services/ai/rag/TextChunker';
@@ -86,9 +87,8 @@ async function invokeRoute(
 }
 
 describe('PR-F5-03: Backend pgvector RAG Knowledge Base & GDPR Purge Tests', () => {
-  const { generateAccessToken } = require('../utils/jwt');
-  const tokenTenant1 = generateAccessToken({ id: 1, sub: 'user_1', tenantId: 1, companyId: 1, role: 'admin', rol: 'ADMIN' });
-  const tokenTenant2 = generateAccessToken({ id: 2, sub: 'user_2', tenantId: 2, companyId: 2, role: 'admin', rol: 'ADMIN' });
+  const tokenTenant1 = createFixtureAccessToken({ id: 1, sub: 'user_1', tenantId: 1, companyId: 1, role: 'admin', rol: 'ADMIN' });
+  const tokenTenant2 = createFixtureAccessToken({ id: 2, sub: 'user_2', tenantId: 2, companyId: 2, role: 'admin', rol: 'ADMIN' });
 
   describe('1. DocumentParser Multi-Format Extraction', () => {
     it('normalizes plain text whitespace and line breaks', () => {
@@ -190,7 +190,7 @@ describe('PR-F5-03: Backend pgvector RAG Knowledge Base & GDPR Purge Tests', () 
       const gateway = new ModelGateway(
         new ByokService(mockUow),
         new QuotaManager(mockUow),
-        new TokenCostLedger(mockUow)
+        new TokenCostLedger(mockUow), undefined, 'synthetic'
       );
 
       const res = await gateway.embed({
@@ -207,10 +207,22 @@ describe('PR-F5-03: Backend pgvector RAG Knowledge Base & GDPR Purge Tests', () 
       const sumSq = res.embeddings[0].reduce((sum, v) => sum + v * v, 0);
       assert.ok(Math.abs(sumSq - 1.0) < 0.05, `Expected unit vector length ~1.0, got ${sumSq}`);
     });
+
+    it('rejects provider failures instead of generating replacement vectors', async () => {
+      const credential = {
+        resolveDecryptedCredential: async () => ({ apiKey: 'test-only', baseUrl: null, defaultModel: null, isByok: true }),
+      } as unknown as ByokService;
+      const quota = { assertWithinQuota: async () => undefined } as unknown as QuotaManager;
+      const gateway = new ModelGateway(credential, quota, undefined, async () => new Response('unavailable', { status: 503 }));
+
+      await assert.rejects(gateway.embed({ tenantId: 1, input: ['texto'] }), {
+        code: 'EMBEDDING_REQUEST_FAILED', statusCode: 502,
+      });
+    });
   });
 
   describe('4. KnowledgeBaseService Ingestion, Search & GDPR Purge', () => {
-    const kbService = new KnowledgeBaseService();
+    const kbService = createMemoryKnowledgeBaseService();
 
     it('creates and lists knowledge collections per tenant', async () => {
       const coll = await kbService.createCollection(1, {
@@ -293,7 +305,7 @@ describe('PR-F5-03: Backend pgvector RAG Knowledge Base & GDPR Purge Tests', () 
   });
 
   describe('5. Express AI RAG Routes Integration', () => {
-    const router = createAiRoutes();
+    const router = createAiRoutes({ knowledgeBaseService: createMemoryKnowledgeBaseService() });
 
     it('GET /api/v1/ai/rag/collections requires JWT and returns collections', async () => {
       const unauth = await invokeRoute(router, 'get', '/rag/collections');

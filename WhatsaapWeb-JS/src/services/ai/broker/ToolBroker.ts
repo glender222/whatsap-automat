@@ -132,7 +132,7 @@ export class ToolBroker {
     // STEP 4: Risk Categorization & Idempotency Key Determination
     // =========================================================================
     const riskLevel: ToolRiskLevel = tool.definition.riskLevel;
-    const proposedActionHash = this.computeActionHash(request.toolName, request.input);
+    const proposedActionHash = this.computeActionHash(request);
     const effectKey = request.effectKey || this.generateEffectKey(
       tenantIdNum,
       request.runId,
@@ -179,6 +179,34 @@ export class ToolBroker {
         };
       }
 
+      if (existingApproval.proposedActionHash !== proposedActionHash || existingApproval.runId !== request.runId) {
+        return {
+          success: false,
+          status: 'unauthorized',
+          output: null,
+          error: { code: 'APPROVAL_ACTION_MISMATCH', message: 'Approval is bound to a different action or run' },
+          durationMs: Date.now() - startTime,
+          riskLevel,
+          hitlRequired: true,
+          approvalId: null,
+          effectKey,
+        };
+      }
+
+      if (existingApproval.status === 'expired' || Date.parse(existingApproval.expiresAt) <= Date.now()) {
+        return {
+          success: false,
+          status: 'rejected',
+          output: null,
+          error: { code: 'APPROVAL_EXPIRED', message: 'Approval expired before the action was executed' },
+          durationMs: Date.now() - startTime,
+          riskLevel,
+          hitlRequired: false,
+          approvalId: existingApproval.id,
+          effectKey,
+        };
+      }
+
       if (existingApproval.status === 'pending') {
         return {
           success: false,
@@ -196,7 +224,7 @@ export class ToolBroker {
         };
       }
 
-      if (existingApproval.status === 'rejected') {
+      if (existingApproval.status !== 'approved') {
         return {
           success: false,
           status: 'rejected',
@@ -413,6 +441,7 @@ export class ToolBroker {
            FROM agent_tool_grants
            WHERE tenant_id = $1 AND tool_name = $2
              AND (agent_graph_id IS NULL OR agent_graph_id = $3)
+           ORDER BY (agent_graph_id IS NOT NULL) DESC, is_enabled ASC
            LIMIT 1`,
           [tenantId, request.toolName, request.agentGraphId]
         );
@@ -457,24 +486,25 @@ export class ToolBroker {
         return { granted: true };
       });
     } catch {
-      // In mock/test environments without DB connection, check definition roles directly
-      const actorRoles = (request.actorRoles || []).map((r) => r.toLowerCase());
-      const reqRoles = requiredRoles.map((r) => r.toLowerCase());
-      const hasRole = reqRoles.some((r) => actorRoles.includes(r));
-      if (!hasRole) {
-        return {
-          granted: false,
-          code: 'FORBIDDEN',
-          message: `Actor lacking required role. Tool requires one of: [${requiredRoles.join(', ')}]`,
-        };
-      }
-      return { granted: true };
+      return { granted: false, code: 'GRANTS_UNAVAILABLE', message: 'Tool permissions could not be verified' };
     }
   }
 
-  private computeActionHash(toolName: string, input: Record<string, unknown>): string {
-    const serialized = JSON.stringify(input, Object.keys(input).sort());
-    return createHash('sha256').update(`${toolName}:${serialized}`).digest('hex');
+  private computeActionHash(request: ToolExecutionRequestV1): string {
+    const action = {
+      toolName: request.toolName,
+      graphId: request.agentGraphId,
+      conversationId: request.conversationId,
+      expectedConversationVersion: request.expectedConversationVersion,
+      input: request.input,
+    };
+    const serialized = JSON.stringify(action, (_key, value: unknown) => {
+      if (value === null || typeof value !== 'object' || Array.isArray(value)) return value;
+      const entries = Object.entries(value);
+      entries.sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0);
+      return Object.fromEntries(entries);
+    });
+    return createHash('sha256').update(serialized).digest('hex');
   }
 
   private generateEffectKey(

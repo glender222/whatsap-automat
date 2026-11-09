@@ -1,6 +1,7 @@
 // Invariants before config load
 process.env.JWT_SECRET = 'test-only-jwt-secret-with-at-least-32-characters-for-testing';
 process.env.DB_PASSWORD = 'test-only-database-password';
+const { createBrokerFixtureRegistry } = require('./fixtures/brokerTools') as typeof import('./fixtures/brokerTools');
 process.env.META_TOKEN_ENCRYPTION_KEY = '01234567890123456789012345678901';
 
 import assert from 'node:assert/strict';
@@ -33,8 +34,6 @@ import {
   ApprovalCasConflictError,
   ApprovalNotFoundError,
   ApprovalExpiredError,
-  SendWhatsappMessageTool,
-  CreateInvoiceTool,
   HttpRequestTool,
 } from '../services/ai/broker';
 
@@ -919,7 +918,7 @@ describe('M4 Adversarial Stress Challenge: SSRF Evasions, Redirect Chains & CAS 
       mockUow = createConcurrencyMockUoW();
       casService = new ConversationCasService(mockUow);
       hitlService = new HitlApprovalService(mockUow);
-      registry = new ToolRegistry(mockUow);
+      registry = createBrokerFixtureRegistry(mockUow);
       const effectCache = new EffectCache(mockUow);
       broker = new ToolBroker({
         uow: mockUow,

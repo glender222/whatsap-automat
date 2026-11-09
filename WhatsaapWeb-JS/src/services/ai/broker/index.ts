@@ -7,8 +7,6 @@ export * from './HitlApprovalService';
 export * from './ToolBroker';
 export * from './tools/HttpRequestTool';
 export * from './tools/SearchKnowledgeTool';
-export * from './tools/SendWhatsappMessageTool';
-export * from './tools/CreateInvoiceTool';
 
 import { ToolBroker } from './ToolBroker';
 import { ToolRegistry } from './ToolRegistry';

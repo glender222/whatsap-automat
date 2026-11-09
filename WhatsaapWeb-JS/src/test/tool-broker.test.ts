@@ -4,6 +4,7 @@ process.env.DB_PASSWORD = 'test-only-database-password';
 
 import assert from 'node:assert/strict';
 import { describe, it, beforeEach } from 'node:test';
+const { createBrokerFixtureRegistry } = require('./fixtures/brokerTools') as typeof import('./fixtures/brokerTools');
 const {
   ToolBroker,
   ToolRegistry,
@@ -11,8 +12,6 @@ const {
   HitlApprovalService,
   HttpRequestTool,
   SearchKnowledgeTool,
-  SendWhatsappMessageTool,
-  CreateInvoiceTool,
 } = require('../services/ai/broker') as typeof import('../services/ai/broker');
 const { ConversationCasService } = require('../services/conversations/ConversationCasService') as typeof import('../services/conversations/ConversationCasService');
 import type {
@@ -163,7 +162,7 @@ describe('PR-F5-02 ToolBroker Security Barrier & Interception Engine Tests', () 
 
   beforeEach(() => {
     mockUow = createMockUoW();
-    registry = new ToolRegistry(mockUow);
+    registry = createBrokerFixtureRegistry(mockUow);
     hitlService = new HitlApprovalService(mockUow);
     casService = new ConversationCasService(mockUow);
     effectCache = new EffectCache(mockUow);
@@ -177,7 +176,16 @@ describe('PR-F5-02 ToolBroker Security Barrier & Interception Engine Tests', () 
   });
 
   describe('Suite 1: Tool Registry & Discovery', () => {
-    it('initializes with all 4 built-in standard tools', async () => {
+    it('exposes only tools with a working implementation by default', async () => {
+      const productionRegistry = new ToolRegistry(mockUow);
+      assert.deepEqual((await productionRegistry.listTools(1)).map((tool) => tool.definition.name), [
+        'http_request', 'search_knowledge',
+      ]);
+      assert.equal(await productionRegistry.getTool(1, 'send_whatsapp_message'), null);
+      assert.equal(await productionRegistry.getTool(1, 'create_invoice'), null);
+    });
+
+    it('lists implemented tools and explicitly injected test fixtures', async () => {
       const tools = await registry.listTools(1);
       const toolNames = tools.map((t) => t.definition.name);
 
@@ -437,7 +445,15 @@ describe('PR-F5-02 ToolBroker Security Barrier & Interception Engine Tests', () 
         actorRole: 'finance_admin',
       });
 
-      // ToolBroker re-evaluates: execution proceeds to executed status
+      const modified = await broker.execute({
+        ...req,
+        effectKey: initialResult.effectKey!,
+        input: { ...req.input, items: [{ description: 'Enterprise License', quantity: 1, unitAmountCents: 90000 }] },
+      });
+      assert.equal(modified.status, 'unauthorized');
+      assert.equal(modified.error?.code, 'APPROVAL_ACTION_MISMATCH');
+
+      // The approved action itself can still execute.
       const reResult = await broker.execute(req);
       assert.equal(reResult.success, true);
       assert.equal(reResult.status, 'executed');

@@ -7,6 +7,8 @@ process.env.DB_PASSWORD = 'test-only-database-password';
 process.env.META_TOKEN_ENCRYPTION_KEY = 'test-encryption-key-with-at-least-32-chars-for-aes256';
 process.env.TEST_MODE = 'true';
 
+const { createFixtureAccessToken, createMemoryKnowledgeBaseService } = require('./fixtures/embeddingGateway') as typeof import('./fixtures/embeddingGateway');
+const { createBrokerFixtureRegistry } = require('./fixtures/brokerTools') as typeof import('./fixtures/brokerTools');
 const {
   ToolBroker,
   ToolRegistry,
@@ -14,8 +16,6 @@ const {
   HitlApprovalService,
   HttpRequestTool,
   SearchKnowledgeTool,
-  SendWhatsappMessageTool,
-  CreateInvoiceTool,
 } = require('../services/ai/broker') as typeof import('../services/ai/broker');
 const { ConversationCasService } = require('../services/conversations/ConversationCasService') as typeof import('../services/conversations/ConversationCasService');
 const { TenantScopedUoW } = require('../db/TenantScopedUoW') as typeof import('../db/TenantScopedUoW');
@@ -399,7 +399,7 @@ describe('PR-F5 Adversarial Stress & Hardening Suite (Milestone M4)', () => {
 
     beforeEach(() => {
       mockUow = createAdversarialMockUoW();
-      registry = new ToolRegistry(mockUow);
+      registry = createBrokerFixtureRegistry(mockUow);
       hitlService = new HitlApprovalService(mockUow);
       toolBroker = new ToolBroker({
         uow: mockUow,
@@ -854,7 +854,7 @@ describe('PR-F5 Adversarial Stress & Hardening Suite (Milestone M4)', () => {
     let kbService: KnowledgeBaseService;
 
     beforeEach(() => {
-      kbService = new KnowledgeBaseService();
+      kbService = createMemoryKnowledgeBaseService();
     });
 
     it('2.1 Probing Multi-Tenant Vector Collection Isolation: Tenant 2 cannot access or ingest into Tenant 1 collection', async () => {
@@ -1101,8 +1101,7 @@ describe('PR-F5 Adversarial Stress & Hardening Suite (Milestone M4)', () => {
         content: 'Confidential secret credentials: PROD-API-KEY-999',
       });
 
-      const { generateAccessToken } = require('../utils/jwt');
-      const tokenTenant2 = generateAccessToken({
+      const tokenTenant2 = createFixtureAccessToken({
         id: 201,
         sub: 'attacker_user_2',
         tenantId: 2,

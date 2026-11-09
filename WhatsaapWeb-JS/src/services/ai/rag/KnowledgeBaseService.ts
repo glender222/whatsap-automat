@@ -52,7 +52,8 @@ export class KnowledgeBaseService {
 
   constructor(
     private readonly uow: TenantScopedUoW = tenantScopedUoW,
-    private readonly gateway: ModelGateway = modelGateway
+    private readonly gateway: ModelGateway = modelGateway,
+    private readonly options: { allowMemoryFallback?: boolean } = {}
   ) {}
 
   /**
@@ -107,7 +108,8 @@ export class KnowledgeBaseService {
           updatedAt: row.updated_at?.toISOString?.() || now,
         };
       });
-    } catch {
+    } catch (error) {
+      if (!this.options.allowMemoryFallback) throw error;
       // Memory store fallback
       const record: MemoryCollectionRecord = {
         id,
@@ -155,7 +157,8 @@ export class KnowledgeBaseService {
           updatedAt: row.updated_at?.toISOString?.() || row.updated_at,
         };
       });
-    } catch {
+    } catch (error) {
+      if (!this.options.allowMemoryFallback) throw error;
       const coll = this.memoryCollections.get(collectionId);
       if (!coll || coll.tenantId !== tenantId) return null;
       let count = 0;
@@ -191,7 +194,8 @@ export class KnowledgeBaseService {
           updatedAt: row.updated_at?.toISOString?.() || row.updated_at,
         }));
       });
-    } catch {
+    } catch (error) {
+      if (!this.options.allowMemoryFallback) throw error;
       const results: KnowledgeCollectionV1[] = [];
       for (const coll of this.memoryCollections.values()) {
         if (coll.tenantId === tenantId) {
@@ -220,7 +224,8 @@ export class KnowledgeBaseService {
         );
         return (res.rowCount || 0) > 0;
       });
-    } catch {
+    } catch (error) {
+      if (!this.options.allowMemoryFallback) throw error;
       const coll = this.memoryCollections.get(collectionId);
       if (!coll || coll.tenantId !== tenantId) return false;
       this.memoryCollections.delete(collectionId);
@@ -288,65 +293,56 @@ export class KnowledgeBaseService {
       input: chunkTexts,
     });
 
-    const chunkIds: string[] = [];
-    let totalTokens = 0;
     const now = new Date().toISOString();
-
-    for (let i = 0; i < chunkItems.length; i++) {
-      const item = chunkItems[i];
-      const chunkId = `chk_${documentId}_${item.index}`;
-      const vector = embeddingResult.embeddings[i] || [];
-      const meta = {
-        ...(command.metadata || {}),
-        documentName: command.documentName,
-        fileType: command.fileType,
-        startChar: item.startChar,
-        endChar: item.endChar,
+    const records = chunkItems.map((item, index) => {
+      const embedding = embeddingResult.embeddings[index];
+      if (!embedding?.length || !embedding.every(Number.isFinite)) {
+        throw new Error('Embedding provider did not return a valid vector for every chunk');
+      }
+      return {
+        id: `chk_${documentId}_${item.index}`,
+        collectionId: command.collectionId,
+        tenantId,
+        documentId,
+        customerId: command.customerId || null,
+        chunkIndex: item.index,
+        content: item.text,
+        metadata: {
+          ...(command.metadata || {}),
+          documentName: command.documentName,
+          fileType: command.fileType,
+          startChar: item.startChar,
+          endChar: item.endChar,
+        },
+        embedding,
+        tokenCount: item.tokenCount,
+        createdAt: now,
       };
+    });
 
-      chunkIds.push(chunkId);
-      totalTokens += item.tokenCount;
-
-      try {
-        await this.uow.run(tenantId, async (client) => {
-          // Format vector for pgvector: '[0.1,0.2,...]'
-          const vectorStr = `[${vector.join(',')}]`;
+    try {
+      await this.uow.run(tenantId, async (client) => {
+        for (const chunk of records) {
           await client.query(
             `INSERT INTO knowledge_chunks (
               id, collection_id, tenant_id, document_id, customer_id,
               chunk_index, content_text, metadata_json, embedding, token_count, created_at
             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, NOW())`,
             [
-              chunkId,
-              command.collectionId,
-              tenantId,
-              documentId,
-              command.customerId || null,
-              item.index,
-              item.text,
-              JSON.stringify(meta),
-              vectorStr,
-              item.tokenCount,
+              chunk.id, chunk.collectionId, chunk.tenantId, chunk.documentId, chunk.customerId,
+              chunk.chunkIndex, chunk.content, JSON.stringify(chunk.metadata),
+              `[${chunk.embedding.join(',')}]`, chunk.tokenCount,
             ]
           );
-        });
-      } catch {
-        // Fallback to memory
-        this.memoryChunks.set(chunkId, {
-          id: chunkId,
-          collectionId: command.collectionId,
-          tenantId,
-          documentId,
-          customerId: command.customerId || null,
-          chunkIndex: item.index,
-          content: item.text,
-          metadata: meta,
-          embedding: vector,
-          tokenCount: item.tokenCount,
-          createdAt: now,
-        });
-      }
+        }
+      });
+    } catch (error) {
+      if (!this.options.allowMemoryFallback) throw error;
+      for (const chunk of records) this.memoryChunks.set(chunk.id, chunk);
     }
+
+    const chunkIds = records.map((chunk) => chunk.id);
+    const totalTokens = records.reduce((sum, chunk) => sum + chunk.tokenCount, 0);
 
     return {
       collectionId: command.collectionId,
@@ -420,7 +416,8 @@ export class KnowledgeBaseService {
           distance: Number(Number(r.distance).toFixed(4)),
         }));
       });
-    } catch {
+    } catch (error) {
+      if (!this.options.allowMemoryFallback) throw error;
       // In-memory cosine similarity fallback
       const candidates: { chunk: MemoryChunkRecord; score: number; dist: number }[] = [];
       for (const chunk of this.memoryChunks.values()) {
@@ -527,7 +524,8 @@ export class KnowledgeBaseService {
           purgedAt,
         };
       });
-    } catch {
+    } catch (error) {
+      if (!this.options.allowMemoryFallback) throw error;
       // Memory store fallback purge
       switch (request.scope) {
         case 'customer': {

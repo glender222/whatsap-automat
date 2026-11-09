@@ -4,6 +4,7 @@ process.env.DB_PASSWORD = 'test-only-database-password';
 process.env.META_TOKEN_ENCRYPTION_KEY = 'test-encryption-key-with-at-least-32-chars-for-aes256';
 
 import assert from 'node:assert/strict';
+const { createFixtureAccessToken, createMemoryKnowledgeBaseService, createSyntheticEmbeddingGateway } = require('./fixtures/embeddingGateway') as typeof import('./fixtures/embeddingGateway');
 import { describe, it, beforeEach } from 'node:test';
 import { KnowledgeBaseService } from '../services/ai/rag/KnowledgeBaseService';
 import { TextChunker } from '../services/ai/rag/TextChunker';
@@ -95,8 +96,7 @@ async function invokeRoute(
 }
 
 describe('M3 Adversarial Challenge: RAG Knowledge Base, Multi-Tenant Isolation & GDPR RTBF', () => {
-  const { generateAccessToken } = require('../utils/jwt');
-  const tokenTenant1 = generateAccessToken({
+  const tokenTenant1 = createFixtureAccessToken({
     id: 101,
     sub: 'user_t1',
     tenantId: 1,
@@ -104,7 +104,7 @@ describe('M3 Adversarial Challenge: RAG Knowledge Base, Multi-Tenant Isolation &
     role: 'admin',
     rol: 'ADMIN',
   });
-  const tokenTenant2 = generateAccessToken({
+  const tokenTenant2 = createFixtureAccessToken({
     id: 202,
     sub: 'user_t2',
     tenantId: 2,
@@ -120,7 +120,7 @@ describe('M3 Adversarial Challenge: RAG Knowledge Base, Multi-Tenant Isolation &
     let kbService: KnowledgeBaseService;
 
     beforeEach(() => {
-      kbService = new KnowledgeBaseService();
+      kbService = createMemoryKnowledgeBaseService();
     });
 
     it('denies Tenant B semantic query access to Tenant A collection and documents', async () => {
@@ -288,7 +288,7 @@ describe('M3 Adversarial Challenge: RAG Knowledge Base, Multi-Tenant Isolation &
         },
       } as any;
 
-      const dbKbService = new KnowledgeBaseService(mockDbUow);
+      const dbKbService = new KnowledgeBaseService(mockDbUow, createSyntheticEmbeddingGateway());
 
       // Query from tenant 2
       await dbKbService.queryKnowledge(2, {
@@ -306,7 +306,7 @@ describe('M3 Adversarial Challenge: RAG Knowledge Base, Multi-Tenant Isolation &
     });
 
     it('enforces cross-tenant isolation at REST route level via JWT claims', async () => {
-      const router = createAiRoutes();
+      const router = createAiRoutes({ knowledgeBaseService: createMemoryKnowledgeBaseService() });
 
       // Tenant 1 creates a collection via API
       const createRes = await invokeRoute(router, 'post', '/rag/collections', {
@@ -369,7 +369,7 @@ describe('M3 Adversarial Challenge: RAG Knowledge Base, Multi-Tenant Isolation &
     let kbService: KnowledgeBaseService;
 
     beforeEach(() => {
-      kbService = new KnowledgeBaseService();
+      kbService = createMemoryKnowledgeBaseService();
     });
 
     it('Scope 1 (customer): purges target customer chunks completely while leaving peer customers intact', async () => {
@@ -758,7 +758,7 @@ describe('M3 Adversarial Challenge: RAG Knowledge Base, Multi-Tenant Isolation &
       const gateway = new ModelGateway(
         new ByokService(mockUow),
         new QuotaManager(mockUow),
-        new TokenCostLedger(mockUow)
+        new TokenCostLedger(mockUow), undefined, 'synthetic'
       );
 
       // 1. Single string 4 chars -> 1 token
@@ -816,7 +816,7 @@ describe('M3 Adversarial Challenge: RAG Knowledge Base, Multi-Tenant Isolation &
       const gateway = new ModelGateway(
         new ByokService(mockUow),
         new QuotaManager(mockUow),
-        new TokenCostLedger(mockUow)
+        new TokenCostLedger(mockUow), undefined, 'synthetic'
       );
 
       // 400 chars -> 100 tokens -> round((100 * 20000)/1000000) = 2 micro-USD
@@ -848,7 +848,7 @@ describe('M3 Adversarial Challenge: RAG Knowledge Base, Multi-Tenant Isolation &
       const gateway = new ModelGateway(
         new ByokService(mockUow),
         new QuotaManager(mockUow),
-        new TokenCostLedger(mockUow)
+        new TokenCostLedger(mockUow), undefined, 'synthetic'
       );
 
       const res = await gateway.embed({
@@ -873,7 +873,7 @@ describe('M3 Adversarial Challenge: RAG Knowledge Base, Multi-Tenant Isolation &
       const gateway = new ModelGateway(
         new ByokService(mockUow),
         new QuotaManager(mockUow),
-        new TokenCostLedger(mockUow)
+        new TokenCostLedger(mockUow), undefined, 'synthetic'
       );
 
       // Test 1: Explicit nomic-embed-text model
@@ -922,7 +922,7 @@ describe('M3 Adversarial Challenge: RAG Knowledge Base, Multi-Tenant Isolation &
         }),
       };
 
-      const gateway = new ModelGateway(mockByokService, mockQuotaManager, mockLedger);
+      const gateway = new ModelGateway(mockByokService, mockQuotaManager, mockLedger, undefined, 'synthetic');
 
       const embedRes = await gateway.embed({
         tenantId: 42,
@@ -1023,7 +1023,7 @@ describe('M3 Adversarial Challenge: RAG Knowledge Base, Multi-Tenant Isolation &
     let kbService: KnowledgeBaseService;
 
     beforeEach(() => {
-      kbService = new KnowledgeBaseService();
+      kbService = createMemoryKnowledgeBaseService();
     });
 
     it('neutralizes SQL injection payloads in collectionId, customerId, query, and purge targetId', async () => {

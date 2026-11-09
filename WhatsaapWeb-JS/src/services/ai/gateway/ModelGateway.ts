@@ -26,7 +26,8 @@ export class ModelGateway implements IModelGateway {
     private readonly byokService: ByokService = new ByokService(),
     private readonly quotaManager: QuotaManager = new QuotaManager(),
     private readonly ledger: TokenCostLedger = new TokenCostLedger(),
-    private readonly customFetch?: FetchFunction
+    private readonly customFetch?: FetchFunction,
+    private readonly embeddingMode: 'provider' | 'synthetic' = 'provider'
   ) {}
 
   /**
@@ -211,92 +212,94 @@ export class ModelGateway implements IModelGateway {
     const provider = request.provider || 'openai';
     const model = request.model || (provider === 'local_openai' ? 'nomic-embed-text' : 'text-embedding-3-small');
     const startTime = Date.now();
+    const synthetic = this.embeddingMode === 'synthetic';
 
-    // 1. Quota check
     try {
       await this.quotaManager.assertWithinQuota(tenantId);
-    } catch (quotaErr: any) {
-      if (quotaErr.code === 'RATE_LIMITED' || quotaErr.statusCode === 429) {
-        throw quotaErr;
-      }
-      // If DB is offline in test mode, continue
+    } catch (error: any) {
+      if (!synthetic || error.code === 'RATE_LIMITED' || error.statusCode === 429) throw error;
     }
 
-    // 2. Resolve credentials
-    let creds = { apiKey: null as string | null, baseUrl: null as string | null, defaultModel: null as string | null, isByok: false };
+    let creds: ResolvedCredential = { apiKey: null, baseUrl: null, defaultModel: null, isByok: false };
     try {
       creds = await this.byokService.resolveDecryptedCredential(tenantId, provider);
-    } catch {
-      // If DB is offline, proceed with uncredentialed / deterministic fallback
+    } catch (error) {
+      if (!synthetic) throw error;
     }
 
-    // 3. Estimate prompt tokens: ~1 token per 4 chars across all input strings
-    const totalChars = request.input.reduce((sum, text) => sum + (text?.length || 0), 0);
-    const promptTokens = Math.max(1, Math.ceil(totalChars / 4));
-    const totalTokens = promptTokens;
-
-    // 4. Calculate cost
-    const costMicroUsd = CostCalculator.calculate(model, promptTokens, 0);
-
-    // 5. Generate embeddings
+    const totalChars = request.input.reduce((sum, text) => sum + text.length, 0);
+    let promptTokens = Math.max(1, Math.ceil(totalChars / 4));
     let embeddings: number[][];
-    if (creds.apiKey && provider === 'openai' && !process.env.MOCK_AI && !process.env.TEST_MODE) {
-      try {
-        const fetchFn = this.customFetch || globalThis.fetch;
-        const resp = await fetchFn('https://api.openai.com/v1/embeddings', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${creds.apiKey}`,
-          },
-          body: JSON.stringify({
-            model,
-            input: request.input,
-          }),
-        });
-        if (!resp.ok) {
-          const errBody = await resp.text();
-          throw new Error(`OpenAI embedding error: ${resp.status} ${errBody}`);
-        }
-        const data = (await resp.json()) as any;
-        embeddings = data.data.map((item: any) => item.embedding);
-      } catch (err: any) {
-        embeddings = request.input.map((text) => this.generateDeterministicVector(text));
-      }
-    } else {
+
+    if (synthetic) {
       embeddings = request.input.map((text) => this.generateDeterministicVector(text));
+    } else {
+      if (provider !== 'openai') {
+        throw Object.assign(new Error('Embedding provider is unavailable'), { statusCode: 422, code: 'EMBEDDING_PROVIDER_UNAVAILABLE' });
+      }
+      if (!creds.apiKey) {
+        throw Object.assign(new Error('Configure a tenant embedding credential before using the knowledge base'), {
+          statusCode: 400, code: 'CREDENTIAL_MISSING',
+        });
+      }
+
+      const fetchFn = this.customFetch || globalThis.fetch;
+      let response: Response;
+      try {
+        response = await fetchFn('https://api.openai.com/v1/embeddings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${creds.apiKey}` },
+          body: JSON.stringify({ model, input: request.input }),
+          signal: AbortSignal.timeout(15000),
+        });
+      } catch {
+        throw Object.assign(new Error('Embedding provider is unreachable'), { statusCode: 502, code: 'EMBEDDING_REQUEST_FAILED' });
+      }
+      if (!response.ok) {
+        throw Object.assign(new Error(`Embedding provider rejected the request (HTTP ${response.status})`), {
+          statusCode: response.status === 429 ? 429 : 502, code: 'EMBEDDING_REQUEST_FAILED',
+        });
+      }
+
+      const data = (await response.json()) as { data?: { embedding: number[]; index: number }[]; usage?: { prompt_tokens?: number } };
+      const vectors = Array.isArray(data.data) ? [...data.data].sort((left, right) => left.index - right.index) : [];
+      if (vectors.length !== request.input.length || !vectors.every((item, index) =>
+        item.index === index && Array.isArray(item.embedding) && item.embedding.length > 0 && item.embedding.every(Number.isFinite)
+      )) {
+        throw Object.assign(new Error('Embedding provider returned invalid vectors'), {
+          statusCode: 502, code: 'EMBEDDING_RESPONSE_INVALID',
+        });
+      }
+      embeddings = vectors.map((item) => item.embedding);
+      const reportedTokens = data.usage?.prompt_tokens;
+      if (typeof reportedTokens === 'number' && Number.isSafeInteger(reportedTokens) && reportedTokens >= 0) {
+        promptTokens = reportedTokens;
+      }
     }
 
+    const costMicroUsd = CostCalculator.calculate(model, promptTokens, 0);
     const latencyMs = Date.now() - startTime;
-
-    // 6. Record in ledger
     try {
       await this.ledger.record({
-        tenantId,
-        provider,
-        model,
+        tenantId, provider, model,
         operation: 'embedding',
         promptTokens,
         completionTokens: 0,
-        totalTokens,
+        totalTokens: promptTokens,
         costMicroUsd,
         isByok: creds.isByok,
         latencyMs,
         status: 'success',
-        metadataJson: {
-          inputCount: request.input.length,
-        },
+        metadataJson: { inputCount: request.input.length },
       });
-
-      // 7. Consume quota
-      await this.quotaManager.consume(tenantId, costMicroUsd, totalTokens);
-    } catch {
-      // In-memory / test environment without active postgres connection
+      await this.quotaManager.consume(tenantId, costMicroUsd, promptTokens);
+    } catch (error) {
+      if (!synthetic) throw error;
     }
 
     return {
       embeddings,
-      usage: { promptTokens, totalTokens },
+      usage: { promptTokens, totalTokens: promptTokens },
       costMicroUsd,
       provider,
       model,

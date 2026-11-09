@@ -4,6 +4,7 @@ process.env.DB_PASSWORD = 'test-only-database-password';
 
 import assert from 'node:assert/strict';
 import { describe, it, beforeEach } from 'node:test';
+const { createBrokerFixtureRegistry } = require('./fixtures/brokerTools') as typeof import('./fixtures/brokerTools');
 const {
   ToolBroker,
   ToolRegistry,
@@ -15,8 +16,6 @@ const {
   ApprovalExpiredError,
   HttpRequestTool,
   SearchKnowledgeTool,
-  SendWhatsappMessageTool,
-  CreateInvoiceTool,
 } = require('../services/ai/broker') as typeof import('../services/ai/broker');
 const {
   ConversationCasService,
@@ -263,7 +262,7 @@ describe('PR-F5-02 Empirical Adversarial Stress Challenge Suite', () => {
 
   beforeEach(() => {
     mockUow = createAdversarialMockUoW();
-    registry = new ToolRegistry(mockUow);
+    registry = createBrokerFixtureRegistry(mockUow);
     hitlService = new HitlApprovalService(mockUow);
     casService = new ConversationCasService(mockUow);
     effectCache = new EffectCache(mockUow);

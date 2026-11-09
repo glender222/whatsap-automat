@@ -23,15 +23,7 @@ export class SearchKnowledgeTool implements IToolImplementation {
     isEgressNetworkTool: false,
   };
 
-  private readonly kbService: KnowledgeBaseService;
-
-  constructor(kbOrUow?: KnowledgeBaseService | any) {
-    if (kbOrUow && typeof kbOrUow.queryKnowledge === 'function') {
-      this.kbService = kbOrUow;
-    } else {
-      this.kbService = knowledgeBaseService;
-    }
-  }
+  constructor(private readonly kbService: Pick<KnowledgeBaseService, 'queryKnowledge'> = knowledgeBaseService) {}
 
   validateInput(input: Record<string, unknown>): ToolValidationResult {
     const errors: string[] = [];
@@ -50,43 +42,18 @@ export class SearchKnowledgeTool implements IToolImplementation {
     const minSimilarity = typeof input.minSimilarity === 'number' ? input.minSimilarity : 0.7;
     const collectionId = typeof input.collectionId === 'string' ? input.collectionId : undefined;
 
-    try {
-      const result = await this.kbService.queryKnowledge(context.tenantId, {
-        query,
-        collectionId,
-        topK,
-        minSimilarity,
-      });
-
-      if (result.chunks.length > 0) {
-        return {
-          query: result.query,
-          totalResults: result.totalResults,
-          chunks: result.chunks.map((c) => ({
-            id: c.id,
-            content: c.content,
-            metadata: c.metadata,
-            score: c.similarityScore,
-          })),
-        };
-      }
-    } catch {
-      // In case of error, fall through to fallback response
-    }
-
-    // Standard fallback response when no chunks are found or in test mode
+    const result = await this.kbService.queryKnowledge(context.tenantId, {
+      query, collectionId, topK, minSimilarity,
+    });
     return {
-      query,
-      totalResults: 1,
-      chunks: [
-        {
-          id: 'chunk_synthetic_001',
-          content: `Relevant information matching query: "${query}"`,
-          metadata: { source: 'knowledge_base' },
-          score: 0.88,
-        },
-      ],
+      query: result.query,
+      totalResults: result.totalResults,
+      chunks: result.chunks.map((chunk) => ({
+        id: chunk.id,
+        content: chunk.content,
+        metadata: chunk.metadata,
+        score: chunk.similarityScore,
+      })),
     };
   }
 }
-

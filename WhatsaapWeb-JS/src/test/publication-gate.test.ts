@@ -4,14 +4,13 @@ process.env.DB_PASSWORD = 'test-only-database-password';
 process.env.META_TOKEN_ENCRYPTION_KEY = 'test-encryption-key-with-at-least-32-chars-for-aes256';
 
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { before, describe, it } from 'node:test';
 import { PublicationGate } from '../services/ai/eval/PublicationGate';
 import {
   AgentGraphVersionV1,
   EvalScorecardV1,
   computeAgentSpecHash,
 } from '@whatsap-automat/contracts';
-import createAiRoutes from '../routes/ai.routes';
 import jwt from 'jsonwebtoken';
 
 async function invokeRoute(
@@ -242,9 +241,12 @@ describe('PR-F5-03: Pre-Deploy Publication Gate & Security Boundary Tests', () =
   });
 
   describe('3. REST Route POST /api/v1/ai/agents/:id/publish', () => {
-    const router = createAiRoutes();
+    let router: ReturnType<typeof import('../routes/ai.routes').default>;
+    before(async () => {
+      router = (await import('../routes/ai.routes')).default();
+    });
 
-    it('returns 200 OK and publishes when publication gate validates successfully', async () => {
+    it('never claims publication from a client-provided passing scorecard', async () => {
       const res = await invokeRoute(router, 'post', '/agents/:id/publish', {
         token,
         params: { id: 'agent_graph_sales' },
@@ -254,32 +256,24 @@ describe('PR-F5-03: Pre-Deploy Publication Gate & Security Boundary Tests', () =
         },
       });
 
-      assert.equal(res.status, 200);
-      assert.equal(res.body.success, true);
-      assert.equal(res.body.data.agentGraphId, 'agent_graph_sales');
-      assert.equal(res.body.data.specHash, validSpecHash);
+      assert.equal(res.status, 501);
+      assert.equal(res.body.success, false);
+      assert.equal(res.body.error, 'PUBLICATION_UNAVAILABLE');
     });
 
-    it('returns 422 PUBLICATION_GATE_BLOCKED when publication gate conditions are violated', async () => {
-      const failingScorecard = {
-        ...validScorecard,
-        passRatePercent: 91.0,
-      };
-
+    it('never claims publication from an empty client-provided scorecard', async () => {
       const res = await invokeRoute(router, 'post', '/agents/:id/publish', {
         token,
         params: { id: 'agent_graph_sales' },
         body: {
           graph: validGraph,
-          scorecard: failingScorecard,
+          scorecard: {},
         },
       });
 
-      assert.equal(res.status, 422);
+      assert.equal(res.status, 501);
       assert.equal(res.body.success, false);
-      assert.equal(res.body.error, 'PUBLICATION_GATE_BLOCKED');
-      assert.equal(res.body.gateResult.allowed, false);
-      assert.ok(res.body.gateResult.blockers.length >= 1);
+      assert.equal(res.body.error, 'PUBLICATION_UNAVAILABLE');
     });
   });
 });
