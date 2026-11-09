@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { ArrowLeft, ArrowRight, CheckCircle2, Puzzle, Search, Star } from 'lucide-react';
+import { useAtomValue } from 'jotai';
+import { userRoleAtom } from '../../jotai/middleware/userRoleAtom';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
   catalogPageSize, extensionTypes, isExtensionType, listMarketplace, marketplaceError,
-  marketplacePath, ratingLabel, type CatalogQuery,
+  marketplacePath, marketplacePublicationsPath, ratingLabel, type CatalogQuery,
 } from './marketplaceApi';
 
 const inputClass = 'min-h-11 w-full rounded-md border border-gray-300 bg-white px-3 text-sm dark:border-gray-600 dark:bg-gray-800';
@@ -31,6 +33,7 @@ function queryParams(query: CatalogQuery) {
 }
 
 export default function MarketplacePage() {
+  const role = useAtomValue(userRoleAtom);
   const [params, setParams] = useSearchParams();
   const [attempt, setAttempt] = useState(0);
   const [result, setResult] = useState<{ key: string; data?: Awaited<ReturnType<typeof listMarketplace>>; error?: string }>();
@@ -86,6 +89,11 @@ export default function MarketplacePage() {
         <p className="mb-1 text-sm font-semibold text-emerald-700 dark:text-emerald-300">Catálogo comunitario</p>
         <h1 id="marketplace-title" className="text-2xl font-semibold">Marketplace</h1>
         <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">Explora extensiones, revisa los permisos que solicitan y comparte tu valoración.</p>
+        <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">La instalación de extensiones no está disponible.</p>
+        {role === 'ADMIN' && <Link to={marketplacePublicationsPath}
+          className="mt-2 inline-flex min-h-11 items-center rounded-md border border-emerald-600 px-3 text-sm font-semibold text-emerald-800 dark:text-emerald-200">
+          Gestionar publicaciones
+        </Link>}
       </header>
       <form key={formKey} onSubmit={handleSearch} className="space-y-3 rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-900">
         <div className="grid gap-3 md:grid-cols-[2fr_1fr_1fr]">

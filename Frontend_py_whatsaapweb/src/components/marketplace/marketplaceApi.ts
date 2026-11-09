@@ -136,3 +136,43 @@ export async function submitMarketplaceReview(id: string, score: number, review:
   }
   return result;
 }
+
+export const marketplacePublicationsPath = marketplacePath + '/gestionar/publicaciones';
+
+export interface MarketplacePublication {
+  id: string;
+  extensionId: string;
+  displayName: string;
+  version: string;
+  type: ExtensionType;
+  state: 'published' | 'withdrawn';
+  publishedAt: string;
+  withdrawnAt: string | null;
+}
+
+function isPublication(value: MarketplacePublication | undefined | null): value is MarketplacePublication {
+  return Boolean(value && typeof value.id === 'string' && value.id && typeof value.extensionId === 'string' &&
+    typeof value.displayName === 'string' && typeof value.version === 'string' && isExtensionType(value.type) &&
+    Number.isFinite(Date.parse(value.publishedAt)) &&
+    ((value.state === 'published' && value.withdrawnAt === null) ||
+      (value.state === 'withdrawn' && typeof value.withdrawnAt === 'string' && Number.isFinite(Date.parse(value.withdrawnAt)))));
+}
+
+export async function listMarketplacePublications(offset: number, signal: AbortSignal) {
+  const { data } = await api.get<ApiResponse<MarketplacePublication[]> & { pagination: { hasMore: boolean } }>(
+    '/v1/marketplace/publications', { params: { offset, limit: catalogPageSize }, signal },
+  );
+  if (data?.success !== true || !Array.isArray(data.data) || !data.data.every(isPublication) ||
+      typeof data.pagination?.hasMore !== 'boolean') {
+    throw new Error('El servidor devolvió una lista de publicaciones incompleta.');
+  }
+  return { items: data.data, hasMore: data.pagination.hasMore };
+}
+
+export async function withdrawMarketplacePublication(id: string) {
+  const { data } = await api.post<ApiResponse<MarketplacePublication>>(`${endpoint}/${encodeURIComponent(id)}/withdraw`, {});
+  if (data?.success !== true || !isPublication(data.data) || data.data.id !== id || data.data.state !== 'withdrawn') {
+    throw new Error('El servidor no confirmó la retirada de la publicación.');
+  }
+  return data.data;
+}

@@ -37,6 +37,7 @@ const CampaignWizard = lazy(() => import("../components/campaigns/CampaignWizard
 const SegmentsManager = lazy(() => import("../components/campaigns/SegmentsManager"));
 const MarketplacePage = lazy(() => import("../components/marketplace/MarketplacePage"));
 const MarketplaceDetailPage = lazy(() => import("../components/marketplace/MarketplaceDetailPage"));
+const MarketplacePublicationsPage = lazy(() => import("../components/marketplace/MarketplacePublicationsPage"));
 const WorkflowListPage = lazy(() => import("../components/workflows/WorkflowListPage"));
 const WorkflowDetailPage = lazy(() => import("../components/workflows/WorkflowDetailPage"));
 const WorkflowEditorPage = lazy(() => import("../components/workflows/WorkflowEditorPage"));
@@ -95,6 +96,7 @@ function AppRoutesInner() {
           <Route path="segmentos" element={<SegmentsManager />} />
           <Route path="marketplace" element={<MarketplacePage />} />
           <Route path="marketplace/:extensionId" element={<MarketplaceDetailPage />} />
+          <Route path="marketplace/gestionar/publicaciones" element={<PrivateRoute adminOnly><MarketplacePublicationsPage /></PrivateRoute>} />
           <Route path="workflows" element={<WorkflowListPage />} />
           <Route path="workflows/nuevo" element={<PrivateRoute adminOnly><WorkflowEditorPage /></PrivateRoute>} />
           <Route path="workflows/:workflowId" element={<WorkflowDetailPage />} />

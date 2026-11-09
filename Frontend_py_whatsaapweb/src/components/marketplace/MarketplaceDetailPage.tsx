@@ -184,6 +184,7 @@ function ListingDetails({ id }: { id: string }) {
               {listing.categories.length > 0 && <div><dt className="font-semibold">Categorías</dt><dd className="break-words">{listing.categories.join(', ')}</dd></div>}
               {listing.tags.length > 0 && <div><dt className="font-semibold">Etiquetas</dt><dd className="break-words">{listing.tags.join(', ')}</dd></div>}
             </dl>
+            <p className="rounded-md bg-gray-50 p-3 text-sm dark:bg-gray-800">La instalación de extensiones no está disponible.</p>
             <section aria-labelledby="extension-permissions">
               <h2 id="extension-permissions" className="font-semibold">Permisos solicitados</h2>
               {listing.permissions.length ? (

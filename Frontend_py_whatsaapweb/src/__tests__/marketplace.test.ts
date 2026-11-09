@@ -3,7 +3,8 @@ import { test, type TestContext } from 'node:test';
 import type { InternalAxiosRequestConfig } from 'axios';
 import { api } from '../shared/axios/http';
 import {
-  catalogPageSize, getMarketplaceListing, getMarketplaceReviews, listMarketplace, ratingLabel, submitMarketplaceReview,
+  catalogPageSize, getMarketplaceListing, getMarketplaceReviews, listMarketplace, listMarketplacePublications, ratingLabel, submitMarketplaceReview,
+  withdrawMarketplacePublication,
 } from '../components/marketplace/marketplaceApi';
 
 Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: () => null } });
@@ -54,4 +55,27 @@ test('detail and company reviews use the canonical extension identity', async (c
   review.extensionId = 'another-extension';
   await assert.rejects(getMarketplaceReviews(listing.extensionId, signal), /reseñas incompletas/);
   await assert.rejects(submitMarketplaceReview(listing.extensionId, 4, 'Sirve'), /no confirmó la valoración/);
+});
+
+
+test('publisher management accepts withdrawal only when the server confirms the same listing', async (context) => {
+  const published = {
+    id: listing.id, extensionId: listing.extensionId, displayName: listing.displayName, type: listing.type,
+    version: listing.version, state: 'published', publishedAt: '2026-02-01T00:00:00.000Z', withdrawnAt: null,
+  };
+  const withdrawn = { ...published, state: 'withdrawn', withdrawnAt: '2026-02-02T00:00:00.000Z' };
+  mockResponse(context, (request) => {
+    if (request.method === 'get') {
+      assert.equal(request.url, '/v1/marketplace/publications');
+      assert.deepEqual(request.params, { offset: 12, limit: catalogPageSize });
+      return { success: true, data: [published], pagination: { hasMore: false } };
+    }
+    assert.equal(request.url, '/v1/marketplace/extensions/ext_13/withdraw');
+    return { success: true, data: withdrawn };
+  });
+  const signal = new AbortController().signal;
+  assert.deepEqual(await listMarketplacePublications(12, signal), { items: [published], hasMore: false });
+  assert.deepEqual(await withdrawMarketplacePublication(listing.id), withdrawn);
+  withdrawn.id = 'another-extension';
+  await assert.rejects(withdrawMarketplacePublication(listing.id), /no confirmó la retirada/);
 });
