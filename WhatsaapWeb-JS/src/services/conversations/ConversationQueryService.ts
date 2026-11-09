@@ -7,7 +7,7 @@ import {
   ConversationV1,
   toCanonicalDeliveryState,
 } from '@whatsap-automat/contracts';
-import { withTenantTransaction } from '../../db/TenantScopedUoW';
+import { TenantScopedUoW, tenantScopedUoW } from '../../db/TenantScopedUoW';
 import { Queryable } from '../../shared/UnitOfWorkPort';
 
 type Cursor = { direction: 'older' | 'newer'; id: number };
@@ -115,9 +115,11 @@ function cursorOperator(cursor: Cursor | null): '<' | '>' { return cursor?.direc
 function orderForCursor(cursor: Cursor | null): 'DESC' | 'ASC' { return cursor?.direction === 'newer' ? 'ASC' : 'DESC'; }
 
 export class ConversationQueryService {
+  constructor(private readonly uow: TenantScopedUoW = tenantScopedUoW) {}
+
   list(tenantId: number, page: ConversationPage, filters: ConversationFilters) {
     const channels = filters.channel === 'whatsapp-cloud' ? whatsappAliases : filters.channel ? [filters.channel] : supportedChannels;
-    return withTenantTransaction(tenantId, async (client) => {
+    return this.uow.run(tenantId, async (client) => {
       const { rows } = await client.query(
         `SELECT ${conversationColumns}
          FROM conversations
@@ -133,21 +135,24 @@ export class ConversationQueryService {
   }
 
   get(tenantId: number, id: number) {
-    return withTenantTransaction(tenantId, (client) => readConversation(client, tenantId, id));
+    return this.uow.run(tenantId, (client) => readConversation(client, tenantId, id));
   }
 
   messages(tenantId: number, id: number, page: ConversationPage) {
-    return withTenantTransaction(tenantId, async (client) => {
+    return this.uow.run(tenantId, async (client) => {
       const conversation = await readConversation(client, tenantId, id);
       if (!conversation) return null;
       const { rows } = await client.query(
         `SELECT m.id, m.direction, m.status, m.external_contact_id,
                 m.client_request_id, m.body, COALESCE(m.occurred_at, m.created_at) AS created_at,
+                send.actor_id AS canonical_actor_id, send.connection_id AS canonical_connection_id,
                 COALESCE((SELECT jsonb_agg(jsonb_build_object(
                   'id', a.id::text, 'filename', a.filename, 'mimeType', COALESCE(a.mime_type, 'application/octet-stream'),
                   'sizeBytes', a.size_bytes
                 ) ORDER BY a.id) FROM message_attachments a WHERE a.message_id = m.id), '[]') AS attachments
          FROM messages m
+         LEFT JOIN conversation_send_claims send ON send.tenant_id = m.company_id
+           AND send.conversation_id = m.conversation_id AND send.message_id = m.id
          WHERE m.company_id = $1 AND m.conversation_id = $2 AND m.direction IN ('inbound', 'outbound')
            AND ($3::integer IS NULL OR m.id ${cursorOperator(page.cursor)} $3)
          ORDER BY m.id ${orderForCursor(page.cursor)} LIMIT $4`,
@@ -155,7 +160,7 @@ export class ConversationQueryService {
       );
       return pageOf(rows.map((row): ConversationMessageV1 => ({
         id: String(row.id), conversationId: conversation.id, tenantId: conversation.tenantId,
-        connectionId: conversation.connectionId, channel: conversation.channel,
+        connectionId: row.canonical_connection_id ?? conversation.connectionId, channel: conversation.channel,
         direction: row.direction,
         deliveryState: row.direction === 'inbound' && row.status === 'received' ? 'delivered' : toCanonicalDeliveryState(row.status ?? ''),
         originEventId: null, clientRequestId: row.client_request_id, correlationId: null, body: row.body,
@@ -166,7 +171,7 @@ export class ConversationQueryService {
         })),
         causedBy: row.direction === 'inbound'
           ? { type: 'customer', id: conversation.contactIdentityId ?? row.external_contact_id ?? conversation.externalConversationId }
-          : { type: 'system', id: 'legacy' },
+          : row.canonical_actor_id ? { type: 'human', id: String(row.canonical_actor_id) } : { type: 'system', id: 'legacy' },
         createdAt: row.created_at.toISOString(),
       })), page);
     });

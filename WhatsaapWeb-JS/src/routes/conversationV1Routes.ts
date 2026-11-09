@@ -10,17 +10,25 @@ import {
 import { JwtRequest, requireJwt, resolveWhatsappCompanyId, toPositiveInt } from '../middleware/jwtAuth';
 import { isInternalChatId } from '../middleware/resourceAuth';
 import { tenantContext } from '../middleware/tenantContext';
-import { conversationQueryService, parseConversationPage } from '../services/conversations/ConversationQueryService';
+import { ConversationQueryService, conversationQueryService, parseConversationPage } from '../services/conversations/ConversationQueryService';
 import {
   CasConflictError, ConversationNotFoundError, conversationCasService,
 } from '../services/conversations/ConversationCasService';
+import {
+  ConversationSendError, ConversationSendService, conversationSendService,
+} from '../services/conversations/ConversationSendService';
 
-function problem(req: JwtRequest, res: Response, code: StandardErrorCode, detail: string) {
-  const body = createProblemDetails({ code, detail, instance: req.originalUrl, correlationId: randomUUID() });
+function problem(
+  req: JwtRequest, res: Response, code: StandardErrorCode, detail: string, metadata?: Record<string, unknown>,
+) {
+  const body = createProblemDetails({ code, detail, instance: req.originalUrl, correlationId: randomUUID(), metadata });
   return res.status(body.status).type('application/problem+json').json(body);
 }
 
-export default function createConversationV1Routes(): Router {
+export default function createConversationV1Routes(
+  sender: ConversationSendService = conversationSendService,
+  query: ConversationQueryService = conversationQueryService,
+): Router {
   const router = Router();
   router.use(requireJwt, tenantContext({ allowSandbox: false }));
 
@@ -34,7 +42,7 @@ export default function createConversationV1Routes(): Router {
         return problem(req, res, StandardErrorCode.VALIDATION_ERROR, 'Invalid conversation filters or cursor');
       }
       const tenantId = resolveWhatsappCompanyId(req);
-      return res.json(await conversationQueryService.list(tenantId, page, {
+      return res.json(await query.list(tenantId, page, {
         channel: channel.data, stage: stage.data, status: status.data,
       }));
     } catch (error) { return next(error); }
@@ -44,7 +52,7 @@ export default function createConversationV1Routes(): Router {
     try {
       const id = String(req.params.id);
       if (!isInternalChatId(id)) return problem(req, res, StandardErrorCode.NOT_FOUND, 'Conversation not found');
-      const item = await conversationQueryService.get(resolveWhatsappCompanyId(req), Number(id));
+      const item = await query.get(resolveWhatsappCompanyId(req), Number(id));
       if (!item) return problem(req, res, StandardErrorCode.NOT_FOUND, 'Conversation not found');
       return res.json(item);
     } catch (error) { return next(error); }
@@ -56,10 +64,51 @@ export default function createConversationV1Routes(): Router {
       if (!isInternalChatId(id)) return problem(req, res, StandardErrorCode.NOT_FOUND, 'Conversation not found');
       const page = parseConversationPage(req.query, 50);
       if (!page) return problem(req, res, StandardErrorCode.VALIDATION_ERROR, 'Invalid message cursor or page size');
-      const result = await conversationQueryService.messages(resolveWhatsappCompanyId(req), Number(id), page);
+      const result = await query.messages(resolveWhatsappCompanyId(req), Number(id), page);
       if (!result) return problem(req, res, StandardErrorCode.NOT_FOUND, 'Conversation not found');
       return res.json(result);
     } catch (error) { return next(error); }
+  });
+
+  router.post('/:id/messages', async (req: JwtRequest, res, next) => {
+    const id = String(req.params.id);
+    if (!isInternalChatId(id)) return problem(req, res, StandardErrorCode.NOT_FOUND, 'Conversation not found');
+    const actor = req.tenantContext;
+    if (!actor?.userId || actor.userId > 2147483647 || actor.tenantId > 2147483647 ||
+        !['ADMIN', 'EMPLEADO', 'SUPERADMIN'].includes(actor.role ?? '')) {
+      return problem(req, res, StandardErrorCode.POLICY_DENIED, 'A signed operator identity is required');
+    }
+    const key = req.get('Idempotency-Key');
+    const body = req.body;
+    const version = body?.expectedConversationVersion;
+    const message = body?.message;
+    if (!key || !/^[A-Za-z0-9_.:-]{1,128}$/.test(key) ||
+        !Number.isSafeInteger(version) || version < 0 || version >= 2147483647 ||
+        !message || typeof message !== 'object' || typeof message.kind !== 'string') {
+      return problem(req, res, StandardErrorCode.VALIDATION_ERROR, 'Provide an idempotency key, expected conversation version and message');
+    }
+    if (message.kind !== 'text') {
+      return problem(req, res, StandardErrorCode.VALIDATION_ERROR, 'Only plain text messages are supported',
+        { reasonCode: 'MESSAGE_KIND_UNSUPPORTED' });
+    }
+    const text = message.text;
+    if (typeof text !== 'string' || !text.trim() || text.length > 4096 || /[\u0000\uD800-\uDFFF]/u.test(text) ||
+        Object.keys(body).some((name) => name !== 'message' && name !== 'expectedConversationVersion') ||
+        Object.keys(message).some((name) => name !== 'kind' && name !== 'text')) {
+      return problem(req, res, StandardErrorCode.VALIDATION_ERROR, 'Invalid plain text message payload');
+    }
+
+    try {
+      const result = await sender.send({
+        tenantId: actor.tenantId, actorId: actor.userId, conversationId: Number(id), expectedVersion: version, key, text,
+      });
+      return res.setHeader('Cache-Control', 'no-store').status(202).json(result);
+    } catch (error) {
+      if (error instanceof ConversationSendError) {
+        return problem(req, res, error.code, error.message, { reasonCode: error.reasonCode, ...error.metadata });
+      }
+      return next(new Error('The conversation message could not be prepared.'));
+    }
   });
 
   const commands = {

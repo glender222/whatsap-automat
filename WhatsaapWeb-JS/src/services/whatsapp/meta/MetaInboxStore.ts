@@ -1,7 +1,9 @@
+import { createHash } from 'node:crypto';
 import { Pool } from 'pg';
 import pool from '../../../config/database';
 import { TenantScopedUoW } from '../../../db/TenantScopedUoW';
 import { Queryable } from '../../../shared/UnitOfWorkPort';
+import { applyCanonicalMetaStatuses, lockMetaReceipt } from './MetaCanonicalReceipt';
 
 function toUnixSeconds(value: unknown): number | null {
   if (!value) return null;
@@ -562,56 +564,75 @@ export class MetaInboxStore {
     return this.tenantWork.run(this.companyId, async (client) => {
       const providerMessageId = status.id;
       const occurredAt = new Date(Number(status.timestamp || Math.floor(Date.now() / 1000)) * 1000);
+      if (typeof providerMessageId === 'string') {
+        await lockMetaReceipt(client, this.companyId, providerMessageId);
+      }
+      const legacyKey = `status:${providerMessageId}:${status.status}:${status.timestamp || ''}`;
+      const receiptKey = 'status:' + createHash('sha256').update(JSON.stringify([
+        providerMessageId, status.status, status.timestamp ?? null, metadata?.phone_number_id ?? null, status.recipient_id ?? null,
+      ])).digest('hex');
       const event = await client.query(
         `INSERT INTO whatsapp_webhook_events (
            company_id, provider, phone_number_id, event_type, event_dedupe_key,
            provider_message_id, payload_json
          )
-         VALUES ($1, 'meta-cloud', $2, $3, $4, $5, $6)
+         SELECT $1::integer, 'meta-cloud', $2::varchar, $3::varchar, $4::varchar, $5::varchar, $6::jsonb
+         WHERE NOT EXISTS (
+           SELECT 1 FROM whatsapp_webhook_events
+           WHERE company_id = $1::integer AND provider = 'meta-cloud' AND event_dedupe_key = $7::varchar
+             AND phone_number_id IS NOT DISTINCT FROM $2::varchar
+             AND payload_json #>> '{status,recipient_id}' IS NOT DISTINCT FROM $8::text
+         )
          ON CONFLICT (company_id, provider, event_dedupe_key) DO NOTHING
          RETURNING *`,
         [
           this.companyId,
           metadata?.phone_number_id || null,
           `status.${status.status || 'unknown'}`,
-          `status:${providerMessageId}:${status.status}:${status.timestamp || ''}`,
+          receiptKey,
           providerMessageId,
           json({ status, metadata, value }),
+          legacyKey,
+          status.recipient_id ?? null,
         ]
       );
       if (!event.rows[0]) {
         return { duplicate: true };
       }
 
-      const messageResult = await client.query(
-        `SELECT * FROM messages WHERE company_id = $1 AND channel = 'whatsapp' AND provider_message_id = $2 LIMIT 1`,
-        [this.companyId, providerMessageId]
-      );
-      const messageRow = messageResult.rows[0];
-      if (messageRow) {
-        await client.query(
-          `INSERT INTO message_statuses (message_id, status, source, occurred_at, metadata_json, provider, provider_message_id, raw_payload_json)
-           VALUES ($1, $2, 'meta-cloud', $3, $4, 'meta-cloud', $5, $6)
-           ON CONFLICT DO NOTHING`,
-          [messageRow.id, status.status || 'unknown', occurredAt, json(status), providerMessageId, json(status)]
+      const canonical = typeof providerMessageId === 'string' &&
+        await applyCanonicalMetaStatuses(client, this.companyId, providerMessageId, String(event.rows[0].id));
+      if (!canonical) {
+        const messageResult = await client.query(
+          `SELECT * FROM messages WHERE company_id = $1 AND channel = 'whatsapp' AND provider_message_id = $2 LIMIT 1`,
+          [this.companyId, providerMessageId]
         );
-        await client.query(
-          `UPDATE messages
-           SET status = $1::varchar,
-               delivered_at = CASE WHEN $1::varchar = 'delivered' THEN COALESCE(delivered_at, $2) ELSE delivered_at END,
-               read_at = CASE WHEN $1::varchar = 'read' THEN COALESCE(read_at, $2) ELSE read_at END,
-               failed_at = CASE WHEN $1::varchar = 'failed' THEN COALESCE(failed_at, $2) ELSE failed_at END,
-               error_code = $3,
-               error_message = $4
-           WHERE id = $5`,
-          [
-            status.status || 'unknown',
-            occurredAt,
-            status.errors?.[0]?.code ? String(status.errors[0].code) : null,
-            status.errors?.[0]?.title || status.errors?.[0]?.message || null,
-            messageRow.id,
-          ]
-        );
+        const messageRow = messageResult.rows[0];
+        if (messageRow) {
+          await client.query(
+            `INSERT INTO message_statuses (message_id, status, source, occurred_at, metadata_json, provider, provider_message_id, raw_payload_json)
+             VALUES ($1, $2, 'meta-cloud', $3, $4, 'meta-cloud', $5, $6)
+             ON CONFLICT DO NOTHING`,
+            [messageRow.id, status.status || 'unknown', occurredAt, json(status), providerMessageId, json(status)]
+          );
+          await client.query(
+            `UPDATE messages
+             SET status = $1::varchar,
+                 delivered_at = CASE WHEN $1::varchar = 'delivered' THEN COALESCE(delivered_at, $2) ELSE delivered_at END,
+                 read_at = CASE WHEN $1::varchar = 'read' THEN COALESCE(read_at, $2) ELSE read_at END,
+                 failed_at = CASE WHEN $1::varchar = 'failed' THEN COALESCE(failed_at, $2) ELSE failed_at END,
+                 error_code = $3,
+                 error_message = $4
+             WHERE id = $5`,
+            [
+              status.status || 'unknown',
+              occurredAt,
+              status.errors?.[0]?.code ? String(status.errors[0].code) : null,
+              status.errors?.[0]?.title || status.errors?.[0]?.message || null,
+              messageRow.id,
+            ]
+          );
+        }
       }
       await client.query(`UPDATE whatsapp_webhook_events SET processed_at = NOW(), processing_status = 'processed' WHERE id = $1`, [event.rows[0].id]);
       return { duplicate: false };
