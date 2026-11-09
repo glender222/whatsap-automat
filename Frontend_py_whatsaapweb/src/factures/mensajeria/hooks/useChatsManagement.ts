@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAtom } from 'jotai';
 import { chatsAtom } from '../../../jotai/slices/messagesAtoms';
 import { getChatsByTag } from '../services/tagsService';
@@ -11,6 +11,7 @@ export function useChatsManagement(tagId: string) {
   const [chatsError, setChatsError] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
   const loadedTag = useRef('');
+  const reloadChats = useCallback(() => setRevision((previous) => previous + 1), []);
 
   useEffect(() => {
     if (!tagId) {
@@ -31,6 +32,7 @@ export function useChatsManagement(tagId: string) {
         if (controller.signal.aborted) return;
         const normalized = data.map((chat): WhatsAppChat => ({
           id: String(chat.id),
+          conversationId: typeof chat.conversationId === 'string' ? chat.conversationId : undefined,
           name: String(chat.name ?? ''),
           profilePhotoUrl: chat.profilePhotoUrl ?? null,
           lastMessageTimestamp: normalizeMessageTimestamp(
@@ -59,7 +61,7 @@ export function useChatsManagement(tagId: string) {
 
   return {
     chats: loadedTag.current === tagId && tagId ? chats : [],
-    reloadChats: () => setRevision((previous) => previous + 1),
+    reloadChats,
     isLoadingChats: Boolean(tagId) && (isLoadingChats || (loadedTag.current !== tagId && !chatsError)),
     chatsError,
   };

@@ -63,38 +63,6 @@ export async function getMessagesByChat(
   }
 }
 
-/**
- * Envía un mensaje de texto a un chat
- * 📤 POST /api/chats/{chatId}/messages
- * ✅ Token inyectado automáticamente por axios interceptor
- * 🔐 Valida permisos en backend según rol del usuario
- */
-export async function sendMessage(chatId: string, message: string, mediaUrl?: string) {
-  try {
-    console.log(`📤 Enviando mensaje a: ${chatId}`);
-    
-    const response = await api.post(`/chats/${encodeURIComponent(chatId)}/messages`, {
-      message,
-      mediaUrl
-    });
-    
-    console.log(`✅ Mensaje enviado correctamente con ID: ${response.data?.messageId}`);
-    return response.data;
-  } catch (error: any) {
-    console.error(`❌ Error al enviar mensaje a ${chatId}:`, {
-      status: error?.response?.status,
-      message: error?.response?.data?.message,
-      error: error?.message
-    });
-    
-    if (error?.response?.status === 403) {
-      throw new Error('❌ No tienes permiso para enviar mensajes en este chat');
-    }
-
-    throw new Error(getSendErrorMessage(error));
-  }
-}
-
 export async function sendTemplateMessage(
   chatId: string,
   templateName: string,

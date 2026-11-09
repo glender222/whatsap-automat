@@ -7,6 +7,7 @@ import type { WhatsAppMessage } from '../../../../shared/types/wsp';
 import FilePreview from '../../../../shared/components/FilePreview'; 
 import { getAuthenticatedMediaBlob, getAuthenticatedMediaObjectUrl } from '../../services/mediaService';
 import { getSessionStatus, completeSession } from '../../services/sessionService';
+import { deliveryLabel } from '../../services/canonicalConversationApi';
 import type { AgentActivityTurn } from '../../../agentes/services/agentService';
 
 // Componente para modal de preview de documentos con obtención de URL pública
@@ -554,7 +555,10 @@ const MessagesPanel: React.FC<MessagesPanelProps> = ({
                           })}
                         </div>
                       )}
-                      <div className="text-xs text-gray-400 dark:text-gray-500 mt-1">{new Date(item.messageItem.timestamp * 1000).toLocaleString()}</div>
+                      <div className="mt-1 flex flex-wrap justify-end gap-x-2 text-xs text-gray-600 dark:text-gray-300">
+                        {item.messageItem.fromMe && deliveryLabel(item.messageItem.status) && <span>{deliveryLabel(item.messageItem.status)}</span>}
+                        <span>{new Date(item.messageItem.timestamp * 1000).toLocaleString()}</span>
+                      </div>
                     </div>
                   </div>
                 ))}

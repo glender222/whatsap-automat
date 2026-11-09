@@ -18,6 +18,7 @@
 /** Información de un chat de WhatsApp */
 export interface WhatsAppChat {
   id: string;
+  conversationId?: string;
   name: string;
   profilePhotoUrl?: string | null;
   photoUrl?: string | null;
@@ -56,6 +57,7 @@ export type MessageStatus = 'pending' | 'sent' | 'delivered' | 'read' | 'played'
 /** Un mensaje de WhatsApp */
 export interface WhatsAppMessage {
   id: string;
+  status?: string;
   body: string;
   fromMe: boolean;
   timestamp: number;

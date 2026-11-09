@@ -153,75 +153,33 @@ const validateFile = (file: File): string | null => {
     onSuccess?: (messageId: string) => void,
     onError?: (error: string) => void
   ) => {
-    if (!selectedFile) return;
+    const file = selectedFile?.file;
+    if (!(file instanceof File)) {
+      onError?.('Selecciona un archivo válido antes de enviar.');
+      return;
+    }
     setUploading(true);
-    
+
     try {
-      const file = selectedFile.file;
-      const isImage = file.type.startsWith('image/');
-      const isVideo = file.type.startsWith('video/');
-      
-      console.log('📁 Enviando archivo:', {
-        fileName: file.name,
-        fileType: file.type,
-        fileSize: file.size,
-        isImage,
-        isVideo,
-        chatId
-      });
-
-      console.log('🔍 DEBUG - selectedFile:', selectedFile);
-      console.log('🔍 DEBUG - file object:', file);
-      console.log('🔍 DEBUG - file instanceof File:', file instanceof File);
-
       const formData = new FormData();
-      // ✅ CORREGIDO: NO enviar chatId en FormData, va en la URL
       if (message) formData.append('message', message);
       formData.append('forceDocument', String(forceAsDocument));
-      
-      // ✅ ASEGURAR que el archivo se agregue correctamente
-      if (file && file instanceof File) {
-        formData.append('file', file, file.name);
-        console.log('✅ Archivo agregado al FormData:', file.name);
-      } else {
-        console.error('❌ ERROR: file no es una instancia de File', file);
-      }
+      formData.append('file', file, file.name);
 
-      // ✅ DEBUG: Verificar contenido del FormData
-      console.log('📦 FormData contenido:');
-      for (const [key, value] of formData.entries()) {
-        console.log(`  - ${key}:`, value instanceof File ? `File(${value.name}, ${value.size} bytes)` : value);
-      }
-
-      // ✅ CORREGIDO: Endpoint unificado del backend
       const endpoint = `/chats/${encodeURIComponent(chatId)}/messages`;
-
-      if (forceAsDocument) {
-        console.log('📄 Enviando como DOCUMENTO (forzado por usuario)');
-      } else if (isImage || isVideo) {
-        console.log('📹 Enviando como MEDIA (reproducible)');
-      } else {
-        console.log('📄 Enviando como DOCUMENTO (descargable)');
+      const response = await api.post(endpoint, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        transformRequest: [(data) => data],
+      });
+      const messageId = response.data?.messageId ?? response.data?.data?.messageId ?? response.data?.id;
+      if (response.data?.success !== true ||
+          !(typeof messageId === 'string' && messageId || typeof messageId === 'number' && Number.isSafeInteger(messageId) && messageId > 0)) {
+        throw new Error('El servidor no confirmó el envío del archivo.');
       }
 
-      console.log(`🚀 Enviando POST a: ${endpoint}`);
-      
-      // ✅ CORREGIDO: Configuración correcta para multipart/form-data
-      const response = await api.post(endpoint, formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-        transformRequest: [(data) => data], // ✅ NO transformar el FormData
-      });
-
-      console.log('✅ Archivo enviado exitosamente:', response.data);
-      
       clearFile();
       setUploading(false);
-      
-      // ✅ Devolver el ID del mensaje creado
-      const messageId = response.data?.messageId || response.data?.data?.messageId || response.data?.id || `msg-${Date.now()}`;
-      if (onSuccess) onSuccess(messageId);
+      onSuccess?.(String(messageId));
       return response.data;
       
     } catch (error: any) {

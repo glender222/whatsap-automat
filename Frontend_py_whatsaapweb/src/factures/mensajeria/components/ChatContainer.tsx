@@ -2,6 +2,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useAtom, useSetAtom } from 'jotai';
 import MessagesPanel from './bandeja de chats/MessagesPanel';
 import MessageInputBar from './bandeja de chats/MessageInputBar';
+import CanonicalSendStatus from './CanonicalSendStatus';
+import type { CanonicalComposer } from '../hooks/useCanonicalComposer';
 import type { WhatsAppMessage } from '../../../shared/types/wsp';
 import {
   AlertTriangle,
@@ -27,7 +29,7 @@ interface ChatContainerProps {
   setMessage: React.Dispatch<React.SetStateAction<string>>;
   messages: WhatsAppMessage[];
   onImageClick: (msg: WhatsAppMessage) => void;
-  onSendMessage: (messageText: string) => Promise<void> | void;
+  composer: CanonicalComposer;
   onOptimisticMessage: (msg: WhatsAppMessage) => void;
   onMessageSent: (tempId: string, realId: string) => void;
   onMessageError: (tempId: string) => void;
@@ -40,7 +42,7 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
   setMessage,
   messages,
   onImageClick,
-  onSendMessage,
+  composer,
   onOptimisticMessage,
   onMessageSent,
   onMessageError,
@@ -66,10 +68,20 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
   const setChatActivity = useSetAtom(setChatActivityAtom);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const emojiPickerRef = useRef<HTMLDivElement>(null);
+  const composerInputRef = useRef<HTMLTextAreaElement>(null);
+  const ownershipFocus = useRef(false);
   const customerHistory = useCustomerHistory(selectedChat);
 
   const iaPauseStatus = selectedChat ? agentState.iaPauseByChat[selectedChat] : undefined;
-  const isIaPaused = Boolean(iaPauseStatus?.paused);
+  const isIaPaused = composer.conversation?.aiPaused ?? Boolean(iaPauseStatus?.paused);
+
+  useEffect(() => {
+    if (!composer.owns) ownershipFocus.current = false;
+    if (composer.canSend && composer.notice?.message === 'Control confirmado para tu sesión.' && !ownershipFocus.current) {
+      ownershipFocus.current = true;
+      composerInputRef.current?.focus();
+    }
+  }, [composer.canSend, composer.notice, composer.owns]);
 
   useEffect(() => {
     if (messagesEndRef.current) {
@@ -166,25 +178,9 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
   }, [agentState.handoffTickets, selectedChat]);
 
   const handleSendMessage = async () => {
-    if (message.trim() && selectedChat) {
-      const text = message;
-      setMessage('');
-      setAgentSuggestion(null);
-      try {
-        await onSendMessage(text);
-        customerHistory.reload();
-      } catch (error) {
-        setMessage((current) => current || text);
-        throw error;
-      }
-    }
-  };
-
-  const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSendMessage();
-    }
+    if (!message.trim() || !selectedChat || !composer.canSend) return;
+    setAgentSuggestion(null);
+    await composer.send(message);
   };
 
   const handleEmojiSelect = (emoji: string) => {
@@ -270,6 +266,7 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
       } else {
         await iaService.pauseIa(selectedChat, 'Pausado manualmente desde chat', 24);
       }
+      composer.refresh();
     } catch (error: unknown) {
       const err = error as Error & { response?: { data?: { message?: string } } };
       setAgentError(err?.response?.data?.message || err?.message || 'No se pudo cambiar el estado de la IA.');
@@ -447,12 +444,16 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
           </div>
         )}
 
+        <CanonicalSendStatus composer={composer} />
         <MessageInputBar
           message={message}
           setMessage={setMessage}
           selectedChat={selectedChat}
-          handleKeyPress={handleKeyPress}
           handleSendMessage={handleSendMessage}
+          canSendText={composer.canSend}
+          canSendFile={composer.canAttach}
+          textSending={composer.phase === 'send'}
+          inputRef={composerInputRef}
           emojiPickerOpen={emojiPickerOpen}
           setEmojiPickerOpen={setEmojiPickerOpen}
           emojiPickerRef={emojiPickerRef}

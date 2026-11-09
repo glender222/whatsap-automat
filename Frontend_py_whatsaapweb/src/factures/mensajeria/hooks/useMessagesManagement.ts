@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAtom, useSetAtom } from 'jotai';
 import { chatsAtom, loadingMessagesAtom, messagesAtom, selectedChatAtom } from '../../../jotai/slices/messagesAtoms';
-import { createOptimisticMessage, normalizeMessageTimestamp } from '../../../shared/types/wsp';
+import { normalizeMessageTimestamp } from '../../../shared/types/wsp';
 import type { WhatsAppMessage } from '../../../shared/types/wsp';
 import { markChatAsRead } from '../services/chatService';
-import { getMessagesByChat, sendMessage } from '../services/messageService';
+import { getMessagesByChat } from '../services/messageService';
 
 export function useMessagesManagement() {
   const [messages, setMessages] = useAtom(messagesAtom);
@@ -59,9 +59,11 @@ export function useMessagesManagement() {
       .then((history) => {
         if (!isCurrent()) return;
         const ids = new Set(history.map((message) => message.id));
+        const newest = Math.max(0, ...history.map((message) => normalizeMessageTimestamp(message.timestamp)));
         setMessages((current) => [
           ...history,
-          ...current.filter((message) => message.chatId === selectedChat && !ids.has(message.id)),
+          ...current.filter((message) => message.chatId === selectedChat && !ids.has(message.id) &&
+            (message.id.startsWith('temp-file-') || normalizeMessageTimestamp(message.timestamp) > newest)),
         ]);
       })
       .catch((error: unknown) => {
@@ -99,34 +101,10 @@ export function useMessagesManagement() {
     )));
   }, [setMessages]);
 
-  const handleSendMessage = useCallback(async (messageText: string) => {
-    if (!selectedChat || selectedChatRef.current !== selectedChat || !messageText.trim()) return;
-
-    const optimistic = createOptimisticMessage(selectedChat, messageText);
-    addOptimisticMessage(optimistic);
-    try {
-      const response = await sendMessage(selectedChat, messageText);
-      if (!response.success) throw new Error(response.message || 'No se pudo enviar el mensaje.');
-      const messageId = response.messageId || response.data?.messageId || response.data?.id;
-      if (messageId) updateOptimisticMessage(optimistic.id, messageId);
-
-      setChats((current) => {
-        const chat = current.find((item) => item.id === selectedChat);
-        if (!chat) return current;
-        return [
-          { ...chat, lastMessageTimestamp: Date.now(), lastMessagePreview: messageText.slice(0, 50) },
-          ...current.filter((item) => item.id !== selectedChat),
-        ];
-      });
-    } catch (error) {
-      setMessages((current) => current.filter((message) => message.id !== optimistic.id));
-      throw error;
-    }
-  }, [addOptimisticMessage, selectedChat, setChats, setMessages, updateOptimisticMessage]);
+  const reloadMessages = useCallback(() => setRevision((previous) => previous + 1), []);
 
   return {
     messages, selectedChat, loadingMessages, messageError, selectChat, handleNewMessage,
-    reloadMessages: () => setRevision((previous) => previous + 1),
-    handleSendMessage, addOptimisticMessage, updateOptimisticMessage, markMessageError,
+    reloadMessages, addOptimisticMessage, updateOptimisticMessage, markMessageError,
   };
 }

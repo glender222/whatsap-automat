@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { SetStateAction } from 'react';
-import { useSetAtom } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { useSearchParams } from 'react-router-dom';
 import { Inbox, X } from 'lucide-react';
 import ChatSidebar from './components/bandeja de chats/ChatSidebar';
@@ -9,6 +9,7 @@ import ImageGalleryModal from './components/extras/ImageGalleryModal';
 import ChatContainer from './components/ChatContainer';
 import ConversationHeader from './components/MobileHeader';
 import { chatsAtom } from '../../jotai/slices/messagesAtoms';
+import { userAtom } from '../../jotai/slices/authAtoms';
 import type { WhatsAppChat, WhatsAppMessage } from '../../shared/types/wsp';
 import { useSocketSimple } from './hooks/useSocketSimple';
 import { useChatsManagement } from './hooks/useChatsManagement';
@@ -16,6 +17,8 @@ import { useMessagesManagement } from './hooks/useMessagesManagement';
 import { useTagsManagement } from './hooks/useTagsManagement';
 import { useContactPanel } from './hooks/useContactPanel';
 import { useGalleryModal } from './hooks/useGalleryModal';
+import { useCanonicalComposer } from './hooks/useCanonicalComposer';
+import { inboxActor } from './services/canonicalConversationApi';
 
 function formatNumeroAfiliado(chatId: string): string {
   const number = chatId.split('@')[0];
@@ -29,6 +32,8 @@ export default function Inicio() {
   const queue = useRef<HTMLDivElement>(null);
   const conversationTitle = useRef<HTMLHeadingElement>(null);
   const setChats = useSetAtom(chatsAtom);
+  const user = useAtomValue(userAtom);
+  const actor = useMemo(() => inboxActor(user), [user]);
 
   const {
     tags, selectedTagId, setSelectedTagId, isLoadingTags, tagsError, reloadTags,
@@ -37,7 +42,7 @@ export default function Inicio() {
   const { chats, reloadChats, isLoadingChats, chatsError } = useChatsManagement(selectedTagId);
   const {
     messages, selectedChat, loadingMessages, messageError, reloadMessages, selectChat, handleNewMessage,
-    handleSendMessage, addOptimisticMessage, updateOptimisticMessage, markMessageError,
+    addOptimisticMessage, updateOptimisticMessage, markMessageError,
   } = useMessagesManagement();
   const {
     contactPanelOpen, contactPanelMounted, contactMedia, contactUserInfo,
@@ -69,6 +74,15 @@ export default function Inicio() {
 
   const activeChat = chats.find((chat) => chat.id === selectedChat);
   const selectedName = activeChat?.name || formatNumeroAfiliado(selectedChat ?? '');
+  const acceptDraft = useCallback((chatId: string, text: string) => {
+    setDrafts((current) => current[chatId] === text ? { ...current, [chatId]: '' } : current);
+    reloadChats();
+  }, [reloadChats]);
+  const latestInboundId = [...messages].reverse().find((message) => !message.fromMe)?.id;
+  const composer = useCanonicalComposer({
+    chatId: selectedChat, conversationId: activeChat?.conversationId, actor, inboundId: latestInboundId,
+    refreshHistory: reloadMessages, acceptDraft,
+  });
 
   function setDraft(update: SetStateAction<string>) {
     if (!selectedChat) return;
@@ -135,28 +149,27 @@ export default function Inicio() {
         {selectedChat ? (
           <>
             <ConversationHeader titleRef={conversationTitle} selectedChatName={selectedName} onBack={handleBackToChats} />
-            {messageError ? (
+            {messageError && (
               <div role="alert" className="m-4 rounded-lg border border-subtle bg-surface p-5 text-sm text-red-700 dark:text-red-300">
                 <p>{messageError}</p>
                 <button type="button" className="mt-3 min-h-11 rounded-md px-2 font-semibold underline" onClick={reloadMessages}>
                   Reintentar
                 </button>
               </div>
-            ) : (
-              <ChatContainer
-                key={selectedChat}
-                selectedChat={selectedChat}
-                loadingMessages={loadingMessages}
-                messages={messages}
-                message={drafts[selectedChat] || ''}
-                setMessage={setDraft}
-                onImageClick={handleImageClick}
-                onSendMessage={handleSendMessage}
-                onOptimisticMessage={addOptimisticMessage}
-                onMessageSent={updateOptimisticMessage}
-                onMessageError={markMessageError}
-              />
             )}
+            <ChatContainer
+              key={selectedChat}
+              selectedChat={selectedChat}
+              loadingMessages={loadingMessages}
+              messages={messages}
+              message={drafts[selectedChat] || ''}
+              setMessage={setDraft}
+              onImageClick={handleImageClick}
+              composer={composer}
+              onOptimisticMessage={addOptimisticMessage}
+              onMessageSent={updateOptimisticMessage}
+              onMessageError={markMessageError}
+            />
           </>
         ) : (
           <div className="m-auto max-w-sm px-6 text-center">

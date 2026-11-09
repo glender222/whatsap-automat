@@ -21,8 +21,11 @@ interface MessageInputBarProps {
   message: string;
   setMessage: (msg: string) => void;
   selectedChat: string | null;
-  handleKeyPress: (e: React.KeyboardEvent) => void;
   handleSendMessage: () => Promise<void> | void; // Solo para texto puro
+  canSendText: boolean;
+  canSendFile: boolean;
+  textSending: boolean;
+  inputRef: RefObject<HTMLTextAreaElement | null>;
   emojiPickerOpen: boolean;
   setEmojiPickerOpen: React.Dispatch<React.SetStateAction<boolean>>;
   emojiPickerRef: RefObject<HTMLDivElement | null>;
@@ -36,8 +39,11 @@ const MessageInputBar: React.FC<MessageInputBarProps> = ({
   message,
   setMessage,
   selectedChat,
-  handleKeyPress,
-  handleSendMessage, // Solo se usa para texto
+  handleSendMessage,
+  canSendText,
+  canSendFile,
+  textSending,
+  inputRef,
   emojiPickerOpen,
   setEmojiPickerOpen,
   emojiPickerRef,
@@ -63,16 +69,17 @@ const MessageInputBar: React.FC<MessageInputBarProps> = ({
   const [dragActive, setDragActive] = useState(false);
   const [isAttachMenuOpen, setAttachMenuOpen] = useState(false);
   const [isQuickRepliesOpen, setQuickRepliesOpen] = useState(false); // ✅ NUEVO: Estado para respuestas rápidas
-  const [sendError, setSendError] = useState<string | null>(null);
   const attachMenuRef = useRef<HTMLDivElement>(null);
-  const canSendFreeForm = Boolean(selectedChat);
+  const fileSendLock = useRef(false);
+  const canSubmit = !uploading && !textSending && Boolean(selectedFile ? canSendFile : canSendText && message.trim());
 
   // ✅ NUEVO: Manejar envío combinado (archivo + caption)
   const handleCombinedSend = async () => {
-    if (!selectedChat) return;
-    setSendError(null);
+    if (!selectedChat || !canSubmit) return;
 
     if (selectedFile) {
+      if (fileSendLock.current) return;
+      fileSendLock.current = true;
       // ✅ Crear mensaje optimista
       const tempId = `temp-file-${Date.now()}`;
       const optimisticMessage = {
@@ -98,40 +105,26 @@ const MessageInputBar: React.FC<MessageInputBarProps> = ({
       setMessage('');
 
       // ✅ ENVIAR ARCHIVO EN SEGUNDO PLANO
-      await uploadFile(
-        selectedChat,
-        caption,
-        (realMessageId: string) => {
-          // ✅ Éxito: reemplazar mensaje temporal con real
-          onMessageSent?.(tempId, realMessageId);
-        },
-        (error: string) => {
-          // ✅ Error: marcar mensaje como fallido
-          console.error('Error:', error);
-          onMessageError?.(tempId);
-        }
-      );
-    } else if (message.trim()) {
-      // ✅ SOLO TEXTO (sin archivo)
       try {
-        await handleSendMessage(); // Llama a la función del padre
-      } catch (error: any) {
-        setSendError(error?.message || 'No se pudo enviar el mensaje');
+        await uploadFile(
+          selectedChat,
+          caption,
+          (realMessageId: string) => onMessageSent?.(tempId, realMessageId),
+          () => onMessageError?.(tempId),
+        );
+      } finally {
+        fileSendLock.current = false;
       }
+    } else if (message.trim()) {
+      await handleSendMessage();
     }
   };
 
   // ✅ NUEVO: Enter con o sin archivo
   const handleKeyPressWithFile = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
-      handleCombinedSend();
-      return;
-    }
-
-    // For other keys, preserve parent's handler if provided
-    if (typeof handleKeyPress === 'function') {
-      handleKeyPress(e);
+      void handleCombinedSend();
     }
   };
 
@@ -139,7 +132,7 @@ const MessageInputBar: React.FC<MessageInputBarProps> = ({
   const handleDragEnter = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    setDragActive(true);
+    if (canSendFile) setDragActive(true);
   };
 
   const handleDragLeave = (e: React.DragEvent) => {
@@ -149,7 +142,8 @@ const MessageInputBar: React.FC<MessageInputBarProps> = ({
   };
 
   const handleDropFile = (e: React.DragEvent) => {
-    handleDrop(e);
+    if (canSendFile) handleDrop(e);
+    else e.preventDefault();
     setDragActive(false);
   };
 
@@ -258,7 +252,7 @@ const MessageInputBar: React.FC<MessageInputBarProps> = ({
         <div className="relative" ref={attachMenuRef}>
           <button
             onClick={handleAttachClick} // ✅ CAMBIADO
-            disabled={uploading || !selectedChat || !canSendFreeForm}
+            disabled={uploading || !canSendFile}
             className="p-2 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             title="Adjuntar"
           >
@@ -296,7 +290,7 @@ const MessageInputBar: React.FC<MessageInputBarProps> = ({
         {/* ✅ NUEVO: Botón respuestas rápidas */}
         <button
           onClick={() => setQuickRepliesOpen((prev) => !prev)}
-          disabled={uploading || !selectedChat || !canSendFreeForm}
+          disabled={uploading || !selectedChat}
           className={`p-2 rounded-lg transition-colors ${isQuickRepliesOpen
             ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
             : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700'
@@ -312,7 +306,7 @@ const MessageInputBar: React.FC<MessageInputBarProps> = ({
             className="p-2 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
             onClick={() => setEmojiPickerOpen((prev) => !prev)}
             type="button"
-            disabled={uploading || !canSendFreeForm}
+            disabled={uploading || !selectedChat}
           >
             <Smile size={20} />
           </button>
@@ -324,17 +318,18 @@ const MessageInputBar: React.FC<MessageInputBarProps> = ({
         </div>
 
         {/* Textarea con soporte Ctrl+V */}
-        <div className="flex-1">
+        <div className="min-w-0 flex-1">
           <textarea
+            ref={inputRef}
             aria-label="Mensaje"
             value={message}
             onChange={(e) => setMessage(e.target.value)}
-            onKeyPress={handleKeyPressWithFile} // ✅ USAR LA NUEVA FUNCIÓN
-            onPaste={handlePaste} // ✅ SOPORTE CTRL+V
+            onKeyDown={handleKeyPressWithFile}
+            onPaste={canSendFile ? handlePaste : undefined}
             placeholder={
               selectedFile
-                ? 'Escribe un mensaje (opcional)...'
-                : 'Escribe un mensaje o pega una imagen (Ctrl+V)'
+                ? 'Comentario del archivo (opcional)'
+                : 'Escribe un mensaje'
             }
             className="w-full px-4 py-2 border border-gray-200 dark:border-gray-600 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
             rows={1}
@@ -344,22 +339,22 @@ const MessageInputBar: React.FC<MessageInputBarProps> = ({
               target.style.height = 'auto';
               target.style.height = Math.min(target.scrollHeight, 120) + 'px';
             }}
-            disabled={uploading || !selectedChat || !canSendFreeForm}
+            disabled={uploading || !selectedChat}
           />
         </div>
 
         {/* Botón enviar */}
         <button
           type="button"
-          aria-label="Enviar mensaje"
-          onClick={handleCombinedSend} // ✅ USAR LA NUEVA FUNCIÓN
-          disabled={(!message.trim() && !selectedFile) || !selectedChat || uploading || !canSendFreeForm}
-          className={`p-2 rounded-lg transition-colors min-w-[40px] flex items-center justify-center ${(message.trim() || selectedFile) && selectedChat && !uploading && canSendFreeForm
+          aria-label={selectedFile ? 'Enviar archivo' : 'Enviar mensaje'}
+          onClick={handleCombinedSend}
+          disabled={!canSubmit}
+          className={`p-2 rounded-lg transition-colors min-w-[40px] flex items-center justify-center ${canSubmit
             ? 'bg-green-500 dark:bg-green-600 text-white hover:bg-green-600 dark:hover:bg-green-700'
             : 'bg-gray-200 dark:bg-gray-700 text-gray-400 dark:text-gray-500 cursor-not-allowed'
             }`}
         >
-          {uploading ? (
+          {uploading || textSending ? (
             <Loader2 size={20} className="animate-spin" />
           ) : (
             <Send size={20} />
@@ -375,11 +370,6 @@ const MessageInputBar: React.FC<MessageInputBarProps> = ({
         </div>
       )}
 
-      {sendError && (
-        <div className="mt-2 text-xs text-red-600 dark:text-red-400">
-          {sendError}
-        </div>
-      )}
     </div>
   );
 };
