@@ -71,7 +71,7 @@ Consulte los archivos de especificación formal:
 | `GET` | `/api/v1/conversations` | Lista paginada de conversaciones | `Authorization` |
 | `GET` | `/api/v1/conversations/{id}` | Detalle de conversación | `Authorization` |
 | `GET` | `/api/v1/conversations/{id}/messages` | Mensajes de conversación | `Authorization` |
-| `POST` | `/api/v1/conversations/{id}/messages` | Envío de mensaje humano (previsto) | `Authorization`, `Idempotency-Key` |
+| `POST` | `/api/v1/conversations/{id}/messages` | Envío de texto por WhatsApp Cloud | `Authorization`, `Idempotency-Key` |
 | `POST` | `/api/v1/conversations/{id}/takeover` | Handoff y toma de control (CAS) | `Authorization` |
 | `POST` | `/api/v1/conversations/{id}/pause-ai` | Pausa de IA conversacional (CAS) | `Authorization` |
 | `POST` | `/api/v1/conversations/{id}/resume-ai` | Reanudar IA conversacional (CAS) | `Authorization` |
@@ -96,6 +96,14 @@ Consulte los archivos de especificación formal:
 El contrato incluye operaciones previstas. En la API v1 de conversaciones se pueden consultar la lista, el detalle y el historial, además de tomar el control, pausar o reanudar la IA. Los cambios CAS identifican al operador con su sesión. La lista y el historial devuelven primero los registros de mayor identificador. En conversaciones migradas del esquema anterior, `connectionId` usa una referencia de compatibilidad `legacy:<tenant>:<canal>`.
 
 Agent Studio conserva cada borrador como una revisión numerada e inmutable. Para leer o validar una revisión anterior, indica `?version=N`. La validación comprueba la estructura sin ejecutar el grafo y devuelve `publicationEvidence: false`. El simulador de regresión de `/api/v1/ai/eval/simulate` devuelve resultados sintéticos. La publicación requiere ejecutar una evaluación de servidor con un conjunto de pruebas autorizado, asociar su evidencia al tenant, la revisión y su hash, y usar esa revisión exacta en el runtime.
+
+### Envío de texto por WhatsApp Cloud
+
+Primero toma el control con `POST /api/v1/conversations/{id}/takeover`. Usa el `stateVersion` devuelto como `expectedConversationVersion` del envío. El servidor exige la sesión que tomó el control y una ventana de atención vigente en una sola cuenta verificada de WhatsApp Cloud. La cuenta requiere una credencial cifrada del tenant.
+
+Envía `message.kind = "text"`, el texto y una clave `Idempotency-Key` propia de ese intento. Conserva la clave, texto y versión si necesitas repetir el mismo intento. El servidor devuelve `409` si la clave se reutiliza con datos distintos. Después de un intento nuevo, consulta la conversación para obtener la versión vigente.
+
+Una respuesta `202` devuelve el estado registrado del intento. `provider_accepted` indica que Meta devolvió un identificador. `delivered` y `read` requieren un webhook firmado. `unknown_delivery` requiere revisión del estado en el proveedor y bloquea nuevas claves en la conversación. La API aún carece de conciliación automática para intentos sin identificador del proveedor. La protección de esta ruta v1 aplica al envío de texto. Los clientes que usan `/api/chats` siguen su flujo legado.
 
 ### Herramientas de agente
 

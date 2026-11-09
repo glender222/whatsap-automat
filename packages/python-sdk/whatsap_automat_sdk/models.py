@@ -284,6 +284,13 @@ class ApprovalDecisionResult(AutomatBaseModel):
 # Command / Request Models
 # ---------------------------------------------------------------------------
 
+class SendMessageResult(AutomatBaseModel):
+    provider_message_id: Optional[str] = Field(alias="providerMessageId")
+    accepted: bool
+    raw_status: str = Field(alias="rawStatus")
+    delivery_state: DeliveryState = Field(alias="deliveryState")
+
+
 class TakeoverRequest(AutomatBaseModel):
     expected_version: int = Field(alias="expectedVersion")
     user_id: Optional[str] = Field(default=None, alias="userId")

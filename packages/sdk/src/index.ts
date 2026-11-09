@@ -12,6 +12,7 @@ export * from './resources/approvals';
 export type {
   ConversationV1,
   ConversationMessageV1,
+  SendMessageResultV1,
   TakeoverCommandV1,
   PauseAiCommandV1,
   ChannelConnectionV1,

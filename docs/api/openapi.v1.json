@@ -225,9 +225,8 @@
         }
       },
       "post": {
-        "x-implementation-status": "planned",
-        "summary": "Enviar mensaje humano en conversación",
-        "description": "Envia un mensaje desde la interfaz humana usando control de idempotencia y CAS version.",
+        "summary": "Enviar texto por WhatsApp Cloud",
+        "description": "El operador autenticado debe controlar la conversación. Se requiere una ventana de atención de 24 horas comprobada con mensajes entrantes de la cuenta de envío. La clave se conserva para reintentar el mismo intento. Si se desconoce la entrega, se bloquea un nuevo intento en esa conversación.",
         "operationId": "sendConversationMessage",
         "security": [
           {
@@ -247,8 +246,10 @@
             "name": "Idempotency-Key",
             "in": "header",
             "required": true,
+            "description": "Reutiliza esta clave con el mismo texto, versión, conversación y sesión al reintentar.",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.:-]{1,128}$"
             }
           }
         ],
@@ -264,7 +265,7 @@
         },
         "responses": {
           "202": {
-            "description": "Mensaje aceptado para despacho",
+            "description": "Estado registrado del intento, incluido un rechazo o una entrega incierta. Consulta deliveryState.",
             "content": {
               "application/json": {
                 "schema": {
@@ -273,17 +274,20 @@
               }
             }
           },
-          "400": {
-            "$ref": "#/components/responses/ValidationError"
-          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
           }
         }
       }
@@ -2026,6 +2030,7 @@
       },
       "SendConversationMessageRequest": {
         "type": "object",
+        "additionalProperties": false,
         "required": [
           "message",
           "expectedConversationVersion"
@@ -2033,35 +2038,26 @@
         "properties": {
           "message": {
             "type": "object",
+            "additionalProperties": false,
             "required": [
-              "kind"
+              "kind",
+              "text"
             ],
             "properties": {
               "kind": {
-                "type": "string",
-                "enum": [
-                  "text",
-                  "media",
-                  "template",
-                  "interactive"
-                ]
+                "const": "text"
               },
               "text": {
-                "type": "string"
-              },
-              "mediaRef": {
-                "type": "string"
-              },
-              "templateId": {
-                "type": "string"
-              },
-              "parameters": {
-                "type": "object"
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096
               }
             }
           },
           "expectedConversationVersion": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2147483646
           }
         }
       },

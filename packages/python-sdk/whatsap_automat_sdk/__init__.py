@@ -46,6 +46,7 @@ from .models import (
     TakeoverRequest,
     PauseAiRequest,
     ResumeAiRequest,
+    SendMessageResult,
     ApprovalDecisionRequest,
     ApprovalDecisionResult,
 )
@@ -102,6 +103,7 @@ __all__ = [
     "TakeoverRequest",
     "PauseAiRequest",
     "ResumeAiRequest",
+    "SendMessageResult",
     "ApprovalDecisionRequest",
     "ApprovalDecisionResult",
 ]

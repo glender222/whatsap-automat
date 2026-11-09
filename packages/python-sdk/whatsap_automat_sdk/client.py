@@ -31,6 +31,7 @@ from .models import (
     PagedResponse,
     PauseAiRequest,
     ResumeAiRequest,
+    SendMessageResult,
     SimulatedNodeExecution,
     TakeoverRequest,
 )
@@ -109,6 +110,21 @@ class ConversationsResource:
             )
 
         return CursorPager(fetcher, initial_cursor=cursor)
+
+    def send_text(
+        self,
+        conversation_id: str,
+        text: str,
+        expected_conversation_version: int,
+        idempotency_key: Optional[str] = None,
+    ) -> SendMessageResult:
+        data = self._client._request(
+            "POST",
+            f"/conversations/{quote(conversation_id, safe='')}/messages",
+            json_body={"message": {"kind": "text", "text": text}, "expectedConversationVersion": expected_conversation_version},
+            headers={"Idempotency-Key": idempotency_key if idempotency_key is not None else uuid4().hex},
+        )
+        return SendMessageResult.model_validate(data)
 
     def takeover(
         self,
@@ -442,6 +458,21 @@ class AsyncConversationsResource:
             )
 
         return AsyncCursorPager(fetcher, initial_cursor=cursor)
+
+    async def send_text(
+        self,
+        conversation_id: str,
+        text: str,
+        expected_conversation_version: int,
+        idempotency_key: Optional[str] = None,
+    ) -> SendMessageResult:
+        data = await self._client._request(
+            "POST",
+            f"/conversations/{quote(conversation_id, safe='')}/messages",
+            json_body={"message": {"kind": "text", "text": text}, "expectedConversationVersion": expected_conversation_version},
+            headers={"Idempotency-Key": idempotency_key if idempotency_key is not None else uuid4().hex},
+        )
+        return SendMessageResult.model_validate(data)
 
     async def takeover(
         self,

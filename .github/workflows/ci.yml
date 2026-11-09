@@ -142,14 +142,15 @@ jobs:
             cat "$RUNNER_TEMP/product-smoke.log"
             exit 1
           fi
-      - name: Probar campañas, Marketplace, Studio, conexiones y consola de workflows contra PostgreSQL
+      - name: Probar envíos, campañas, Marketplace, Studio, conexiones y workflows contra PostgreSQL
         env:
           CAMPAIGN_SMOKE: '1'
           WORKFLOW_CONSOLE_SMOKE: '1'
           MARKETPLACE_TEST_DATABASE_URL: postgres://whatsap_smoke:ci-runtime-only@127.0.0.1:5432/whatsap_automat_smoke
           AGENT_STUDIO_TEST_DATABASE_URL: postgres://whatsap_smoke:ci-runtime-only@127.0.0.1:5432/whatsap_automat_smoke
           CHANNEL_CONNECTIONS_TEST_DATABASE_URL: postgres://whatsap_smoke:ci-runtime-only@127.0.0.1:5432/whatsap_automat_smoke
-        run: node --import tsx --test src/test/campaign-persistence.integration.test.ts src/test/marketplace-postgres.test.ts src/test/agent-studio-postgres.test.ts src/test/channel-connections-postgres.test.ts src/test/workflow-console.integration.test.ts
+          CONVERSATION_SEND_TEST_DATABASE_URL: postgres://whatsap_smoke:ci-runtime-only@127.0.0.1:5432/whatsap_automat_smoke
+        run: node --import tsx --test src/test/campaign-persistence.integration.test.ts src/test/marketplace-postgres.test.ts src/test/agent-studio-postgres.test.ts src/test/channel-connections-postgres.test.ts src/test/workflow-console.integration.test.ts src/test/conversation-send-postgres.test.ts
       - name: Ejecutar workflows con el worker compilado y Temporal
         env:
           WORKFLOW_TEST_DATABASE_URL: postgres://whatsap_smoke:ci-runtime-only@127.0.0.1:5432/whatsap_automat_smoke

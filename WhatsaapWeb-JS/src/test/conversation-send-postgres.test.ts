@@ -6,6 +6,7 @@ import { createServer, type Server, type ServerResponse } from 'node:http';
 import { test, type TestContext } from 'node:test';
 import { sendMessageResultV1Schema } from '@whatsap-automat/contracts';
 import express, { type Request } from 'express';
+import { AutomatClient } from '../../../packages/sdk/src';
 import { Pool } from 'pg';
 import config from '../config/index';
 import { TenantScopedUoW } from '../db/TenantScopedUoW';
@@ -23,7 +24,7 @@ const jwt = require('jsonwebtoken') as { sign(claims: Record<string, unknown>, s
 const connectionString = process.env.CONVERSATION_SEND_TEST_DATABASE_URL;
 const tenantA = randomInt(500_000_000, 700_000_000);
 const tenantB = tenantA + 1;
-const actor = 43;
+const actor = randomInt(700_000_000, 800_000_000);
 const appSecret = 'fixture-only-signature-secret';
 
 function token(tenantId: number, userId = actor, rol = 'EMPLEADO', secret = process.env.JWT_SECRET!) {
@@ -294,7 +295,8 @@ test('durable CAS sends one Graph POST per intent and reconciles authenticated r
   const missingAck = await send(url, id, 'missing-provider-ack', version + 2, accessA);
   assert.equal(missingAck.body.deliveryState, 'unknown_delivery');
   const restarted = await api(t, sender());
-  assert.deepEqual(await send(restarted, id, 'missing-provider-ack', version + 2, accessA), missingAck);
+  const sdk = new AutomatClient({ baseUrl: `${restarted}/api/v1`, token: accessA });
+  assert.deepEqual(await sdk.conversations.sendText(String(id), 'Hola desde la bandeja', version + 2, 'missing-provider-ack'), missingAck.body);
   assert.equal((await send(restarted, id, 'blind-retry-new-key', version + 3, accessA)).body.metadata.reasonCode, 'DELIVERY_UNRESOLVED');
 
   await inbound(phoneB, '12025550105');

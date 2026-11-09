@@ -1,4 +1,4 @@
-import { ConversationV1, ConversationMessageV1 } from '@whatsap-automat/contracts';
+import { ConversationV1, ConversationMessageV1, SendMessageResultV1 } from '@whatsap-automat/contracts';
 import { HttpClient } from '../http';
 import { CursorPager } from '../pagination';
 
@@ -48,6 +48,17 @@ export class ConversationsResource {
       );
       return res;
     }, params.cursor);
+  }
+
+  async sendText(
+    conversationId: string,
+    text: string,
+    expectedConversationVersion: number,
+    idempotencyKey: string = globalThis.crypto.randomUUID(),
+  ): Promise<SendMessageResultV1> {
+    return this.http.post<SendMessageResultV1>(`/conversations/${encodeURIComponent(conversationId)}/messages`, {
+      message: { kind: 'text', text }, expectedConversationVersion,
+    }, { headers: { 'Idempotency-Key': idempotencyKey } });
   }
 
   async takeover(conversationId: string, params: TakeoverParams): Promise<ConversationV1> {
