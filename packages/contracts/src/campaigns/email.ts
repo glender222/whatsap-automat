@@ -12,11 +12,11 @@ export const emailChannelConfigV1Schema = z.object({
   dkimSelector: z.string().optional(),
   dkimPrivateKey: z.string().optional(),
   imapHost: z.string().optional(),
-  imapPort: z.number().int().positive().default(993).optional(),
-  imapSecure: z.boolean().default(true).optional(),
+  imapPort: z.number().int().positive().optional(),
+  imapSecure: z.boolean().optional(),
   imapUser: z.string().optional(),
   imapPassword: z.string().optional(),
-  pollingIntervalSeconds: z.number().int().min(5).default(30).optional(),
+  pollingIntervalSeconds: z.number().int().min(5).optional(),
 });
 
 export type EmailChannelConfigV1 = z.infer<typeof emailChannelConfigV1Schema>;

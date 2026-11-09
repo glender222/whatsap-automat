@@ -40,7 +40,7 @@ export const knowledgeCollectionV1Schema = z.object({
     chunkSizeTokens: 512,
     overlapTokens: 64,
   }),
-  metadata: z.record(z.unknown()).default({}),
+  metadata: z.record(z.string(), z.unknown()).default({}),
   chunkCount: z.number().int().nonnegative().optional(),
   createdAt: z.string().datetime().optional(),
   updatedAt: z.string().datetime().optional(),
@@ -56,7 +56,7 @@ export const createKnowledgeCollectionCommandV1Schema = z.object({
   embeddingModel: z.string().min(1).default('text-embedding-3-small'),
   distanceMetric: distanceMetricSchema.default('cosine'),
   chunkStrategy: chunkingConfigV1Schema.partial().optional(),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
 });
 export type CreateKnowledgeCollectionCommandV1 = z.infer<typeof createKnowledgeCollectionCommandV1Schema>;
 
@@ -71,7 +71,7 @@ export const knowledgeChunkV1Schema = z.object({
   customerId: z.string().nullable().optional(),
   chunkIndex: z.number().int().nonnegative(),
   content: z.string().min(1),
-  metadata: z.record(z.unknown()).default({}),
+  metadata: z.record(z.string(), z.unknown()).default({}),
   tokenCount: z.number().int().nonnegative(),
   embedding: z.array(z.number()).optional(),
   createdAt: z.string().datetime().optional(),
@@ -88,7 +88,7 @@ export const ingestDocumentCommandV1Schema = z.object({
   fileType: z.enum(['text', 'markdown', 'pdf', 'csv', 'json']).default('text'),
   content: z.string().min(1, 'Document content cannot be empty'),
   customerId: z.string().optional(),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
   customChunkStrategy: chunkingConfigV1Schema.partial().optional(),
 });
 export type IngestDocumentCommandV1 = z.infer<typeof ingestDocumentCommandV1Schema>;
@@ -112,7 +112,7 @@ export const knowledgeQueryRequestV1Schema = z.object({
   topK: z.number().int().min(1).max(10).default(3),
   minSimilarity: z.number().min(0).max(1).default(0.7),
   customerId: z.string().optional(),
-  filterMetadata: z.record(z.unknown()).optional(),
+  filterMetadata: z.record(z.string(), z.unknown()).optional(),
 });
 export type KnowledgeQueryRequestV1 = z.infer<typeof knowledgeQueryRequestV1Schema>;
 
@@ -122,7 +122,7 @@ export const knowledgeQueryResultChunkV1Schema = z.object({
   documentId: z.string().nullable().optional(),
   customerId: z.string().nullable().optional(),
   content: z.string().min(1),
-  metadata: z.record(z.unknown()),
+  metadata: z.record(z.string(), z.unknown()),
   similarityScore: z.number().min(0).max(1),
   distance: z.number().nonnegative(),
 });

@@ -61,8 +61,8 @@ export const extensionManifestSchema = z
     slots: z.array(uiSlotSchema).optional(),
     capabilities: z.array(z.string()).optional(),
     minRuntimeVersion: z.string().default('^0.4.0'),
-    configSchema: z.record(z.unknown()).optional(),
-    metadata: z.record(z.unknown()).default({}),
+    configSchema: z.record(z.string(), z.unknown()).optional(),
+    metadata: z.record(z.string(), z.unknown()).default({}),
     channel: z
       .object({
         kind: z.string().min(1),
@@ -74,7 +74,7 @@ export const extensionManifestSchema = z
       .object({
         name: z.string().min(1),
         riskLevel: z.enum(['read', 'write', 'send', 'financial', 'destructive']).default('read'),
-        parameters: z.record(z.unknown()).optional(),
+        parameters: z.record(z.string(), z.unknown()).optional(),
       })
       .optional(),
     ui: z
@@ -112,7 +112,7 @@ export function validateExtensionManifest(data: unknown): ExtensionValidationRes
   if (!result.success) {
     return {
       valid: false,
-      errors: result.error.errors.map((e) => `${e.path.join('.')}: ${e.message}`),
+      errors: result.error.issues.map((e) => `${e.path.join('.')}: ${e.message}`),
     };
   }
   return {

@@ -62,7 +62,7 @@ export const tokenLedgerEntryV1Schema = z.object({
   isByok: z.boolean().default(false),
   latencyMs: z.number().int().nonnegative().default(0),
   status: ledgerEntryStatusSchema.default('success'),
-  metadataJson: z.record(z.unknown()).default({}),
+  metadataJson: z.record(z.string(), z.unknown()).default({}),
   createdAt: z.string().datetime().optional(),
 });
 
@@ -87,7 +87,7 @@ export const createTokenLedgerEntryCommandV1Schema = z.object({
   isByok: z.boolean().default(false),
   latencyMs: z.number().int().nonnegative().default(0),
   status: ledgerEntryStatusSchema.default('success'),
-  metadataJson: z.record(z.unknown()).default({}),
+  metadataJson: z.record(z.string(), z.unknown()).default({}),
 });
 
 export type CreateTokenLedgerEntryCommandV1 = z.infer<typeof createTokenLedgerEntryCommandV1Schema>;

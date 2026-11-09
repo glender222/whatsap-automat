@@ -27,7 +27,7 @@ export const workflowNodeDefinitionV1Schema = z.object({
   id: z.string().min(1),
   kind: workflowNodeKindSchema,
   label: z.string().optional(),
-  config: z.record(z.unknown()).default({}),
+  config: z.record(z.string(), z.unknown()).default({}),
   position: workflowNodePositionSchema.optional(),
 });
 
@@ -98,7 +98,7 @@ export const workflowErrorDetailsV1Schema = z.object({
   timestamp: z.string().datetime().optional(),
   retryable: z.boolean().optional(),
   stack: z.string().optional(),
-  details: z.record(z.unknown()).optional(),
+  details: z.record(z.string(), z.unknown()).optional(),
 });
 
 // Workflow Run
@@ -113,8 +113,8 @@ export const workflowRunV1Schema = z.object({
   triggerType: workflowTriggerTypeSchema,
   status: workflowRunStatusSchema,
   correlationId: z.string().min(1),
-  inputPayload: z.record(z.unknown()).default({}),
-  outputPayload: z.record(z.unknown()).default({}),
+  inputPayload: z.record(z.string(), z.unknown()).default({}),
+  outputPayload: z.record(z.string(), z.unknown()).default({}),
   currentStep: z.string().nullable().optional(),
   stepCount: z.number().int().nonnegative().default(0),
   errorDetails: workflowErrorDetailsV1Schema.nullable().optional(),
@@ -156,7 +156,7 @@ export const workflowTriggerV1Schema = z.object({
   authTokenHash: z.string().nullable().optional(),
   cronExpression: z.string().nullable().optional(),
   isActive: z.boolean().default(true),
-  metadata: z.record(z.unknown()).default({}),
+  metadata: z.record(z.string(), z.unknown()).default({}),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });
@@ -170,7 +170,7 @@ export const executionStatusSchema = z.enum(EXECUTION_STATUSES);
 
 export const automationTriggerV1Schema = z.object({
   type: automationTriggerTypeSchema,
-  config: z.record(z.unknown()),
+  config: z.record(z.string(), z.unknown()),
 });
 
 export const automationDefinitionV1Schema = z.object({

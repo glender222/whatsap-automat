@@ -214,6 +214,10 @@ jobs:
         working-directory: packages/contracts
         run: npm run typecheck
 
+      - name: Auditar contratos distribuidos
+        working-directory: packages/contracts
+        run: npm audit --omit=dev --audit-level=high
+
       - name: Pruebas unitarias de contratos, canales y mappers (bloqueante)
         working-directory: packages/contracts
         run: npm test
@@ -332,6 +336,7 @@ jobs:
           npm --prefix packages/sdk run build
           npm --prefix packages/sdk test
           npm --prefix packages/cli ci
+          npm --prefix packages/cli audit --omit=dev --audit-level=high
           npm --prefix packages/cli run build
           npm --prefix packages/cli test
       - name: Validar aplicación móvil

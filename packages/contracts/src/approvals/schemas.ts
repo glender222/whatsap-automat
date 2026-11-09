@@ -8,7 +8,7 @@ export const approvalStatusSchema = z.enum(APPROVAL_STATUSES);
 export const approvalActionDetailsSchema = z.object({
   toolName: z.string().min(1),
   summary: z.string().min(1),
-  parametersRedacted: z.record(z.unknown()),
+  parametersRedacted: z.record(z.string(), z.unknown()),
   requiredRole: z.string().optional(),
 });
 

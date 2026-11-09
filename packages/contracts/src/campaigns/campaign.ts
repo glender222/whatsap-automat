@@ -39,7 +39,7 @@ export const campaignDefinitionV1Schema = z.object({
   segmentId: z.string().nullable().optional(),
   purpose: consentPurposeSchema.default('marketing'),
   templateId: z.string().nullable().optional(),
-  templateVariables: z.record(z.unknown()).default({}),
+  templateVariables: z.record(z.string(), z.unknown()).default({}),
   contentSubject: z.string().nullable().optional(),
   contentBody: z.string().nullable().optional(),
   status: campaignStatusSchema.default('draft'),
@@ -54,7 +54,7 @@ export const campaignDefinitionV1Schema = z.object({
   statsDelivered: z.number().int().nonnegative().default(0),
   statsFailed: z.number().int().nonnegative().default(0),
   statsSuppressed: z.number().int().nonnegative().default(0),
-  metadata: z.record(z.unknown()).default({}),
+  metadata: z.record(z.string(), z.unknown()).default({}),
   createdAt: z.string().datetime().optional(),
   updatedAt: z.string().datetime().optional(),
 });
@@ -69,13 +69,13 @@ export const createCampaignCommandV1Schema = z.object({
   segmentId: z.string().optional(),
   purpose: consentPurposeSchema.default('marketing'),
   templateId: z.string().optional(),
-  templateVariables: z.record(z.unknown()).default({}),
+  templateVariables: z.record(z.string(), z.unknown()).default({}),
   contentSubject: z.string().optional(),
   contentBody: z.string().optional(),
   rateLimitPerMinute: z.number().int().min(1).max(1000).default(50),
   failurePauseThresholdPercent: z.number().min(0).max(100).default(5),
   scheduledAt: z.string().datetime().optional(),
-  metadata: z.record(z.unknown()).default({}),
+  metadata: z.record(z.string(), z.unknown()).default({}),
 });
 
 export type CreateCampaignCommandV1 = z.infer<typeof createCampaignCommandV1Schema>;
@@ -92,7 +92,7 @@ export const campaignDeliveryV1Schema = z.object({
   providerMessageId: z.string().nullable().optional(),
   errorCode: z.string().nullable().optional(),
   errorMessage: z.string().nullable().optional(),
-  renderedPayload: z.record(z.unknown()).default({}),
+  renderedPayload: z.record(z.string(), z.unknown()).default({}),
   dispatchedAt: z.string().datetime().nullable().optional(),
   deliveredAt: z.string().datetime().nullable().optional(),
   createdAt: z.string().datetime().optional(),

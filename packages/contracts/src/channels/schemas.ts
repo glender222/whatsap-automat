@@ -25,7 +25,7 @@ export const inboundInteractiveSchema = z.object({
   type: z.enum(['button_reply', 'list_reply', 'quick_reply']),
   id: z.string().min(1),
   title: z.string().min(1),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
 export const inboundMessagePayloadSchema = z.object({
@@ -55,7 +55,7 @@ export const channelEventPayloadSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('message'), data: inboundMessagePayloadSchema }),
   z.object({ kind: z.literal('status'), data: messageStatusPayloadSchema }),
   z.object({ kind: z.literal('connection'), data: connectionStatusPayloadSchema }),
-  z.object({ kind: z.literal('raw'), data: z.record(z.unknown()) }),
+  z.object({ kind: z.literal('raw'), data: z.record(z.string(), z.unknown()) }),
 ]);
 
 export const channelEventV1Schema = z.object({
@@ -80,7 +80,7 @@ export const outboundMessageContentSchema = z.object({
   text: z.string().optional(),
   mediaRef: z.string().optional(),
   templateId: z.string().optional(),
-  parameters: z.record(z.unknown()).optional(),
+  parameters: z.record(z.string(), z.unknown()).optional(),
 });
 
 export const messageCausedBySchema = z.object({

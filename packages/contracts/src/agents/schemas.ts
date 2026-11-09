@@ -9,7 +9,7 @@ export const agentRunStateSchema = z.enum(AGENT_RUN_STATES);
 export const graphNodeDefinitionSchema = z.object({
   id: z.string().min(1),
   kind: nodeKindSchema,
-  config: z.record(z.unknown()),
+  config: z.record(z.string(), z.unknown()),
 });
 
 export const graphEdgeDefinitionSchema = z.object({
@@ -50,7 +50,7 @@ export const toolInvocationV1Schema = z.object({
   graphVersion: z.number().int().positive(),
   toolName: z.string().min(1),
   schemaVersion: z.number().int().positive(),
-  input: z.record(z.unknown()),
+  input: z.record(z.string(), z.unknown()),
   effectKey: z.string().min(1),
   expectedConversationVersion: z.number().int().nonnegative(),
   requestedByNodeId: z.string().min(1),
@@ -61,7 +61,7 @@ export const agentTimelineStepSchema = z.object({
   step: z.number().int().positive(),
   nodeId: z.string().min(1),
   event: z.string().min(1),
-  detailsRedacted: z.record(z.unknown()).optional(),
+  detailsRedacted: z.record(z.string(), z.unknown()).optional(),
 });
 
 export const agentRunTraceV1Schema = z.object({
@@ -80,7 +80,7 @@ export const agentSimulationRequestV1Schema = z.object({
   graphId: z.string().min(1),
   graphVersion: z.number().int().positive().optional(),
   mockInput: z.string().min(1),
-  mockConversationState: z.record(z.unknown()).optional(),
+  mockConversationState: z.record(z.string(), z.unknown()).optional(),
 });
 
 export const agentSimulationResultV1Schema = z.object({
@@ -88,7 +88,7 @@ export const agentSimulationResultV1Schema = z.object({
     z.object({
       nodeId: z.string().min(1),
       kind: z.string().min(1),
-      output: z.record(z.unknown()),
+      output: z.record(z.string(), z.unknown()),
       durationMs: z.number().nonnegative(),
     })
   ),

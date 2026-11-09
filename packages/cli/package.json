@@ -25,7 +25,7 @@
   "license": "MIT",
   "dependencies": {
     "@whatsap-automat/contracts": "file:../contracts",
-    "zod": "^3.23.8"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/node": "^22.8.1",

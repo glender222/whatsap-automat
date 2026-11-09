@@ -17,7 +17,7 @@ export const problemDetailsV1Schema = z.object({
   code: standardErrorCodeSchema,
   correlationId: z.string().min(1),
   invalidParams: z.array(invalidParamDetailSchema).optional(),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
 export type ProblemDetailsV1SchemaType = z.infer<typeof problemDetailsV1Schema>;

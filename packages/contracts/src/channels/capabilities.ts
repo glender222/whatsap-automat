@@ -118,7 +118,7 @@ export const channelBudgetSchema = z.object({
 
 export const regionalConstraintsSchema = z.object({
   blacklistedCountries: z.array(z.string().length(2)),
-  restrictedFeaturesByCountry: z.record(z.array(z.string())).optional(),
+  restrictedFeaturesByCountry: z.record(z.string(), z.array(z.string())).optional(),
 });
 
 export const channelCapabilityMatrixSchema = z.object({

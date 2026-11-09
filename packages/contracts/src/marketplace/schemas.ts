@@ -32,7 +32,7 @@ export type MarketplaceListingStatus = z.infer<typeof marketplaceListingStatusSc
 export const extensionRatingScoreSchema = z.number().int().min(1).max(5);
 
 export const extensionRatingSchema = z.object({
-  id: z.string().uuid(),
+  id: z.guid(),
   extensionId: z.string().min(1),
   tenantId: z.string().min(1),
   userId: z.string().min(1),

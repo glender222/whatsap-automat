@@ -33,14 +33,14 @@ export const fallbackManifestSchema = z.object({
   tool: z.object({
     name: z.string().min(1),
     riskLevel: z.enum(['read', 'write', 'send', 'financial', 'destructive']).default('read'),
-    parameters: z.record(z.unknown()).optional(),
+    parameters: z.record(z.string(), z.unknown()).optional(),
   }).optional(),
   ui: z.object({
     slots: z.array(z.string()).min(1),
     entrypointHtml: z.string().optional(),
   }).optional(),
   slots: z.array(z.string()).optional(),
-  settings: z.record(z.unknown()).optional(),
+  settings: z.record(z.string(), z.unknown()).optional(),
 });
 
 export type ExtensionManifest = z.infer<typeof fallbackManifestSchema>;

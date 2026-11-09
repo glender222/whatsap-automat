@@ -12,7 +12,7 @@ export const messageAttachmentV1Schema = z.object({
   mimeType: z.string().min(1),
   sizeBytes: z.number().int().nonnegative().optional(),
   url: z.string().optional(),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
 export const conversationMessageV1Schema = z.object({

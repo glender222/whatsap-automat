@@ -62,7 +62,7 @@ export type ModelMessage = ModelMessageV1;
 export const modelToolDefinitionV1Schema = z.object({
   name: z.string().min(1).regex(/^[a-zA-Z0-9_.-]+$/, 'Tool name must contain alphanumeric characters, underscores, dots, or hyphens'),
   description: z.string().min(1),
-  parameters: z.record(z.unknown()).default({}),
+  parameters: z.record(z.string(), z.unknown()).default({}),
 });
 
 export type ModelToolDefinitionV1 = z.infer<typeof modelToolDefinitionV1Schema>;
@@ -75,7 +75,7 @@ export type ModelToolDefinition = ModelToolDefinitionV1;
 export const modelToolCallV1Schema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
-  arguments: z.record(z.unknown()).default({}),
+  arguments: z.record(z.string(), z.unknown()).default({}),
 });
 
 export type ModelToolCallV1 = z.infer<typeof modelToolCallV1Schema>;

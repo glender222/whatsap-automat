@@ -46,7 +46,7 @@ export const consentRecordV1Schema = z.object({
   purpose: consentPurposeSchema.default('marketing'),
   status: consentStatusSchema.default('opted_in'),
   evidenceType: consentEvidenceTypeSchema.default('manual'),
-  evidenceProof: z.record(z.unknown()).default({}),
+  evidenceProof: z.record(z.string(), z.unknown()).default({}),
   optedInAt: z.string().datetime().default(() => new Date().toISOString()),
   revokedAt: z.string().datetime().nullable().optional(),
   createdAt: z.string().datetime().optional(),
@@ -62,7 +62,7 @@ export const recordConsentInputV1Schema = z.object({
   purpose: consentPurposeSchema.default('marketing'),
   status: consentStatusSchema.default('opted_in'),
   evidenceType: consentEvidenceTypeSchema.default('manual'),
-  evidenceProof: z.record(z.unknown()).default({}),
+  evidenceProof: z.record(z.string(), z.unknown()).default({}),
 });
 
 export type RecordConsentInputV1 = z.infer<typeof recordConsentInputV1Schema>;

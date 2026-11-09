@@ -88,7 +88,7 @@ export const toolDefinitionV1Schema = z.object({
   description: z.string().min(1).max(1024),
   riskLevel: toolRiskLevelSchema,
   requiredRoles: z.array(z.string().min(1)).min(1, 'Tool requires at least one authorized role'),
-  parameters: z.record(z.unknown()).default({}),
+  parameters: z.record(z.string(), z.unknown()).default({}),
   timeoutMs: z
     .number()
     .int()
@@ -116,7 +116,7 @@ export const toolExecutionRequestV1Schema = z.object({
   agentGraphId: z.string().min(1),
   runId: z.string().min(1),
   toolName: z.string().min(1),
-  input: z.record(z.unknown()).default({}),
+  input: z.record(z.string(), z.unknown()).default({}),
   expectedConversationVersion: z.number().int().nonnegative().optional(),
   actorRoles: z.array(z.string().min(1)).default([]),
   actorId: z.string().optional(),

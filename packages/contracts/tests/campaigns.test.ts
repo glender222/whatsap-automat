@@ -246,6 +246,20 @@ describe('PR-F6-01: Campaigns, Audiences, Consent & Email Contracts', () => {
       assert.equal(parsed.data.fromAddress, 'notifications@example.com');
     });
 
+    it('preserves omitted IMAP options in an SMTP-only configuration', () => {
+      const config = emailChannelConfigV1Schema.parse({
+        smtpHost: 'smtp.example.com',
+        smtpUser: 'operator',
+        smtpPassword: 'fixture-only',
+        fromAddress: 'notifications@example.com',
+      });
+      assert.equal(config.smtpPort, 587);
+      assert.equal(config.smtpSecure, false);
+      assert.equal(Object.hasOwn(config, 'imapPort'), false);
+      assert.equal(Object.hasOwn(config, 'imapSecure'), false);
+      assert.equal(Object.hasOwn(config, 'pollingIntervalSeconds'), false);
+    });
+
     it('rejects invalid email address in EmailChannelConfigV1', () => {
       const invalidEmail = {
         smtpHost: 'smtp.example.com',
