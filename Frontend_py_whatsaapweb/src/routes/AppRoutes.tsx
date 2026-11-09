@@ -26,6 +26,9 @@ const HandoffPage = lazy(() => import("../factures/dashboard/pages/HandoffPage")
 const AiDomainsPage = lazy(() => import("../factures/agentes/pages/AiDomainsPage"));
 const AgentsPage = lazy(() => import("../factures/agentes/pages/AgentsPage"));
 const AgentTestSessionPage = lazy(() => import("../factures/agentes/pages/AgentTestSessionPage"));
+const AgentGraphListPage = lazy(() => import("../components/agent-studio/canonical/AgentGraphListPage"));
+const AgentGraphEditorPage = lazy(() => import("../components/agent-studio/canonical/AgentGraphEditorPage"));
+const AgentGraphDetailPage = lazy(() => import("../components/agent-studio/canonical/AgentGraphDetailPage"));
 const CatalogsPage = lazy(() => import("../factures/inventario/pages/CatalogsPage"));
 const InventoryPage = lazy(() => import("../factures/inventario/pages/InventoryPage"));
 const CampaignsPage = lazy(() => import("../components/campaigns/CampaignsPage"));
@@ -77,6 +80,10 @@ function AppRoutesInner() {
           <Route path="ia-settings" element={<Navigate to="/dashboard/ia/dominios" replace />} />
           <Route path="ia/agentes" element={<PrivateRoute adminOnly><AgentsPage /></PrivateRoute>} />
           <Route path="ia/agentes/test" element={<PrivateRoute adminOnly><AgentTestSessionPage /></PrivateRoute>} />
+          <Route path="ia/estudio" element={<PrivateRoute adminOnly><AgentGraphListPage /></PrivateRoute>} />
+          <Route path="ia/estudio/nuevo" element={<PrivateRoute adminOnly><AgentGraphEditorPage /></PrivateRoute>} />
+          <Route path="ia/estudio/grafos/:graphId" element={<PrivateRoute adminOnly><AgentGraphDetailPage /></PrivateRoute>} />
+          <Route path="ia/estudio/grafos/:graphId/revisiones/nueva" element={<PrivateRoute adminOnly><AgentGraphEditorPage /></PrivateRoute>} />
           <Route path="agentes" element={<Navigate to="/dashboard/ia/agentes" replace />} />
           <Route path="inventario" element={<InventoryPage />} />
           <Route path="catalogos" element={<CatalogsPage />} />

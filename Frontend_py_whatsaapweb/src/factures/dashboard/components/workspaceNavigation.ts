@@ -1,6 +1,7 @@
 import {
   Activity,
   BarChart3,
+  GitBranch,
   Hand,
   Inbox,
   LayoutDashboard,
@@ -45,7 +46,8 @@ export const workspaceSections: WorkspaceSection[] = [
   {
     label: 'Automatización',
     links: [
-      { to: '/dashboard/ia/agentes', label: 'Agentes', icon: Sparkles, adminOnly: true },
+      { to: '/dashboard/ia/estudio', label: 'Agent Studio', icon: GitBranch, adminOnly: true },
+      { to: '/dashboard/ia/agentes', label: 'Ajustes de agentes', icon: Sparkles, adminOnly: true },
       { to: '/dashboard/ia/dominios', label: 'Dominios de IA', icon: Layers3, adminOnly: true },
       { to: '/dashboard/campanas', label: 'Campañas', icon: Send },
       { to: '/dashboard/segmentos', label: 'Segmentos', icon: Users },

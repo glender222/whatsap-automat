@@ -1,0 +1,146 @@
+import { isAxiosError } from 'axios';
+import { api } from '../../../shared/axios/http';
+
+export const studioPath = '/dashboard/ia/estudio';
+export const legacyAgentsPath = '/dashboard/ia/agentes';
+export const graphPath = (id: string) => `${studioPath}/grafos/${encodeURIComponent(id)}`;
+const base = '/v1/agent-graphs';
+const pageSize = 12;
+const graphEndpoint = (id: string) => `${base}/${encodeURIComponent(id)}`;
+
+export const graphIdPattern = String.raw`[A-Za-z0-9_\-]{1,128}`;
+export const nodeKinds = {
+  agent: 'Agente', router: 'Enrutador', condition: 'Condición', tool: 'Herramienta', approval: 'Aprobación',
+  subgraph: 'Subgrafo', parallel: 'Paralelo', join: 'Unión', handoff: 'Derivación', end: 'Fin',
+} as const;
+type NodeKind = keyof typeof nodeKinds;
+interface GraphNode { id: string; kind: NodeKind; config: Record<string, unknown> }
+interface GraphEdge { id: string; from: string; to: string; condition?: string; priority?: number }
+
+export interface GraphSpec {
+  entryNodeId: string;
+  policyRef: string;
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  limits: {
+    maxSteps: number;
+    maxDelegations: number;
+    maxParallelNodes: number;
+    maxDurationSeconds: number;
+    maxModelTokens: number;
+    maxCostMicroUsd: number;
+  };
+}
+
+export interface GraphDraft extends GraphSpec {
+  schemaVersion: 1;
+  graphId: string;
+  tenantId: string;
+  version: number;
+  status: 'draft';
+  specHash: string;
+}
+
+interface GraphIssue { severity: 'error'; code: string; message: string; nodeId?: string }
+export interface GraphValidation {
+  graphId: string;
+  version: number;
+  specHash: string;
+  scope: 'structural';
+  publicationEvidence: false;
+  valid: boolean;
+  issues: GraphIssue[];
+}
+
+export interface GraphProblem {
+  message: string;
+  fields: Array<{ name: string; reason: string }>;
+}
+
+export const exampleGraph: GraphSpec = {
+  entryNodeId: 'inicio',
+  policyRef: 'politica-interna',
+  nodes: [
+    { id: 'inicio', kind: 'agent', config: {} },
+    { id: 'fin', kind: 'end', config: {} },
+  ],
+  edges: [{ id: 'finalizar', from: 'inicio', to: 'fin' }],
+  limits: { maxSteps: 8, maxDelegations: 0, maxParallelNodes: 1, maxDurationSeconds: 30, maxModelTokens: 1000, maxCostMicroUsd: 10000 },
+};
+
+export function draftSpec({ entryNodeId, policyRef, nodes, edges, limits }: GraphDraft): GraphSpec {
+  return { entryNodeId, policyRef, nodes, edges, limits };
+}
+
+export function readVersion(raw: string | null): number | undefined {
+  if (raw && /^[1-9][0-9]*$/.test(raw)) {
+    const value = Number(raw);
+    if (Number.isSafeInteger(value) && value <= 2147483647) return value;
+  }
+  return undefined;
+}
+
+function draftConfirmed(draft: GraphDraft | undefined, id?: string, version?: number): draft is GraphDraft {
+  return Boolean(draft && draft.schemaVersion === 1 && typeof draft.graphId === 'string' &&
+    (id === undefined || draft.graphId === id) && Number.isSafeInteger(draft.version) && draft.version >= 1 &&
+    (version === undefined || draft.version === version) && draft.status === 'draft' &&
+    typeof draft.specHash === 'string' && /^[a-f0-9]{64}$/i.test(draft.specHash) &&
+    typeof draft.entryNodeId === 'string' && typeof draft.policyRef === 'string' &&
+    Array.isArray(draft.nodes) && Array.isArray(draft.edges) && draft.limits);
+}
+
+export function graphProblem(cause: unknown, fallback: string): GraphProblem {
+  const fields: GraphProblem['fields'] = [];
+  if (!isAxiosError(cause)) return { message: cause instanceof Error ? cause.message : fallback, fields };
+  const { status, data } = cause.response ?? {};
+  if ((status === 400 || status === 422) && Array.isArray(data?.invalidParams)) {
+    for (const field of data.invalidParams) {
+      if (typeof field?.name === 'string' && typeof field.reason === 'string') fields.push({ name: field.name, reason: field.reason });
+    }
+    return { message: 'El servidor rechazó campos del borrador.', fields };
+  }
+  if (status === 400 || status === 422) return { message: 'Los datos de esta solicitud no son válidos.', fields };
+  if (status === 403) return { message: 'Agent Studio requiere una cuenta administradora de esta empresa.', fields };
+  if (status === 404) return { message: 'No encontramos este grafo o revisión en tu empresa.', fields };
+  if (status === 409) return { message: 'Ya existe un grafo con este identificador. Abre el existente o elige otro.', fields };
+  return { message: fallback, fields };
+}
+
+export async function listGraphDrafts(after: string | null, signal: AbortSignal) {
+  const { data } = await api.get<{ items: GraphDraft[]; nextAfter: string | null }>(
+    base, { params: { after: after || undefined, limit: pageSize }, signal },
+  );
+  if (!Array.isArray(data?.items) || !data.items.every((item) => draftConfirmed(item)) ||
+      (data.nextAfter !== null && (typeof data.nextAfter !== 'string' || data.nextAfter === after))) {
+    throw new Error('El servidor devolvió un listado de borradores incompleto.');
+  }
+  return data;
+}
+
+export async function getGraphDraft(id: string, version: number | undefined, signal: AbortSignal) {
+  const { data } = await api.get<GraphDraft>(graphEndpoint(id), { params: { version }, signal });
+  if (!draftConfirmed(data, id, version)) throw new Error('El servidor no confirmó la revisión solicitada.');
+  return data;
+}
+
+export async function saveGraphDraft(id: string, spec: Record<string, unknown>, mode: 'create' | 'revision') {
+  const { data } = mode === 'create'
+    ? await api.post<GraphDraft>(base, { ...spec, graphId: id })
+    : await api.post<GraphDraft>(graphEndpoint(id) + '/revisions', spec);
+  if (!draftConfirmed(data, id, mode === 'create' ? 1 : undefined)) throw new Error('El servidor no confirmó el borrador guardado.');
+  return data;
+}
+
+export async function validateGraphDraft(draft: GraphDraft, signal: AbortSignal) {
+  const { data } = await api.post<GraphValidation>(
+    graphEndpoint(draft.graphId) + '/validate', undefined, { params: { version: draft.version }, signal },
+  );
+  if (data?.graphId !== draft.graphId || data.version !== draft.version || data.specHash !== draft.specHash ||
+      data.scope !== 'structural' || data.publicationEvidence !== false || typeof data.valid !== 'boolean' ||
+      !Array.isArray(data.issues) || data.valid !== (data.issues.length === 0) ||
+      !data.issues.every((issue) => issue?.severity === 'error' && typeof issue.code === 'string' &&
+        typeof issue.message === 'string' && (issue.nodeId === undefined || typeof issue.nodeId === 'string'))) {
+    throw new Error('El servidor no confirmó una validación estructural para esta revisión.');
+  }
+  return data;
+}
