@@ -7,10 +7,13 @@ import {
   ChannelAdapterV1,
 } from '@whatsap-automat/contracts';
 import { TenantScopedUoW, tenantScopedUoW } from '../../db/TenantScopedUoW';
+import config from '../../config';
 import { ConsentService, consentService } from './ConsentService';
 import { SegmentationService, segmentationService, RecipientRecord } from './SegmentationService';
 import { CampaignRequestError } from './CampaignRequestError';
 import { defaultWhatsAppCampaignLanguage, WhatsAppCampaignTransport } from './WhatsAppCampaignTransport';
+
+const audienceLimit = 1000;
 
 export interface DispatcherOptions {
   readonly skipPacingDelay?: boolean; // For deterministic unit tests
@@ -280,7 +283,8 @@ export class CampaignDispatcher {
   async executeCampaign(
     tenantId: number,
     campaignId: string,
-    recipientsOverride?: RecipientRecord[]
+    recipientsOverride?: RecipientRecord[],
+    expectedReviewKey?: string,
   ): Promise<CampaignDefinitionV1> {
     const campaign = await this.getCampaign(tenantId, campaignId);
     if (!campaign) throw new CampaignRequestError(404, 'CAMPAIGN_NOT_FOUND', 'Campaña no encontrada.');
@@ -309,14 +313,13 @@ export class CampaignDispatcher {
       throw new CampaignRequestError(409, 'CAMPAIGN_CONTENT_REQUIRED', 'La campaña requiere contenido o una plantilla.');
     }
 
-    let recipients = recipientsOverride ?? [];
-    if (recipients.length === 0 && campaign.segmentId) {
-      recipients = await this.segments.resolveRecipients(tenantId, campaign.segmentId, 1001, 0, campaign.channel);
-    }
-    const destinationKey = (destination: string) => whatsapp ? destination.trim().replace(/^\+/, '') : destination;
-    recipients = [...new Map(recipients.map((recipient) => [destinationKey(recipient.destination), recipient])).values()];
-    if (recipients.length > 1000) {
+    const destinationKey = (destination: string) => this.destinationKey(campaign, destination);
+    const recipients = await this.resolveAudience(campaign, recipientsOverride);
+    if (recipients.length > audienceLimit) {
       throw new CampaignRequestError(409, 'CAMPAIGN_AUDIENCE_LIMIT', 'El segmento supera el límite de 1000 destinatarios.');
+    }
+    if (expectedReviewKey !== undefined && this.reviewKey(campaign, recipients) !== expectedReviewKey) {
+      throw new CampaignRequestError(409, 'CAMPAIGN_AUDIENCE_CHANGED', 'La audiencia cambió. Revisa el segmento de nuevo antes de confirmar.');
     }
 
     const existingDeliveries = await this.getDeliveries(campaign.id, tenantId);
@@ -591,6 +594,55 @@ export class CampaignDispatcher {
       });
     }
     return campaign;
+  }
+
+  async getDispatchReview(tenantId: number, campaignId: string) {
+    const campaign = await this.getCampaign(tenantId, campaignId);
+    if (!campaign) throw new CampaignRequestError(404, 'CAMPAIGN_NOT_FOUND', 'Campaña no encontrada.');
+    const segment = campaign.segmentId ? await this.segments.getSegment(tenantId, campaign.segmentId) : null;
+    const recipients = segment ? await this.resolveAudience(campaign) : [];
+    const deliveries = campaign.startedAt ? await this.getDeliveries(campaignId, tenantId) : [];
+    const attempted = new Set(deliveries.map(({ destination }) => this.destinationKey(campaign, destination)));
+    return {
+      campaignId,
+      campaignStatus: campaign.status,
+      segmentName: segment?.name ?? null,
+      audienceCount: recipients.length,
+      unattemptedCount: recipients.filter(({ destination }) => !attempted.has(this.destinationKey(campaign, destination))).length,
+      audienceLimit,
+      limitExceeded: recipients.length > audienceLimit,
+      reviewKey: this.reviewKey(campaign, recipients),
+      contentBody: campaign.contentBody,
+      templateName: campaign.templateId,
+      templateLanguage: campaign.templateId
+        ? campaign.templateVariables.languageCode ?? defaultWhatsAppCampaignLanguage
+        : null,
+    };
+  }
+
+  private destinationKey(campaign: CampaignDefinitionV1, destination: string): string {
+    return campaign.channel === 'whatsapp-cloud' ? destination.trim().replace(/^\+/, '') : destination;
+  }
+
+  private async resolveAudience(campaign: CampaignDefinitionV1, override?: RecipientRecord[]): Promise<RecipientRecord[]> {
+    const recipients = override?.length ? override : campaign.segmentId
+      ? await this.segments.resolveRecipients(Number(campaign.tenantId), campaign.segmentId, Number.MAX_SAFE_INTEGER, 0, campaign.channel)
+      : [];
+    const unique = new Map<string, RecipientRecord>();
+    for (const recipient of recipients) {
+      const destination = this.destinationKey(campaign, recipient.destination);
+      if (campaign.channel === 'whatsapp-cloud' && this.uow && !/^[1-9]\d{6,14}$/.test(destination)) continue;
+      unique.set(destination, recipient);
+      if (unique.size > audienceLimit) break;
+    }
+    return [...unique.values()];
+  }
+
+  private reviewKey(campaign: CampaignDefinitionV1, recipients: RecipientRecord[]): string {
+    const audience = recipients.map(({ destination }) => this.destinationKey(campaign, destination)).sort();
+    return crypto.createHmac('sha256', config.jwt.secret)
+      .update(JSON.stringify([campaign.id, campaign.updatedAt, audience]))
+      .digest('hex');
   }
 
   private async hasOpenWhatsAppWindow(tenantId: number, destination: string, phoneNumberId?: string): Promise<boolean> {

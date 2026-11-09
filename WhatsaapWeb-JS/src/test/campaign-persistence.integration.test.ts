@@ -249,7 +249,22 @@ test('campaign API persists scoped drafts, real counts, suppression and acknowle
     "UPDATE whatsapp_message_templates SET waba_id = '1234' WHERE company_id = $1",
     [tenant],
   ));
-  const dispatches = [sendRequest(whatsappDispatch, tenant, {}), sendRequest(whatsappDispatch, tenant, {})];
+  const reviewPath = `/production/campaigns/${whatsappCampaign.id}/dispatch-review`;
+  assert.equal((await sendRequest(reviewPath, tenant, undefined, 'EMPLEADO')).status, 403);
+  await request(reviewPath, other, 404);
+  const { data: review } = await request(reviewPath, tenant, 200);
+  assert.equal(review.segmentName, 'Oferta por WhatsApp');
+  assert.equal(review.audienceCount, 1);
+  assert.equal(review.unattemptedCount, 1);
+  const setContacts = (ids: number[]) => tenantScopedUoW.run(tenant, (client) => client.query(
+    'UPDATE segments SET static_contact_ids = $1 WHERE id = $2', [ids, whatsappSegment.id],
+  ));
+  await setContacts([]);
+  assert.equal((await request(whatsappDispatch, tenant, 409, { reviewKey: review.reviewKey })).error, 'CAMPAIGN_AUDIENCE_CHANGED');
+  assert.deepEqual(metaRequests, []);
+  await setContacts([contacts[0]]);
+  const requestBody = { reviewKey: review.reviewKey };
+  const dispatches = [sendRequest(whatsappDispatch, tenant, requestBody), sendRequest(whatsappDispatch, tenant, requestBody)];
   const firstResponse = await Promise.race(dispatches);
   releaseMeta();
   assert.equal(firstResponse.status, 409);

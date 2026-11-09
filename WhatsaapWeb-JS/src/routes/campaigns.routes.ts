@@ -110,8 +110,23 @@ export function createCampaignRoutes(options: CampaignRoutesOptions = {}): Route
       const tenantId = resolveTenantId(req);
       requireCampaignAdmin(req);
       const campaignId = String(req.params.id);
-      const campaign = await dispatcher.executeCampaign(tenantId, campaignId, req.body?.recipients);
+      const reviewKey = req.body?.reviewKey;
+      if (reviewKey !== undefined && (typeof reviewKey !== 'string' || !/^[a-f0-9]{64}$/.test(reviewKey))) {
+        throw new CampaignRequestError(400, 'INVALID_CAMPAIGN_REVIEW', 'La revisión de la campaña no es válida.');
+      }
+      const campaign = await dispatcher.executeCampaign(tenantId, campaignId, req.body?.recipients, reviewKey);
       res.status(200).json({ success: true, data: campaign });
+    } catch (error) {
+      respondError(res, error);
+    }
+  });
+
+  router.get('/:id/dispatch-review', requireJwt, tenantContext(), async (req: Request, res: Response) => {
+    try {
+      const tenantId = resolveTenantId(req);
+      requireCampaignAdmin(req);
+      const review = await dispatcher.getDispatchReview(tenantId, String(req.params.id));
+      res.status(200).json({ success: true, data: review });
     } catch (error) {
       respondError(res, error);
     }
