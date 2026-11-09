@@ -1,3 +1,5 @@
+import type { ConversationV1 } from '@whatsap-automat/contracts';
+import { readConversation } from './ConversationQueryService';
 import { Queryable } from '../../shared/UnitOfWorkPort';
 import { TenantScopedUoW, tenantScopedUoW } from '../../db/TenantScopedUoW';
 import { toPositiveInt } from '../../middleware/jwtAuth';
@@ -12,6 +14,7 @@ export interface TakeoverResult {
   ownerType: 'human' | 'ai_agent';
   ownerId: string | null;
   aiPaused: boolean;
+  conversation?: ConversationV1;
 }
 
 export interface TakeoverConversationParams {
@@ -21,6 +24,7 @@ export interface TakeoverConversationParams {
   userId: string | number;
   reason?: string;
   client?: Queryable;
+  includeConversation?: boolean;
 }
 
 export interface PauseAiParams {
@@ -31,6 +35,7 @@ export interface PauseAiParams {
   durationSeconds?: number;
   reason?: string;
   client?: Queryable;
+  includeConversation?: boolean;
 }
 
 export interface ResumeAiParams {
@@ -40,6 +45,7 @@ export interface ResumeAiParams {
   userId: string | number;
   reason?: string;
   client?: Queryable;
+  includeConversation?: boolean;
 }
 
 export interface ValidateEpochParams {
@@ -142,6 +148,7 @@ export class ConversationCasService {
               ia_paused = true,
               ia_paused_by = $2::integer,
               ia_paused_at = NOW(),
+              ia_resume_at = NULL,
               updated_at = NOW()
           WHERE id = $3 AND company_id = $4 AND version = $5
           RETURNING id, company_id, version, ownership_epoch, owner_type, owner_id, status, assigned_user_id, ia_paused;
@@ -207,8 +214,10 @@ export class ConversationCasService {
           auditMetadata,
         ]);
 
+        const conversation = await this.snapshot(params, client, validTenantId, convId);
         return {
           success: true,
+          ...(conversation && { conversation }),
           conversationId: String(row.id),
           previousVersion: params.expectedVersion,
           newVersion: Number(row.version),
@@ -337,8 +346,10 @@ export class ConversationCasService {
           }),
         ]);
 
+        const conversation = await this.snapshot(params, client, validTenantId, convId);
         return {
           success: true,
+          ...(conversation && { conversation }),
           conversationId: String(row.id),
           previousVersion: params.expectedVersion,
           newVersion: Number(row.version),
@@ -469,8 +480,10 @@ export class ConversationCasService {
           }),
         ]);
 
+        const conversation = await this.snapshot(params, client, validTenantId, convId);
         return {
           success: true,
+          ...(conversation && { conversation }),
           conversationId: String(row.id),
           previousVersion: params.expectedVersion,
           newVersion: Number(row.version),
@@ -499,6 +512,15 @@ export class ConversationCasService {
     emitConversation(validTenantId, result.conversationId, 'conversation.ownership_changed', eventPayload);
 
     return result;
+  }
+
+  private async snapshot(
+    params: { includeConversation?: boolean }, client: Queryable, tenantId: number, conversationId: number
+  ): Promise<ConversationV1 | undefined> {
+    if (!params.includeConversation) return undefined;
+    const conversation = await readConversation(client, tenantId, conversationId);
+    if (!conversation) throw new ConversationNotFoundError(conversationId, tenantId);
+    return conversation;
   }
 
   /**

@@ -286,7 +286,7 @@ class ApprovalDecisionResult(AutomatBaseModel):
 
 class TakeoverRequest(AutomatBaseModel):
     expected_version: int = Field(alias="expectedVersion")
-    user_id: str = Field(alias="userId")
+    user_id: Optional[str] = Field(default=None, alias="userId")
     reason: Optional[str] = None
 
 

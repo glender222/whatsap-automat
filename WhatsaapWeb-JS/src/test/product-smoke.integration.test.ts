@@ -3,6 +3,8 @@ import { createHmac, randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { test } from 'node:test';
 import { io, Socket } from 'socket.io-client';
+import { conversationMessageV1Schema, conversationV1Schema } from '@whatsap-automat/contracts';
+import { AutomatClient } from '../../../packages/sdk/src';
 import config from '../config/index';
 import pool from '../config/database';
 import { auditLogger } from '../services/audit/AuditLogger';
@@ -21,7 +23,7 @@ async function api(path: string, status: number, token?: string, data?: object) 
   });
   const body = await response.json();
   assert.equal(response.status, status, `${path}: ${body.error || body.detail || response.statusText}`);
-  return body.data;
+  return 'data' in body ? body.data : body;
 }
 
 function connect(token: string): Promise<Socket> {
@@ -69,16 +71,18 @@ test('real API isolates two companies through auth, signed ingress, inbox, socke
   await new MetaAccountStore().upsertConnection(owner.user.companyId, { phoneNumberId, status: 'configured' });
   const chatId = '51987654321';
   const messageId = `wamid.${randomUUID()}`;
-  const payload = JSON.stringify({ entry: [{ changes: [{ field: 'messages', value: {
+  const inbound = (id: string, body: string) => JSON.stringify({ entry: [{ changes: [{ field: 'messages', value: {
     metadata: { phone_number_id: phoneNumberId },
-    messages: [{ id: messageId, from: chatId, type: 'text', text: { body: 'Mensaje de prueba' } }],
+    messages: [{ id, from: chatId, type: 'text', text: { body } }],
   } }] }] });
-  const signature = createHmac('sha256', config.meta.appSecret).update(payload).digest('hex');
-  async function webhook(sig: string, status: number) {
+  const sign = (body: string) => createHmac('sha256', config.meta.appSecret).update(body).digest('hex');
+  const payload = inbound(messageId, 'Mensaje de prueba');
+  const signature = sign(payload);
+  async function webhook(sig: string, status: number, body = payload) {
     const response = await fetch(`${base}/api/webhooks/meta/whatsapp`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-hub-signature-256': `sha256=${sig}` },
-      body: payload,
+      body,
     });
     const data = await response.json();
     assert.equal(response.status, status, data.error || data.message);
@@ -94,6 +98,17 @@ test('real API isolates two companies through auth, signed ingress, inbox, socke
   assert.equal(chats[0].id, chatId);
   const messages = await api(`/api/chats/${chatId}/messages`, 200, owner.accessToken);
   assert.deepEqual(messages.map((message: { id: string }) => message.id), [messageId]);
+  const canonicalPath = `/api/v1/conversations/${chats[0].conversationId}`;
+  const canonicalList = await api('/api/v1/conversations?channel=whatsapp-cloud&limit=1', 200, owner.accessToken);
+  assert.equal(canonicalList.items.length, 1);
+  const canonical = conversationV1Schema.parse(canonicalList.items[0]);
+  assert.equal(canonical.externalConversationId, chatId);
+  assert.deepEqual(await api(canonicalPath, 200, owner.accessToken), canonical);
+  const messagePage = await api(`${canonicalPath}/messages`, 200, owner.accessToken);
+  assert.equal(conversationMessageV1Schema.parse(messagePage.items[0]).body, 'Mensaje de prueba');
+  await api('/api/v1/conversations?cursor=invalido', 422, owner.accessToken);
+  await api(canonicalPath, 404, other.accessToken);
+  await api(`${canonicalPath}/messages`, 404, other.accessToken);
   assert.deepEqual(await api('/api/chats', 200, other.accessToken), []);
   await api(`/api/chats/${chatId}/messages`, 404, other.accessToken);
   const room = await ownerSocket.timeout(2000).emitWithAck('join_conversation', chatId);
@@ -107,10 +122,37 @@ test('real API isolates two companies through auth, signed ingress, inbox, socke
   const updated = await api(takeover, 200, owner.accessToken, command);
   assert.equal(updated.aiPaused, true);
   await api(takeover, 409, owner.accessToken, command);
+  const resumed = conversationV1Schema.parse(await api(`${canonicalPath}/resume-ai`, 200, owner.accessToken, {
+    expectedVersion: updated.newVersion,
+  }));
+  assert.equal(resumed.aiPaused, false);
+  await api(`${canonicalPath}/pause-ai`, 409, owner.accessToken, command);
 
   for (let attempt = 0; attempt < 20 && ownerMessages.length === 0; attempt++) await delay(25);
   assert.equal(ownerMessages.length, 1);
   assert.deepEqual(otherMessages, []);
+
+  const secondPayload = inbound(`wamid.${randomUUID()}`, 'Segundo mensaje de prueba');
+  assert.equal((await webhook(sign(secondPayload), 200, secondPayload)).results[0].duplicate, false);
+  const latest = await api(`${canonicalPath}/messages?limit=1`, 200, owner.accessToken);
+  const earlier = await api(`${canonicalPath}/messages?limit=1&cursor=${latest.nextCursor}`, 200, owner.accessToken);
+  const forward = await api(`${canonicalPath}/messages?limit=1&cursor=${earlier.prevCursor}`, 200, owner.accessToken);
+  assert.equal(latest.items[0].body, 'Segundo mensaje de prueba');
+  assert.equal(earlier.items[0].body, 'Mensaje de prueba');
+  assert.equal(earlier.nextCursor, null);
+  assert.deepEqual(forward, latest);
+  const client = new AutomatClient({ baseUrl: `${base}/api/v1`, token: owner.accessToken });
+  assert.deepEqual(await client.conversations.list({ limit: 1 }).all(), [await client.conversations.get(canonical.id)]);
+  assert.deepEqual((await client.conversations.listMessages(canonical.id, { limit: 1 }).all()).map((item) => item.body), [
+    'Segundo mensaje de prueba', 'Mensaje de prueba',
+  ]);
+  const claimed = await client.conversations.takeover(canonical.id, {
+    expectedVersion: resumed.stateVersion,
+    userId: String(other.user.id),
+  });
+  assert.equal(claimed.assignedUserId, String(owner.user.id));
+  assert.equal(claimed.aiPaused, true);
+  assert.equal(claimed.stateVersion, resumed.stateVersion + 1);
 
   const event = await auditLogger.log({ tenantId: owner.user.companyId, action: 'SMOKE_CHECK', resourceType: 'conversation' });
   const audit = await fetch(`${base}/api/v1/admin/audit-events?search=SMOKE_CHECK`, {

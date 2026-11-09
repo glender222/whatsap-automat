@@ -22,6 +22,7 @@ import createPaymentRoutes from './routes/paymentRoutes';
 import createIaPauseRoutes from './routes/iaPauseRoutes';
 import createPaymentWebhookRoutes from './routes/paymentWebhookRoutes';
 import createConversationRoutes from './routes/conversationRoutes';
+import createConversationV1Routes from './routes/conversationV1Routes';
 import createWorkflowRoutes from './routes/workflowRoutes';
 import createAiRoutes from './routes/ai.routes';
 import createAdminRoutes from './routes/adminRoutes';
@@ -218,6 +219,7 @@ export class App {
     this.app.use('/api/webhooks/payments', createPaymentWebhookRoutes());
     this.app.use('/api/customer-history', requireJwt, createCustomerHistoryRoutes());
     this.app.use('/api/conversations', requireJwt, createConversationRoutes());
+    this.app.use('/api/v1/conversations', createConversationV1Routes());
     this.app.use('/api/reports', requireJwt, createReportRoutes());
     this.app.use('/api/whatsapp', requireJwt, createWhatsAppRoutes(this.whatsappService));
     this.app.use('/api/webhooks/meta/whatsapp', createMetaWebhookRoutes(this.whatsappService));

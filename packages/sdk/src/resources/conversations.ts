@@ -7,11 +7,13 @@ export interface ListConversationsParams {
   limit?: number;
   status?: string;
   channel?: string;
+  stage?: string;
 }
 
 export interface TakeoverParams {
   expectedVersion: number;
-  userId: string;
+  /** @deprecated The server takes the operator identity from the session. */
+  userId?: string;
   reason?: string;
 }
 

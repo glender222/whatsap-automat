@@ -112,7 +112,7 @@ class ConversationsResource:
         self,
         conversation_id: str,
         expected_version: int,
-        user_id: str,
+        user_id: Optional[str] = None,
         reason: Optional[str] = None,
     ) -> Conversation:
         cmd = TakeoverRequest(expected_version=expected_version, user_id=user_id, reason=reason)
@@ -435,7 +435,7 @@ class AsyncConversationsResource:
         self,
         conversation_id: str,
         expected_version: int,
-        user_id: str,
+        user_id: Optional[str] = None,
         reason: Optional[str] = None,
     ) -> Conversation:
         cmd = TakeoverRequest(expected_version=expected_version, user_id=user_id, reason=reason)

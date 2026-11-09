@@ -69,10 +69,12 @@ Consulte los archivos de especificación formal:
 |---|---|---|---|
 | `GET` | `/api/v1/workspaces/current` | Espacio de trabajo y permisos | `Authorization` |
 | `GET` | `/api/v1/conversations` | Lista paginada de conversaciones | `Authorization` |
+| `GET` | `/api/v1/conversations/{id}` | Detalle de conversación | `Authorization` |
 | `GET` | `/api/v1/conversations/{id}/messages` | Mensajes de conversación | `Authorization` |
-| `POST` | `/api/v1/conversations/{id}/messages` | Envío de mensaje humano | `Authorization`, `Idempotency-Key` |
+| `POST` | `/api/v1/conversations/{id}/messages` | Envío de mensaje humano (previsto) | `Authorization`, `Idempotency-Key` |
 | `POST` | `/api/v1/conversations/{id}/takeover` | Handoff y toma de control (CAS) | `Authorization` |
 | `POST` | `/api/v1/conversations/{id}/pause-ai` | Pausa de IA conversacional (CAS) | `Authorization` |
+| `POST` | `/api/v1/conversations/{id}/resume-ai` | Reanudar IA conversacional (CAS) | `Authorization` |
 | `GET` | `/api/v1/channel-connections` | Conexiones y salud | `Authorization` |
 | `POST` | `/api/v1/channel-connections/{id}/validate` | Diagnóstico sin secretos | `Authorization` |
 | `POST` | `/api/v1/agent-graphs` | Crear borrador de grafo | `Authorization` |
@@ -84,6 +86,8 @@ Consulte los archivos de especificación formal:
 | `GET` | `/api/v1/approvals` | Cola de aprobaciones pendientes | `Authorization` |
 | `POST` | `/api/v1/approvals/{id}/decision` | Decisión de aprobación (CAS) | `Authorization`, `Idempotency-Key` |
 | `GET` | `/api/v1/operations/executions` | Historial de soporte y reintentos | `Authorization` |
+
+El contrato incluye operaciones previstas. En la API v1 de conversaciones se pueden consultar la lista, el detalle y el historial, además de tomar el control, pausar o reanudar la IA. Los cambios CAS identifican al operador con su sesión. La lista y el historial devuelven primero los registros de mayor identificador. En conversaciones migradas del esquema anterior, `connectionId` usa una referencia de compatibilidad `legacy:<tenant>:<canal>`.
 
 ## 4. Marketplace comunitario
 

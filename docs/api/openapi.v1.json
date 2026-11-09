@@ -68,6 +68,7 @@
             "schema": {
               "type": "integer",
               "default": 20,
+              "minimum": 1,
               "maximum": 100
             }
           },
@@ -112,6 +113,49 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      }
+    },
+    "/conversations/{id}": {
+      "get": {
+        "summary": "Obtener una conversación",
+        "description": "Devuelve la conversación del tenant autenticado por su identificador interno.",
+        "operationId": "getConversation",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Conversación del tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Conversation"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       }
@@ -149,7 +193,9 @@
             "required": false,
             "schema": {
               "type": "integer",
-              "default": 50
+              "default": 50,
+              "minimum": 1,
+              "maximum": 100
             }
           }
         ],
@@ -172,10 +218,14 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
           }
         }
       },
       "post": {
+        "x-implementation-status": "planned",
         "summary": "Enviar mensaje humano en conversación",
         "description": "Envia un mensaje desde la interfaz humana usando control de idempotencia y CAS version.",
         "operationId": "sendConversationMessage",
@@ -241,7 +291,7 @@
     "/conversations/{id}/takeover": {
       "post": {
         "summary": "Toma de control humano (Handoff CAS)",
-        "description": "Asigna la conversación a un operador humano e invalida la versión concurrente si ha cambiado.",
+        "description": "Asigna la conversación al usuario autenticado y comprueba la versión de estado.",
         "operationId": "takeoverConversation",
         "security": [
           {
@@ -287,6 +337,9 @@
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
           }
         }
       }
@@ -340,6 +393,65 @@
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      }
+    },
+    "/conversations/{id}/resume-ai": {
+      "post": {
+        "summary": "Reanudar agente IA en conversación",
+        "description": "Retira la pausa de la conversación y comprueba la versión de estado.",
+        "operationId": "resumeConversationAi",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResumeAiRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Pausa retirada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Conversation"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
           }
         }
       }
@@ -897,7 +1009,11 @@
           "whatsapp-cloud",
           "instagram",
           "messenger",
-          "telegram"
+          "telegram",
+          "webchat",
+          "email",
+          "tiktok",
+          "line"
         ]
       },
       "ChannelCapability": {
@@ -1162,6 +1278,11 @@
             "format": "date-time",
             "nullable": true
           },
+          "serviceWindowExpiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time"
@@ -1397,18 +1518,21 @@
       "TakeoverRequest": {
         "type": "object",
         "required": [
-          "expectedVersion",
-          "userId"
+          "expectedVersion"
         ],
         "properties": {
           "expectedVersion": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": 0
           },
           "userId": {
-            "type": "string"
+            "type": "string",
+            "deprecated": true,
+            "description": "Campo de compatibilidad. El servidor usa el usuario de la sesión."
           },
           "reason": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 1000
           }
         }
       },
@@ -1419,13 +1543,32 @@
         ],
         "properties": {
           "expectedVersion": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": 0
           },
           "durationSeconds": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": 1
           },
           "reason": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 1000
+          }
+        }
+      },
+      "ResumeAiRequest": {
+        "type": "object",
+        "required": [
+          "expectedVersion"
+        ],
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 1000
           }
         }
       },
