@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createHmac, randomInt, randomUUID } from 'node:crypto';
+import { createHash, createHmac, randomInt, randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { test } from 'node:test';
 import { io, Socket } from 'socket.io-client';
@@ -56,10 +56,23 @@ test('real API isolates two companies through auth, signed ingress, inbox, socke
   assert.notEqual(owner.user.companyId, other.user.companyId);
   const [first, second] = await Promise.all([1, 2].map(() => api('/api/auth/login', 200, undefined, accounts[0])));
   assert.notEqual(first.refreshToken, second.refreshToken);
+  const digest = (token: string) => `sha256:${createHash('sha256').update(token).digest('hex')}`;
+  const { rows: sessions } = await pool.query<{ token: string }>(
+    'SELECT token FROM refresh_tokens WHERE usuario_id = $1 ORDER BY token',
+    [owner.user.id]
+  );
+  const expectedDigests = [
+    digest(owner.refreshToken), digest(first.refreshToken), digest(second.refreshToken),
+  ].sort();
+  assert.ok(sessions.length === expectedDigests.length &&
+    sessions.every(({ token }, index) => token === expectedDigests[index]), 'PostgreSQL must store only session token digests');
   const renewal = await api('/api/auth/refresh', 200, undefined, { refreshToken: first.refreshToken });
   assert.equal((await api('/api/auth/me', 200, renewal.accessToken)).companyId, owner.user.companyId);
+  await api('/api/auth/logout', 200, other.accessToken, { refreshToken: first.refreshToken });
+  await api('/api/auth/refresh', 200, undefined, { refreshToken: first.refreshToken });
   await api('/api/auth/logout', 200, first.accessToken, { refreshToken: first.refreshToken });
   await api('/api/auth/refresh', 401, undefined, { refreshToken: first.refreshToken });
+  await api('/api/auth/refresh', 200, undefined, { refreshToken: second.refreshToken });
 
   const ownerSocket = await connect(owner.accessToken);
   t.after(() => { ownerSocket.disconnect(); });

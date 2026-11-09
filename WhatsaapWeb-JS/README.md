@@ -108,6 +108,8 @@ npm run db:status
 
 El comando de migración serializa ejecuciones concurrentes y devuelve un código distinto de cero si PostgreSQL falla. `db:status` consulta el estado y `db:migrate -- --dry-run` enumera los archivos sin conectarse. La ruta `/ready` devuelve `503` hasta que todas las migraciones de la compilación estén aplicadas.
 
+Para aplicar `041_hash_refresh_tokens.sql`, detén las instancias anteriores del backend antes de migrar. La base pasa a guardar el hash SHA-256 de cada token de renovación y conserva la validez y revocación de las sesiones existentes. Arranca la compilación que incluye esta migración antes de reabrir el tráfico. Conserva el soporte de hashes en la compilación de rollback para seguir usando la base migrada. Protege los respaldos previos a la migración como credenciales.
+
 ### Respaldar y restaurar la base de negocio
 
 Configura un servicio PostgreSQL de respaldo con acceso a todas las filas y otro para una base de restauración vacía. El rol de ejecución de la aplicación debe conservar RLS y carecer de `BYPASSRLS`.

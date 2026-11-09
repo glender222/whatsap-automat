@@ -1,8 +1,13 @@
 const pool = require('../config/database');
+const { createHash } = require('node:crypto');
 const { withTenantTransaction } = require('../db/TenantScopedUoW');
 const { PgUnitOfWork } = require('../shared/PgUnitOfWork');
 
 const authLookup = new PgUnitOfWork(pool);
+
+function digestRefreshToken(token) {
+  return `sha256:${createHash('sha256').update(token, 'utf8').digest('hex')}`;
+}
 
 class User {
   /**
@@ -184,7 +189,7 @@ class User {
       RETURNING id
     `;
     
-    const result = await db.query(query, [usuarioId, token, expiresAt]);
+    const result = await db.query(query, [usuarioId, digestRefreshToken(token), expiresAt]);
     return result.rows[0];
   }
 
@@ -197,7 +202,7 @@ class User {
       WHERE usuario_id = $1 AND token = $2 AND revocado = false AND expira_en > CURRENT_TIMESTAMP
     `;
     
-    const result = await pool.query(query, [usuarioId, token]);
+    const result = await pool.query(query, [usuarioId, digestRefreshToken(token)]);
     return result.rows.length > 0;
   }
 
@@ -211,7 +216,7 @@ class User {
       WHERE token = $1 AND usuario_id = $2
     `;
     
-    await pool.query(query, [token, usuarioId]);
+    await pool.query(query, [digestRefreshToken(token), usuarioId]);
   }
 
   /**

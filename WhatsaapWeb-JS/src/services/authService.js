@@ -172,7 +172,7 @@ class AuthService {
    * Logout
    */
   static async logout(userId, refreshToken) {
-    if (refreshToken) {
+    if (typeof refreshToken === 'string' && refreshToken) {
       await User.revokeRefreshToken(userId, refreshToken);
     }
     return true;
