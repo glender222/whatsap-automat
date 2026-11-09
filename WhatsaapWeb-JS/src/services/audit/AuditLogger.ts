@@ -42,6 +42,7 @@ export interface AuditLogQueryFilter {
   decision?: string;
   startDate?: string;
   endDate?: string;
+  search?: string;
   limit?: number;
   offset?: number;
 }
@@ -196,7 +197,8 @@ export class AuditLogger {
    */
   async query(
     tenantId: number,
-    filter: AuditLogQueryFilter = {}
+    filter: AuditLogQueryFilter = {},
+    options: { requirePersisted?: boolean } = {}
   ): Promise<{ events: AuditEvent[]; total: number }> {
     const validTenantId = Number(tenantId);
     if (!validTenantId || validTenantId <= 0) {
@@ -245,6 +247,11 @@ export class AuditLogger {
           conditions.push(`created_at <= $${paramIdx++}`);
           params.push(filter.endDate);
         }
+        if (filter.search) {
+          const placeholder = `$${paramIdx++}`;
+          conditions.push(`(action ILIKE ${placeholder} OR resource_type ILIKE ${placeholder} OR resource_id ILIKE ${placeholder})`);
+          params.push(`%${filter.search.replace(/[\\%_]/g, '\\$&')}%`);
+        }
 
         const whereClause = conditions.join(' AND ');
         const countSql = `SELECT COUNT(*)::integer AS total FROM audit_events WHERE ${whereClause};`;
@@ -257,7 +264,7 @@ export class AuditLogger {
         const listSql = `
           SELECT * FROM audit_events
           WHERE ${whereClause}
-          ORDER BY created_at DESC
+          ORDER BY created_at DESC, id DESC
           LIMIT $${paramIdx++} OFFSET $${paramIdx++};
         `;
         const listRes = await client.query(listSql, [...params, limit, offset]);
@@ -281,6 +288,7 @@ export class AuditLogger {
         return { events, total };
       });
     } catch (dbErr: any) {
+      if (options.requirePersisted) throw dbErr;
       // Filter memory events when DB is offline
       let matched = this.memoryEvents.filter((ev) => ev.tenantId === validTenantId);
 

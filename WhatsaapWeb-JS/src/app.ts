@@ -24,6 +24,7 @@ import createPaymentWebhookRoutes from './routes/paymentWebhookRoutes';
 import createConversationRoutes from './routes/conversationRoutes';
 import createWorkflowRoutes from './routes/workflowRoutes';
 import createAiRoutes from './routes/ai.routes';
+import createAdminRoutes from './routes/adminRoutes';
 import { createCampaignRoutes, createConsentRoutes, createSegmentRoutes } from './routes/campaigns.routes';
 import createOpenApiRoutes from './routes/openapiRoutes';
 import { createMarketplaceRoutes } from './routes/marketplaceRoutes';
@@ -225,6 +226,7 @@ export class App {
     this.app.use('/api/media', requireJwt, createMediaRoutes(this.whatsappService));
     this.app.use('/api/v1/workflows', createWorkflowRoutes());
     this.app.use('/api/v1/ai', createAiRoutes());
+    this.app.use('/api/v1/admin', createAdminRoutes());
     this.app.use('/api/v1/campaigns', createCampaignRoutes());
     this.app.use('/api/v1/consent', createConsentRoutes());
     this.app.use('/api/v1/segments', createSegmentRoutes());

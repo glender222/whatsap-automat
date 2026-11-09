@@ -40,26 +40,19 @@ whatsap-automat/
 
 ---
 
-## 3. Estado Actual del Proyecto (Baseline v0.4)
+## 3. Estado de la rama de integración
 
-El proyecto se encuentra en la **Ola 0** del roadmap de modernización arquitectónica:
+`integration/v0.4-consolidated` contiene el trabajo de las fases F0–F9. La preparación para una release se valida por recorridos y por commit. El [plan de validación](docs/roadmap/PRODUCT_VALIDATION_PLAN.md) define los controles de instalación, aislamiento, UX, proveedores y distribución. El [roadmap v1.0](docs/architecture/ROADMAP_V1.0.md) conserva el alcance de producto.
 
-- :white_check_mark: **PR-00:** Baseline reproducible, licencia MIT, CI mínimo y guías de contribución (*Completado en esta entrega*).
-- :hourglass_flowing_sand: **PR-01:** Autenticación JWT fail-closed y validación estricta de claims de tenant (*En progreso paralelo*).
-- :hourglass_flowing_sand: **PR-02:** Autenticación de Socket.IO y segregación de salas por empresa (*Siguiente fase*).
-- :hourglass_flowing_sand: **PR-03:** Auditoría de base de datos y piloto de Row-Level Security (RLS).
-- :hourglass_flowing_sand: **PR-04:** Paquete de contratos canónicos, esquemas y OpenAPI v1.
-- :hourglass_flowing_sand: **PR-07:** Spike reproducible de Temporal OSS.
-
-Consulta el plan completo en [docs/roadmap/PR_ROADMAP.md](docs/roadmap/PR_ROADMAP.md).
+El [portal de documentación](docs-site/README.md) se puede compilar localmente y ofrece la guía de inicio, la licencia y los contratos OpenAPI como descargas.
 
 ---
 
 ## 4. Requisitos Previos
 
-- **Node.js:** Versión 20.x LTS recomendada (mínimo `>= 18.0.0`).
+- **Node.js:** Versión 22.x para el entorno completo.
 - **npm:** Versión 10.x o superior.
-- **PostgreSQL:** Versión 15 o superior.
+- **PostgreSQL:** Versión 16 para desarrollo y pruebas de integración.
 - **Git:** Versión 2.30+ con soporte para `git worktree`.
 
 ---
@@ -68,15 +61,17 @@ Consulta el plan completo en [docs/roadmap/PR_ROADMAP.md](docs/roadmap/PR_ROADMA
 
 ### 1. Clonar el repositorio
 ```bash
-git clone https://github.com/glender222/whatsap-automat.git
+git clone --branch integration/v0.4-consolidated https://github.com/glender222/whatsap-automat.git
 cd whatsap-automat
+npm --prefix packages/contracts ci
+npm --prefix packages/contracts run build
 ```
 
 ### 2. Configurar Frontend
 ```bash
 cd Frontend_py_whatsaapweb
 cp .env.example .env
-npm install
+npm ci
 npm run dev
 ```
 La aplicación web estará disponible en `http://localhost:5173`.
@@ -86,7 +81,8 @@ La aplicación web estará disponible en `http://localhost:5173`.
 cd ../WhatsaapWeb-JS
 cp .env.example .env
 # Edita .env con las credenciales de tu base de datos local y puertos
-npm install
+npm ci
+npm run db:migrate
 npm run typecheck
 npm run build
 npm run dev
@@ -110,7 +106,7 @@ npm run typecheck:scripts
 # Compilación TypeScript
 npm run build
 
-# Ejecución de suite de pruebas P0 / Unitarias (45 pruebas automatizadas)
+# Ejecución de suite de pruebas P0 y regresión
 npm test
 ```
 

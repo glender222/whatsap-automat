@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import { io, Socket } from 'socket.io-client';
 import config from '../config/index';
 import pool from '../config/database';
+import { auditLogger } from '../services/audit/AuditLogger';
 import { MetaAccountStore } from '../services/whatsapp/meta/MetaAccountStore';
 
 const base = process.env.PRODUCT_SMOKE_URL;
@@ -110,4 +111,18 @@ test('real API isolates two companies through auth, signed ingress, inbox, socke
   for (let attempt = 0; attempt < 20 && ownerMessages.length === 0; attempt++) await delay(25);
   assert.equal(ownerMessages.length, 1);
   assert.deepEqual(otherMessages, []);
+
+  const event = await auditLogger.log({ tenantId: owner.user.companyId, action: 'SMOKE_CHECK', resourceType: 'conversation' });
+  const audit = await fetch(`${base}/api/v1/admin/audit-events?search=SMOKE_CHECK`, {
+    headers: { Authorization: `Bearer ${owner.accessToken}` },
+  });
+  assert.equal(audit.status, 200);
+  assert.deepEqual((await audit.json()).events.map((row: { id: string }) => row.id), [event.id]);
+  await api(`/api/v1/admin/audit-events?tenantId=${owner.user.companyId}`, 403, other.accessToken);
+  const health = await fetch(`${base}/api/v1/admin/health/diagnostics`, {
+    headers: { Authorization: `Bearer ${owner.accessToken}` },
+  });
+  assert.equal(health.status, 200);
+  const report = await health.json();
+  assert.ok(report.checks.some((check: { code: string; status: string }) => check.code === 'DB-PG-001' && check.status === 'PASS'));
 });
