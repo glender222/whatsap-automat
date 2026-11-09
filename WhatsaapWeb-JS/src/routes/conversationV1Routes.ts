@@ -9,6 +9,7 @@ import {
 } from '@whatsap-automat/contracts';
 import { JwtRequest, requireJwt, resolveWhatsappCompanyId, toPositiveInt } from '../middleware/jwtAuth';
 import { isInternalChatId } from '../middleware/resourceAuth';
+import { tenantContext } from '../middleware/tenantContext';
 import { conversationQueryService, parseConversationPage } from '../services/conversations/ConversationQueryService';
 import {
   CasConflictError, ConversationNotFoundError, conversationCasService,
@@ -21,7 +22,7 @@ function problem(req: JwtRequest, res: Response, code: StandardErrorCode, detail
 
 export default function createConversationV1Routes(): Router {
   const router = Router();
-  router.use(requireJwt);
+  router.use(requireJwt, tenantContext({ allowSandbox: false }));
 
   router.get('/', async (req: JwtRequest, res, next) => {
     try {

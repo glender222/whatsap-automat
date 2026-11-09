@@ -14,7 +14,7 @@ paths:
   /workspaces/current:
     get:
       summary: Obtener espacio de trabajo y permisos actuales
-      description: Devuelve información del tenant autenticado, permisos y capacidades activas.
+      description: Devuelve el espacio predeterminado y los permisos de la membresía activa del usuario autenticado.
       operationId: getCurrentWorkspace
       security:
         - BearerAuth: []
@@ -723,17 +723,24 @@ components:
 
     WorkspaceCurrentResponse:
       type: object
-      required: [tenantId, tenantName, roles, capabilities]
+      required: [tenantId, tenantName, workspaceId, workspaceName, workspaceSlug, roles, capabilities]
       properties:
         tenantId:
           type: string
         tenantName:
+          type: string
+        workspaceId:
+          type: string
+        workspaceName:
+          type: string
+        workspaceSlug:
           type: string
         roles:
           type: array
           items:
             type: string
         capabilities:
+          description: Permisos de la sesión. Algunas acciones requieren configuración adicional del proveedor.
           type: array
           items:
             type: string

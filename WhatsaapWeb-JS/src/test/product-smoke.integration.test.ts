@@ -203,6 +203,25 @@ test('real API isolates two companies through auth, signed ingress, inbox, socke
   assert.equal(stationSession.user.id, employee.id);
   assert.equal(stationSession.user.companyId, owner.user.companyId);
   const employeeToken = stationSession.accessToken;
+  const workspacePath = '/api/v1/workspaces/current';
+  await api(workspacePath, 401);
+  const ownerWorkspace = await api(workspacePath, 200, owner.accessToken);
+  assert.equal(ownerWorkspace.tenantId, String(owner.user.companyId));
+  assert.equal(ownerWorkspace.tenantName, accounts[0].nombre);
+  assert.equal(ownerWorkspace.workspaceName, 'Principal');
+  assert.deepEqual(ownerWorkspace.roles, ['owner']);
+  assert.ok(ownerWorkspace.capabilities.includes('approvals.review'));
+  const operatorWorkspace = await api(workspacePath, 200, employeeToken);
+  assert.equal(operatorWorkspace.workspaceId, ownerWorkspace.workspaceId);
+  assert.deepEqual(operatorWorkspace.roles, ['member']);
+  assert.ok(!operatorWorkspace.capabilities.includes('approvals.review'));
+  const otherWorkspace = await fetch(`${base}${workspacePath}`, {
+    headers: { Authorization: `Bearer ${other.accessToken}`, 'x-tenant-id': ownerWorkspace.tenantId, 'x-workspace-id': ownerWorkspace.workspaceId },
+  });
+  assert.equal(otherWorkspace.status, 200);
+  const otherWorkspaceBody = await otherWorkspace.json();
+  assert.equal(otherWorkspaceBody.tenantId, String(other.user.companyId));
+  assert.notEqual(otherWorkspaceBody.workspaceId, ownerWorkspace.workspaceId);
   await api('/api/v1/admin/health/diagnostics', 403, employeeToken);
   const createApproval = (expiresInSeconds: number) => hitlApprovalService.createApprovalRequest({
     tenantId: owner.user.companyId, runId: randomUUID(), toolName: 'test-review', risk: 'financial',
