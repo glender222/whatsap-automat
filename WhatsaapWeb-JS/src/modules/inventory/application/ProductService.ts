@@ -14,7 +14,7 @@ export class ProductService {
   }
 
   get(companyId: number, productId: number) {
-    if (!Number.isInteger(productId) || productId <= 0) throw this.validationError('Item de catalogo invalido');
+    if (!Number.isSafeInteger(productId) || productId <= 0) throw this.validationError('Item de catalogo invalido');
     return this.repository.get(companyId, productId);
   }
 
@@ -23,41 +23,43 @@ export class ProductService {
     return this.repository.create(companyId, this.normalizeProductInput(input));
   }
 
-  update(companyId: number, productId: number, input: Partial<ProductInput>) {
-    if (!Number.isInteger(productId) || productId <= 0) throw this.validationError('Producto invalido');
+  update(companyId: number, productId: number, input: Partial<ProductInput>, actorUserId: number | null = null) {
+    if (!Number.isSafeInteger(productId) || productId <= 0) throw this.validationError('Producto invalido');
     this.assertProductInput(input, false);
-    return this.repository.update(companyId, productId, this.normalizeProductInput(input));
+    return this.repository.update(companyId, productId, this.normalizeProductInput(input), actorUserId);
   }
 
   adjustStock(companyId: number, productId: number, input: StockAdjustmentInput) {
-    if (!Number.isInteger(productId) || productId <= 0) throw this.validationError('Producto invalido');
-    if (!Number.isInteger(input.delta) || input.delta === 0) throw this.validationError('El ajuste debe ser entero y distinto de cero');
+    if (!Number.isSafeInteger(productId) || productId <= 0) throw this.validationError('Producto invalido');
+    if (!Number.isInteger(input.delta) || input.delta === 0 || Math.abs(input.delta) > 2_147_483_647) throw this.validationError('El ajuste debe ser entero y distinto de cero');
     return this.repository.adjustStock(companyId, productId, input);
   }
 
   addImage(companyId: number, productId: number, input: ProductImageInput) {
-    if (!Number.isInteger(productId) || productId <= 0) throw this.validationError('Producto invalido');
+    if (!Number.isSafeInteger(productId) || productId <= 0) throw this.validationError('Producto invalido');
     const normalized = this.normalizeImageInput(input);
     return this.repository.addImage(companyId, productId, normalized);
   }
 
   updateImage(companyId: number, productId: number, imageId: number, input: Partial<ProductImageInput>) {
-    if (!Number.isInteger(productId) || productId <= 0 || !Number.isInteger(imageId) || imageId <= 0) throw this.validationError('Imagen invalida');
+    if (!Number.isSafeInteger(productId) || productId <= 0 || !Number.isSafeInteger(imageId) || imageId <= 0) throw this.validationError('Imagen invalida');
     return this.repository.updateImage(companyId, productId, imageId, this.normalizeImageInput(input, false));
   }
 
   deleteImage(companyId: number, productId: number, imageId: number) {
-    if (!Number.isInteger(productId) || productId <= 0 || !Number.isInteger(imageId) || imageId <= 0) throw this.validationError('Imagen invalida');
+    if (!Number.isSafeInteger(productId) || productId <= 0 || !Number.isSafeInteger(imageId) || imageId <= 0) throw this.validationError('Imagen invalida');
     return this.repository.deleteImage(companyId, productId, imageId);
   }
 
   private assertProductInput(input: Partial<ProductInput>, requireName: boolean): void {
-    if (requireName && !String(input.name || '').trim()) throw this.validationError('Nombre de producto requerido');
-    if (input.name !== undefined && !String(input.name).trim()) throw this.validationError('Nombre de producto requerido');
+    if ((requireName || input.name !== undefined) &&
+        (typeof input.name !== 'string' || !input.name.trim() || input.name.trim().length > 180)) {
+      throw this.validationError('Nombre de producto invalido');
+    }
     if (input.price !== undefined && input.price !== null && (!Number.isFinite(Number(input.price)) || Number(input.price) < 0)) {
       throw this.validationError('Precio invalido');
     }
-    if (input.stockAvailable !== undefined && (!Number.isInteger(Number(input.stockAvailable)) || Number(input.stockAvailable) < 0)) {
+    if (input.stockAvailable !== undefined && (!Number.isInteger(Number(input.stockAvailable)) || Number(input.stockAvailable) < 0 || Number(input.stockAvailable) > 2_147_483_647)) {
       throw this.validationError('Disponibilidad invalida');
     }
     if (input.capacity !== undefined && input.capacity !== null && (!Number.isInteger(Number(input.capacity)) || Number(input.capacity) < 0)) {
@@ -66,15 +68,21 @@ export class ProductService {
     if (input.reservationTtlMinutes !== undefined && input.reservationTtlMinutes !== null && (!Number.isInteger(Number(input.reservationTtlMinutes)) || Number(input.reservationTtlMinutes) <= 0)) {
       throw this.validationError('Tiempo de reserva invalido');
     }
-    if (input.catalogIds !== undefined && (!Array.isArray(input.catalogIds) || input.catalogIds.some((id) => !Number.isInteger(Number(id)) || Number(id) <= 0))) {
+    if (input.catalogIds !== undefined && (!Array.isArray(input.catalogIds) || input.catalogIds.some((id) => !Number.isSafeInteger(Number(id)) || Number(id) <= 0))) {
       throw this.validationError('Catalogo invalido');
     }
     if (input.catalogAssignments !== undefined && (!Array.isArray(input.catalogAssignments) || input.catalogAssignments.some((item) => {
       const catalogId = Number(item?.catalogId);
       const sectionId = item?.sectionId === null || item?.sectionId === undefined ? null : Number(item.sectionId);
-      return !Number.isInteger(catalogId) || catalogId <= 0 || (sectionId !== null && (!Number.isInteger(sectionId) || sectionId <= 0));
+      return !Number.isSafeInteger(catalogId) || catalogId <= 0 || (sectionId !== null && (!Number.isSafeInteger(sectionId) || sectionId <= 0));
     }))) {
       throw this.validationError('Catalogo o seccion invalida');
+    }
+    if (input.images !== undefined) {
+      if (!Array.isArray(input.images) || input.images.length > 8) throw this.validationError('El item permite hasta 8 imagenes');
+      if (input.images.some((image) => !image || typeof image !== 'object')) {
+        throw this.validationError('Imagen invalida');
+      }
     }
     if (input.status && !STATUSES.includes(input.status)) throw this.validationError('Estado de catalogo invalido');
     if (input.itemType && !ITEM_TYPES.includes(input.itemType)) throw this.validationError('Tipo de item invalido');
@@ -101,14 +109,11 @@ export class ProductService {
       aiSalesInstructions: input.aiSalesInstructions ? String(input.aiSalesInstructions).trim() : input.aiSalesInstructions,
       imageUrl: input.imageUrl ? String(input.imageUrl).trim() : input.imageUrl,
       imageAltText: input.imageAltText ? String(input.imageAltText).trim().slice(0, 180) : input.imageAltText,
-      images: input.images?.map((image, index) => ({
-        imageUrl: String(image.imageUrl || '').trim(),
-        imageAltText: image.imageAltText ? String(image.imageAltText).trim().slice(0, 180) : null,
-        sortOrder: Number.isInteger(Number(image.sortOrder)) ? Number(image.sortOrder) : index,
+      images: input.images?.map((image, index) => this.normalizeImageInput({
+        ...image,
+        sortOrder: image.sortOrder ?? index,
         isPrimary: image.isPrimary === true,
-        mimeType: image.mimeType ? String(image.mimeType).slice(0, 120) : null,
-        sizeBytes: image.sizeBytes === undefined || image.sizeBytes === null ? null : Number(image.sizeBytes),
-      })).filter((image) => image.imageUrl),
+      })),
       catalogAssignments: input.catalogAssignments?.map((item) => ({
         catalogId: Number(item.catalogId),
         sectionId: item.sectionId ? Number(item.sectionId) : null,
@@ -128,7 +133,15 @@ export class ProductService {
   }
 
   private normalizeImageInput<T extends Partial<ProductImageInput>>(input: T, requireUrl = true): T {
-    if (requireUrl && !String(input.imageUrl || '').trim()) throw this.validationError('URL de imagen requerida');
+    if ((requireUrl || input.imageUrl !== undefined) && (typeof input.imageUrl !== 'string' || !input.imageUrl.trim())) {
+      throw this.validationError('URL de imagen requerida');
+    }
+    if (input.sortOrder !== undefined && (!Number.isInteger(Number(input.sortOrder)) || Math.abs(Number(input.sortOrder)) > 2_147_483_647)) {
+      throw this.validationError('Orden de imagen invalido');
+    }
+    if (input.sizeBytes != null && (!Number.isInteger(Number(input.sizeBytes)) || Number(input.sizeBytes) < 0 || Number(input.sizeBytes) > 2_147_483_647)) {
+      throw this.validationError('Tamano de imagen invalido');
+    }
     return {
       ...input,
       imageUrl: input.imageUrl ? String(input.imageUrl).trim() : input.imageUrl,

@@ -1,35 +1,46 @@
 import { Queryable } from '../../../../shared/UnitOfWorkPort';
 import { Catalog, CatalogInput, CatalogSection, CatalogSectionInput } from '../../domain/inventory.types';
+import { inventoryScope, InventoryReferenceNotFound, lockCatalog, lockProduct, requireAssignableCatalog } from './inventoryScope';
 
 type Row = Record<string, any>;
 
 export class CatalogRepositoryPg {
-  constructor(private readonly pool: Queryable) {}
+  private readonly inScope: ReturnType<typeof inventoryScope>;
+
+  constructor(db: Queryable) {
+    this.inScope = inventoryScope(db);
+  }
+
+  private query(companyId: number, sql: string, values: unknown[]) {
+    return this.inScope(companyId, (db) => db.query(sql, values));
+  }
 
   async list(companyId: number): Promise<Catalog[]> {
-    const result = await this.pool.query(
-      `SELECT c.*,
-          COUNT(ci.commercial_item_id)::int AS item_count
-       FROM catalogs c
-       LEFT JOIN catalog_items ci
-         ON ci.company_id = c.company_id
-        AND ci.catalog_id = c.id
-       WHERE c.company_id = $1
-         AND c.status <> 'archived'
-       GROUP BY c.id
-       ORDER BY c.sort_order ASC, LOWER(c.name) ASC, c.id ASC`,
-      [companyId]
-    );
-    const catalogs = result.rows.map((row) => this.mapCatalog(row));
-    const sections = await this.listSectionsForCompany(companyId);
-    return catalogs.map((catalog) => ({
-      ...catalog,
-      sections: sections.filter((section) => section.catalogId === catalog.id),
-    }));
+    return this.inScope(companyId, async (db) => {
+      const result = await db.query(
+        `SELECT c.*,
+            COUNT(ci.commercial_item_id)::int AS item_count
+         FROM catalogs c
+         LEFT JOIN catalog_items ci
+           ON ci.company_id = c.company_id
+          AND ci.catalog_id = c.id
+         WHERE c.company_id = $1
+           AND c.status <> 'archived'
+         GROUP BY c.id
+         ORDER BY c.sort_order ASC, LOWER(c.name) ASC, c.id ASC`,
+        [companyId]
+      );
+      const catalogs = result.rows.map((row) => this.mapCatalog(row));
+      const sections = await this.listSectionsForCompany(db, companyId);
+      return catalogs.map((catalog) => ({
+        ...catalog,
+        sections: sections.filter((section) => section.catalogId === catalog.id),
+      }));
+    });
   }
 
   async create(companyId: number, input: CatalogInput): Promise<Catalog> {
-    const result = await this.pool.query(
+    const result = await this.query(companyId,
       `INSERT INTO catalogs (
          company_id, name, description, status, ai_enabled, ai_instructions, sales_policy, sort_order, metadata_json
        )
@@ -51,7 +62,7 @@ export class CatalogRepositoryPg {
   }
 
   async update(companyId: number, catalogId: number, input: Partial<CatalogInput>): Promise<Catalog | null> {
-    const result = await this.pool.query(
+    const result = await this.query(companyId,
       `UPDATE catalogs
        SET name = COALESCE($3, name),
            description = COALESCE($4, description),
@@ -87,52 +98,60 @@ export class CatalogRepositoryPg {
   }
 
   async listSections(companyId: number, catalogId: number): Promise<CatalogSection[]> {
-    const result = await this.pool.query(
-      `SELECT cs.*,
-          COUNT(ci.commercial_item_id)::int AS item_count
-       FROM catalog_sections cs
-       LEFT JOIN catalog_items ci
-         ON ci.company_id = cs.company_id
-        AND ci.section_id = cs.id
-       WHERE cs.company_id = $1
-         AND cs.catalog_id = $2
-         AND cs.status <> 'archived'
-       GROUP BY cs.id
-       ORDER BY cs.sort_order ASC, LOWER(cs.name) ASC, cs.id ASC`,
-      [companyId, catalogId]
-    );
-    return result.rows.map((row) => this.mapSection(row));
+    return this.inScope(companyId, async (db) => {
+      if (!await lockCatalog(db, companyId, catalogId, false)) {
+        throw new InventoryReferenceNotFound('Catalogo no encontrado');
+      }
+      const result = await db.query(
+        `SELECT cs.*,
+            COUNT(ci.commercial_item_id)::int AS item_count
+         FROM catalog_sections cs
+         LEFT JOIN catalog_items ci
+           ON ci.company_id = cs.company_id
+          AND ci.section_id = cs.id
+         WHERE cs.company_id = $1
+           AND cs.catalog_id = $2
+           AND cs.status <> 'archived'
+         GROUP BY cs.id
+         ORDER BY cs.sort_order ASC, LOWER(cs.name) ASC, cs.id ASC`,
+        [companyId, catalogId]
+      );
+      return result.rows.map((row) => this.mapSection(row));
+    });
   }
 
   async createSection(companyId: number, catalogId: number, input: CatalogSectionInput): Promise<CatalogSection | null> {
-    const result = await this.pool.query(
-      `INSERT INTO catalog_sections (
-         company_id, catalog_id, name, description, status, ai_enabled,
-         ai_instructions, sort_order, metadata_json
-       )
-       SELECT $1, c.id, $3, $4, $5, $6, $7, $8, $9::jsonb
-       FROM catalogs c
-       WHERE c.company_id = $1
-         AND c.id = $2
-         AND c.status <> 'archived'
-       RETURNING *, 0::int AS item_count`,
-      [
-        companyId,
-        catalogId,
-        input.name.trim(),
-        input.description || null,
-        input.status || 'active',
-        input.aiEnabled ?? true,
-        input.aiInstructions || '',
-        input.sortOrder ?? 0,
-        JSON.stringify(input.metadata || {}),
-      ]
-    );
-    return result.rows[0] ? this.mapSection(result.rows[0]) : null;
+    return this.inScope(companyId, async (db) => {
+      if (!await lockCatalog(db, companyId, catalogId, true)) return null;
+      const result = await db.query(
+        `INSERT INTO catalog_sections (
+           company_id, catalog_id, name, description, status, ai_enabled,
+           ai_instructions, sort_order, metadata_json
+         )
+         SELECT $1, c.id, $3, $4, $5, $6, $7, $8, $9::jsonb
+         FROM catalogs c
+         WHERE c.company_id = $1
+           AND c.id = $2
+           AND c.status <> 'archived'
+         RETURNING *, 0::int AS item_count`,
+        [
+          companyId,
+          catalogId,
+          input.name.trim(),
+          input.description || null,
+          input.status || 'active',
+          input.aiEnabled ?? true,
+          input.aiInstructions || '',
+          input.sortOrder ?? 0,
+          JSON.stringify(input.metadata || {}),
+        ]
+      );
+      return result.rows[0] ? this.mapSection(result.rows[0]) : null;
+    });
   }
 
   async updateSection(companyId: number, sectionId: number, input: Partial<CatalogSectionInput>): Promise<CatalogSection | null> {
-    const result = await this.pool.query(
+    const result = await this.query(companyId,
       `UPDATE catalog_sections
        SET name = COALESCE($3, name),
            description = COALESCE($4, description),
@@ -166,37 +185,38 @@ export class CatalogRepositoryPg {
   }
 
   async addItem(companyId: number, catalogId: number, commercialItemId: number, sectionId: number | null = null): Promise<boolean> {
-    const result = await this.pool.query(
-      `INSERT INTO catalog_items (company_id, catalog_id, commercial_item_id, section_id, sort_order)
-       SELECT $1, c.id, p.id, cs.id, 0
-       FROM catalogs c
-       JOIN products p ON p.company_id = c.company_id AND p.id = $3
-       LEFT JOIN catalog_sections cs
-         ON cs.company_id = c.company_id
-        AND cs.catalog_id = c.id
-        AND cs.id = $4
-        AND cs.status <> 'archived'
-       WHERE c.company_id = $1
-         AND c.id = $2
-         AND c.status <> 'archived'
-         AND ($4::bigint IS NULL OR cs.id IS NOT NULL)
-       ON CONFLICT (catalog_id, commercial_item_id)
-       DO UPDATE SET section_id = EXCLUDED.section_id
-       RETURNING id`,
-      [companyId, catalogId, commercialItemId, sectionId]
-    );
-    return Boolean(result.rows[0]);
+    return this.inScope(companyId, async (db) => {
+      if (!await lockProduct(db, companyId, commercialItemId)) {
+        throw new InventoryReferenceNotFound('Item de catalogo no encontrado');
+      }
+      await requireAssignableCatalog(db, companyId, catalogId, sectionId);
+      const result = await db.query(
+        `INSERT INTO catalog_items (company_id, catalog_id, commercial_item_id, section_id, sort_order)
+         VALUES ($1, $2, $3, $4, 0)
+         ON CONFLICT (catalog_id, commercial_item_id)
+         DO UPDATE SET section_id = EXCLUDED.section_id
+         WHERE catalog_items.company_id = EXCLUDED.company_id
+         RETURNING id`,
+        [companyId, catalogId, commercialItemId, sectionId]
+      );
+      return Boolean(result.rows[0]);
+    });
   }
 
   async removeItem(companyId: number, catalogId: number, commercialItemId: number): Promise<boolean> {
-    const result = await this.pool.query(
-      `DELETE FROM catalog_items
-       WHERE company_id = $1
-         AND catalog_id = $2
-         AND commercial_item_id = $3`,
-      [companyId, catalogId, commercialItemId]
-    );
-    return (result.rowCount || 0) > 0;
+    return this.inScope(companyId, async (db) => {
+      if (!await lockProduct(db, companyId, commercialItemId) || !await lockCatalog(db, companyId, catalogId, false)) {
+        throw new InventoryReferenceNotFound('Catalogo o item no encontrado');
+      }
+      const result = await db.query(
+        `DELETE FROM catalog_items
+         WHERE company_id = $1
+           AND catalog_id = $2
+           AND commercial_item_id = $3`,
+        [companyId, catalogId, commercialItemId]
+      );
+      return (result.rowCount || 0) > 0;
+    });
   }
 
   private mapCatalog(row: Row): Catalog {
@@ -218,8 +238,8 @@ export class CatalogRepositoryPg {
     };
   }
 
-  private async listSectionsForCompany(companyId: number): Promise<CatalogSection[]> {
-    const result = await this.pool.query(
+  private async listSectionsForCompany(db: Queryable, companyId: number): Promise<CatalogSection[]> {
+    const result = await db.query(
       `SELECT cs.*,
           COUNT(ci.commercial_item_id)::int AS item_count
        FROM catalog_sections cs

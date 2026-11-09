@@ -1,9 +1,10 @@
 import { NextFunction, Response, Router } from 'express';
 import fs from 'fs';
+import type { Pool } from 'pg';
 import path from 'path';
 import pool from '../config/database';
 import config from '../config/index';
-import { JwtRequest, resolveWhatsappCompanyId } from '../middleware/jwtAuth';
+import { JwtRequest, resolveWhatsappCompanyId, toPositiveInt } from '../middleware/jwtAuth';
 import { ProductRepositoryPg, ProductService, type ProductInput } from '../modules/inventory';
 import { DashboardRepositoryPg } from '../modules/dashboard';
 import { emitDashboard } from '../sockets/socketEmitter';
@@ -11,13 +12,13 @@ import { emitDashboard } from '../sockets/socketEmitter';
 const multer = require('multer') as any;
 
 function parsePositiveInt(value: unknown): number | null {
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+  const parsed = toPositiveInt(value);
+  return Number.isSafeInteger(parsed) ? parsed : null;
 }
 
 function getUserId(req: JwtRequest): number | null {
   const value = Number(req.user?.userId || req.user?.id);
-  return Number.isInteger(value) && value > 0 ? value : null;
+  return Number.isSafeInteger(value) && value > 0 ? value : null;
 }
 
 function getBooleanQuery(value: unknown): boolean | null {
@@ -40,7 +41,7 @@ function isAdmin(req: JwtRequest): boolean {
   return req.user?.rol === 'ADMIN';
 }
 
-function sanitizeProductInputForRole(req: JwtRequest, input: Record<string, any>, currentStatus?: string | null): Record<string, any> {
+function sanitizeProductInputForRole(req: JwtRequest, input: Record<string, any>, creating: boolean): Record<string, any> {
   if (isAdmin(req)) return input;
   const allowed: Record<string, true> = {
     name: true,
@@ -65,17 +66,19 @@ function sanitizeProductInputForRole(req: JwtRequest, input: Record<string, any>
   };
   const sanitized: Record<string, any> = {};
   for (const [key, value] of Object.entries(input || {})) {
-    if (allowed[key]) sanitized[key] = value;
+    if (Object.prototype.hasOwnProperty.call(allowed, key)) sanitized[key] = value;
   }
-  sanitized.status = currentStatus || 'draft';
-  sanitized.aiEnabled = false;
+  if (creating) {
+    sanitized.status = 'draft';
+    sanitized.aiEnabled = false;
+  }
   return sanitized;
 }
 
-export default function createProductRoutes(): Router {
+export default function createProductRoutes(database: Pool = pool): Router {
   const router = Router();
-  const service = new ProductService(new ProductRepositoryPg(pool));
-  const dashboardRepo = new DashboardRepositoryPg(pool);
+  const service = new ProductService(new ProductRepositoryPg(database));
+  const dashboardRepo = new DashboardRepositoryPg(database);
   const mediaDir = path.join(config.whatsapp.uploadDir, 'commercial-items');
   fs.mkdirSync(mediaDir, { recursive: true });
   const upload = multer({
@@ -127,10 +130,7 @@ export default function createProductRoutes(): Router {
 
   router.post('/', async (req: JwtRequest, res: Response, next: NextFunction) => {
     try {
-      const input = sanitizeProductInputForRole(req, req.body || {});
-      if (String(input.status || '') === 'active' && !input.imageUrl && (!Array.isArray(input.images) || input.images.length === 0)) {
-        return res.status(400).json({ success: false, message: 'La oferta necesita una imagen principal antes de publicarse' });
-      }
+      const input = sanitizeProductInputForRole(req, req.body || {}, true);
       const data = await service.create(resolveWhatsappCompanyId(req), input as ProductInput);
       res.status(201).json({ success: true, data });
     } catch (error) {
@@ -174,13 +174,8 @@ export default function createProductRoutes(): Router {
       const id = parsePositiveInt(req.params.id);
       if (!id) return res.status(400).json({ success: false, message: 'Item de catalogo invalido' });
       const companyId = resolveWhatsappCompanyId(req);
-      const current = await service.get(companyId, id);
-      if (!current) return res.status(404).json({ success: false, message: 'Item de catalogo no encontrado' });
-      const nextInput = sanitizeProductInputForRole(req, req.body || {}, current.status);
-      if (String(nextInput.status || current.status) === 'active' && !(req.body?.imageUrl || current.primaryImage?.url || current.imageUrl)) {
-        return res.status(400).json({ success: false, message: 'La oferta necesita una imagen principal antes de publicarse' });
-      }
-      const data = await service.update(companyId, id, nextInput);
+      const nextInput = sanitizeProductInputForRole(req, req.body || {}, false);
+      const data = await service.update(companyId, id, nextInput, getUserId(req));
       if (!data) return res.status(404).json({ success: false, message: 'Item de catalogo no encontrado' });
       return res.json({ success: true, data });
     } catch (error) {
@@ -194,11 +189,6 @@ export default function createProductRoutes(): Router {
       const id = parsePositiveInt(req.params.id);
       if (!id) return res.status(400).json({ success: false, message: 'Item de catalogo invalido' });
       const companyId = resolveWhatsappCompanyId(req);
-      const current = await service.get(companyId, id);
-      if (!current) return res.status(404).json({ success: false, message: 'Item de catalogo no encontrado' });
-      if (String(req.body?.status || '') === 'active' && !current.primaryImage?.url && !current.imageUrl) {
-        return res.status(400).json({ success: false, message: 'La oferta necesita una imagen principal antes de publicarse' });
-      }
       const data = await service.update(companyId, id, { status: req.body?.status });
       if (!data) return res.status(404).json({ success: false, message: 'Item de catalogo no encontrado' });
       return res.json({ success: true, data });
@@ -211,7 +201,7 @@ export default function createProductRoutes(): Router {
     try {
       const id = parsePositiveInt(req.params.id);
       if (!id) return res.status(400).json({ success: false, message: 'Item de catalogo invalido' });
-      const item = (await service.list(resolveWhatsappCompanyId(req))).find((entry) => entry.id === id);
+      const item = await service.get(resolveWhatsappCompanyId(req), id);
       if (!item) return res.status(404).json({ success: false, message: 'Item de catalogo no encontrado' });
       return res.json({
         success: true,
@@ -240,7 +230,7 @@ export default function createProductRoutes(): Router {
         capacity: req.body?.capacity,
         allowBackorder: req.body?.allowBackorder,
         reservationTtlMinutes: req.body?.reservationTtlMinutes,
-      });
+      }, getUserId(req));
       if (!data) return res.status(404).json({ success: false, message: 'Item de catalogo no encontrado' });
       return res.json({ success: true, data });
     } catch (error) {
@@ -261,7 +251,7 @@ export default function createProductRoutes(): Router {
         mimeType: req.body?.mimeType || null,
         sizeBytes: req.body?.sizeBytes ?? null,
       });
-      if (!data) return res.status(400).json({ success: false, message: 'No se pudo agregar la imagen. Verifica el item o el limite de 8 imagenes.' });
+      if (!data) return res.status(404).json({ success: false, message: 'Item de catalogo no encontrado' });
       return res.status(201).json({ success: true, data });
     } catch (error) {
       return next(error);
@@ -294,6 +284,7 @@ export default function createProductRoutes(): Router {
       const imageId = parsePositiveInt(req.params.imageId);
       if (!id || !imageId) return res.status(400).json({ success: false, message: 'Imagen invalida' });
       const removed = await service.deleteImage(resolveWhatsappCompanyId(req), id, imageId);
+      if (!removed) return res.status(404).json({ success: false, message: 'Imagen no encontrada' });
       return res.json({ success: true, data: { removed } });
     } catch (error) {
       return next(error);
@@ -310,7 +301,7 @@ export default function createProductRoutes(): Router {
         notes: req.body?.notes || null,
         actorUserId: getUserId(req),
       });
-      if (!result) return res.status(400).json({ success: false, message: 'Item no encontrado o disponibilidad insuficiente' });
+      if (!result) return res.status(404).json({ success: false, message: 'Item de catalogo no encontrado' });
       emitDashboard('stock-updated', { companyId, productId: result.product.id, stockAvailable: result.product.stockAvailable, stockReserved: result.product.stockReserved });
       return res.json({ success: true, data: result.product });
     } catch (error) {
@@ -328,7 +319,7 @@ export default function createProductRoutes(): Router {
         notes: req.body?.reason || req.body?.notes || null,
         actorUserId: getUserId(req),
       });
-      if (!result) return res.status(400).json({ success: false, message: 'Item no encontrado o disponibilidad insuficiente' });
+      if (!result) return res.status(404).json({ success: false, message: 'Item de catalogo no encontrado' });
       emitDashboard('stock-updated', { companyId, productId: result.product.id, stockAvailable: result.product.stockAvailable, stockReserved: result.product.stockReserved });
       return res.json({ success: true, data: result.product });
     } catch (error) {

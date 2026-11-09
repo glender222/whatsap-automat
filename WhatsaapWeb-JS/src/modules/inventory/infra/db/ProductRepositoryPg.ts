@@ -1,10 +1,19 @@
 import { Queryable } from '../../../../shared/UnitOfWorkPort';
 import { CatalogAssignmentInput, Product, ProductImage, ProductImageInput, ProductInput, ProductListFilters, StockAdjustmentInput, StockMovement } from '../../domain/inventory.types';
+import { inventoryScope, InventoryReferenceNotFound, InventoryValidationError, lockProduct, requireAssignableCatalog } from './inventoryScope';
 
 type Row = Record<string, any>;
 
 export class ProductRepositoryPg {
-  constructor(private readonly pool: Queryable) {}
+  private readonly inScope: ReturnType<typeof inventoryScope>;
+
+  constructor(db: Queryable) {
+    this.inScope = inventoryScope(db);
+  }
+
+  private query(companyId: number, sql: string, values: unknown[]) {
+    return this.inScope(companyId, (db) => db.query(sql, values));
+  }
 
   async list(companyId: number, filters: ProductListFilters | string = ''): Promise<Product[]> {
     const normalizedFilters: ProductListFilters = typeof filters === 'string' ? { q: filters } : filters;
@@ -46,7 +55,7 @@ export class ProductRepositoryPg {
       conditions.push(`p.ai_enabled = $${values.length}`);
     }
 
-    const result = await this.pool.query(
+    const result = await this.query(companyId,
       `${this.baseProductSelect()}
        WHERE ${conditions.join(' AND ')}
        GROUP BY p.id
@@ -57,7 +66,11 @@ export class ProductRepositoryPg {
   }
 
   async get(companyId: number, productId: number): Promise<Product | null> {
-    const result = await this.pool.query(
+    return this.inScope(companyId, (db) => this.getUsing(db, companyId, productId));
+  }
+
+  private async getUsing(db: Queryable, companyId: number, productId: number): Promise<Product | null> {
+    const result = await db.query(
       `${this.baseProductSelect()}
        WHERE p.company_id = $1 AND p.id = $2
        GROUP BY p.id
@@ -70,7 +83,7 @@ export class ProductRepositoryPg {
   async findActiveByNames(companyId: number, names: string[]): Promise<Product[]> {
     const normalized = names.map((name) => name.trim().toLowerCase()).filter(Boolean);
     if (normalized.length === 0) return [];
-    const result = await this.pool.query(
+    const result = await this.query(companyId,
       `${this.baseProductSelect()}
        WHERE p.company_id = $1 AND p.status = 'active'
          AND (LOWER(p.name) = ANY($2::varchar[]) OR LOWER(COALESCE(p.sku, '')) = ANY($2::varchar[]))
@@ -95,7 +108,7 @@ export class ProductRepositoryPg {
       values.push(sectionIds);
       scopeFilters.push(`ci_agent.section_id = ANY($${values.length}::bigint[])`);
     }
-    const result = await this.pool.query(
+    const result = await this.query(companyId,
       `${this.baseProductSelect()}
        WHERE p.company_id = $1
          AND p.status = 'active'
@@ -103,13 +116,14 @@ export class ProductRepositoryPg {
          AND EXISTS (
            SELECT 1
            FROM catalog_items ci_agent
-           JOIN catalogs c_agent ON c_agent.id = ci_agent.catalog_id
+           JOIN catalogs c_agent ON c_agent.id = ci_agent.catalog_id AND c_agent.company_id = ci_agent.company_id
            LEFT JOIN catalog_sections cs_agent ON cs_agent.id = ci_agent.section_id
+             AND cs_agent.company_id = ci_agent.company_id AND cs_agent.catalog_id = ci_agent.catalog_id
            WHERE ci_agent.company_id = p.company_id
              AND ci_agent.commercial_item_id = p.id
              AND c_agent.status = 'active'
              AND c_agent.ai_enabled = true
-             AND (cs_agent.id IS NULL OR (cs_agent.status = 'active' AND cs_agent.ai_enabled = true))
+             AND (ci_agent.section_id IS NULL OR (cs_agent.status = 'active' AND cs_agent.ai_enabled = true))
              ${scopeFilters.length ? `AND ${scopeFilters.join(' AND ')}` : ''}
          )
        GROUP BY p.id
@@ -125,7 +139,7 @@ export class ProductRepositoryPg {
     const uniqueIds = Array.from(new Set(ids.filter((id) => Number.isInteger(id) && id > 0)));
     if (uniqueIds.length === 0 && normalized.length === 0) return [];
 
-    const result = await this.pool.query(
+    const result = await this.query(companyId,
       `${this.baseProductSelect()}
        WHERE p.company_id = $1
          AND p.status = 'active'
@@ -142,263 +156,329 @@ export class ProductRepositoryPg {
   }
 
   async create(companyId: number, input: ProductInput): Promise<Product> {
-    const result = await this.pool.query(
-      `INSERT INTO products (
-         company_id, name, description, sku, price, currency, status,
-         item_type, unit_label, ai_enabled, ai_description, ai_sales_instructions,
-         requires_human_approval, availability_type, capacity, allow_backorder,
-         reservation_ttl_minutes, stock_available, image_url, image_alt_text, price_mode, metadata_json
-       )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
-       RETURNING *`,
-      [
-        companyId,
-        input.name.trim(),
-        input.description || null,
-        input.sku || null,
-        input.price ?? null,
-        input.currency || 'PEN',
-        input.status || 'active',
-        input.itemType || 'physical_product',
-        input.unitLabel || null,
-        input.aiEnabled ?? true,
-        input.aiDescription || null,
-        input.aiSalesInstructions || null,
-        input.requiresHumanApproval ?? false,
-        input.availabilityType || this.defaultAvailabilityType(input.itemType),
-        input.capacity ?? null,
-        input.allowBackorder ?? false,
-        input.reservationTtlMinutes ?? null,
-        this.initialAvailableQuantity(input),
-        input.imageUrl || null,
-        input.imageAltText || null,
-        input.priceMode || (input.price === 0 ? 'free' : input.price === null ? 'consult' : 'fixed'),
-        JSON.stringify(input.metadata || {}),
-      ]
-    );
-    const product = this.mapProduct(result.rows[0]);
-    await this.setCatalogAssignments(companyId, product.id, this.normalizeAssignments(input));
-    await this.replaceImagesFromInput(companyId, product.id, input.images, input.imageUrl || null, input.imageAltText || null);
-    return (await this.get(companyId, product.id)) || product;
+    return this.inScope(companyId, async (db) => {
+      const result = await db.query(
+        `INSERT INTO products (
+           company_id, name, description, sku, price, currency, status,
+           item_type, unit_label, ai_enabled, ai_description, ai_sales_instructions,
+           requires_human_approval, availability_type, capacity, allow_backorder,
+           reservation_ttl_minutes, stock_available, image_url, image_alt_text, price_mode, metadata_json
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+         RETURNING *`,
+        [
+          companyId,
+          input.name.trim(),
+          input.description || null,
+          input.sku || null,
+          input.price ?? null,
+          input.currency || 'PEN',
+          input.status || 'active',
+          input.itemType || 'physical_product',
+          input.unitLabel || null,
+          input.aiEnabled ?? true,
+          input.aiDescription || null,
+          input.aiSalesInstructions || null,
+          input.requiresHumanApproval ?? false,
+          input.availabilityType || this.defaultAvailabilityType(input.itemType),
+          input.capacity ?? null,
+          input.allowBackorder ?? false,
+          input.reservationTtlMinutes ?? null,
+          this.initialAvailableQuantity(input),
+          input.imageUrl || null,
+          input.imageAltText || null,
+          input.priceMode || (input.price === 0 ? 'free' : input.price === null ? 'consult' : 'fixed'),
+          JSON.stringify(input.metadata || {}),
+        ]
+      );
+      const productId = Number(result.rows[0].id);
+      await this.writeAssignments(db, companyId, productId, this.normalizeAssignments(input));
+      if (input.images !== undefined) {
+        await this.replaceImages(db, companyId, productId, input.images, input.imageUrl, input.imageAltText);
+      } else if (input.imageUrl) {
+        await this.ensurePrimaryImage(db, companyId, productId, input.imageUrl, input.imageAltText ?? null);
+      }
+      const product = await this.getUsing(db, companyId, productId);
+      if (!product) throw new InventoryReferenceNotFound('Item de catalogo no encontrado');
+      this.requirePublicationImage(product);
+      return product;
+    });
   }
 
-  async update(companyId: number, productId: number, input: Partial<ProductInput>): Promise<Product | null> {
-    const result = await this.pool.query(
-      `UPDATE products
-       SET name = COALESCE($3, name),
-           description = COALESCE($4, description),
-           sku = COALESCE($5, sku),
-           price = COALESCE($6, price),
-           currency = COALESCE($7, currency),
-           status = COALESCE($8, status),
-           item_type = COALESCE($9, item_type),
-           unit_label = COALESCE($10, unit_label),
-           ai_enabled = COALESCE($11, ai_enabled),
-           ai_description = COALESCE($12, ai_description),
-           ai_sales_instructions = COALESCE($13, ai_sales_instructions),
-           requires_human_approval = COALESCE($14, requires_human_approval),
-           availability_type = COALESCE($15, availability_type),
-           capacity = COALESCE($16, capacity),
-           allow_backorder = COALESCE($17, allow_backorder),
-           reservation_ttl_minutes = COALESCE($18, reservation_ttl_minutes),
-           stock_available = COALESCE($19, stock_available),
-           image_url = COALESCE($20, image_url),
-           image_alt_text = COALESCE($21, image_alt_text),
-           price_mode = COALESCE($22, price_mode),
-           metadata_json = COALESCE($23, metadata_json),
-           updated_at = NOW()
-       WHERE company_id = $1 AND id = $2
-       RETURNING *`,
-      [
-        companyId,
-        productId,
-        input.name?.trim() || null,
-        input.description ?? null,
-        input.sku ?? null,
-        input.price ?? null,
-        input.currency || null,
-        input.status || null,
-        input.itemType || null,
-        input.unitLabel ?? null,
-        input.aiEnabled ?? null,
-        input.aiDescription ?? null,
-        input.aiSalesInstructions ?? null,
-        input.requiresHumanApproval ?? null,
-        input.availabilityType || null,
-        input.capacity ?? null,
-        input.allowBackorder ?? null,
-        input.reservationTtlMinutes ?? null,
-        input.stockAvailable ?? null,
-        input.imageUrl ?? null,
-        input.imageAltText ?? null,
-        input.priceMode || null,
-        input.metadata ? JSON.stringify(input.metadata) : null,
-      ]
-    );
-    if (!result.rows[0]) return null;
-    if (input.catalogIds || input.catalogAssignments) {
-      await this.setCatalogAssignments(companyId, productId, this.normalizeAssignments(input));
-    }
-    if (input.images) {
-      await this.replaceImagesFromInput(companyId, productId, input.images, input.imageUrl ?? null, input.imageAltText ?? null);
-    } else if (input.imageUrl !== undefined) {
-      await this.ensurePrimaryImage(companyId, productId, input.imageUrl || null, input.imageAltText || null);
-    }
-    return this.get(companyId, productId);
+  async update(
+    companyId: number, productId: number, input: Partial<ProductInput>, actorUserId: number | null = null,
+  ): Promise<Product | null> {
+    return this.inScope(companyId, async (db) => {
+      const current = await lockProduct(db, companyId, productId);
+      if (!current) return null;
+      const result = await db.query(
+        `UPDATE products
+         SET name = COALESCE($3, name),
+             description = COALESCE($4, description),
+             sku = COALESCE($5, sku),
+             price = COALESCE($6, price),
+             currency = COALESCE($7, currency),
+             status = COALESCE($8, status),
+             item_type = COALESCE($9, item_type),
+             unit_label = COALESCE($10, unit_label),
+             ai_enabled = COALESCE($11, ai_enabled),
+             ai_description = COALESCE($12, ai_description),
+             ai_sales_instructions = COALESCE($13, ai_sales_instructions),
+             requires_human_approval = COALESCE($14, requires_human_approval),
+             availability_type = COALESCE($15, availability_type),
+             capacity = COALESCE($16, capacity),
+             allow_backorder = COALESCE($17, allow_backorder),
+             reservation_ttl_minutes = COALESCE($18, reservation_ttl_minutes),
+             stock_available = COALESCE($19, stock_available),
+             price_mode = COALESCE($20, price_mode),
+             metadata_json = COALESCE($21, metadata_json),
+             updated_at = NOW()
+         WHERE company_id = $1 AND id = $2
+         RETURNING *`,
+        [
+          companyId,
+          productId,
+          input.name?.trim() || null,
+          input.description ?? null,
+          input.sku ?? null,
+          input.price ?? null,
+          input.currency || null,
+          input.status || null,
+          input.itemType || null,
+          input.unitLabel ?? null,
+          input.aiEnabled ?? null,
+          input.aiDescription ?? null,
+          input.aiSalesInstructions ?? null,
+          input.requiresHumanApproval ?? null,
+          input.availabilityType || null,
+          input.capacity ?? null,
+          input.allowBackorder ?? null,
+          input.reservationTtlMinutes ?? null,
+          input.stockAvailable ?? null,
+          input.priceMode || null,
+          input.metadata ? JSON.stringify(input.metadata) : null,
+        ]
+      );
+      if (input.catalogIds !== undefined || input.catalogAssignments !== undefined) {
+        await this.writeAssignments(db, companyId, productId, this.normalizeAssignments(input));
+      }
+      if (input.images !== undefined) {
+        await this.replaceImages(db, companyId, productId, input.images, input.imageUrl, input.imageAltText);
+      } else if (input.imageUrl) {
+        await this.ensurePrimaryImage(db, companyId, productId, input.imageUrl, input.imageAltText ?? null);
+      } else if (input.imageAltText != null) {
+        await db.query(`
+          UPDATE product_images SET image_alt_text = $3, updated_at = NOW()
+          WHERE company_id = $1 AND product_id = $2 AND is_primary
+        `, [companyId, productId, input.imageAltText]);
+        await db.query(`
+          UPDATE products SET image_alt_text = $3 WHERE company_id = $1 AND id = $2
+        `, [companyId, productId, input.imageAltText]);
+      }
+      const delta = result.rows[0].stock_available - current.stock_available;
+      if (delta) await this.recordAdjustment(db, result.rows[0], { delta, actorUserId });
+      const product = await this.getUsing(db, companyId, productId);
+      if (product && (input.status === 'active' || input.images !== undefined || input.imageUrl)) {
+        this.requirePublicationImage(product);
+      }
+      return product;
+    });
   }
 
   async addImage(companyId: number, productId: number, input: ProductImageInput): Promise<ProductImage | null> {
-    const countResult = await this.pool.query(
-      'SELECT COUNT(*)::int AS count FROM product_images WHERE company_id = $1 AND product_id = $2',
-      [companyId, productId]
-    );
-    const count = Number(countResult.rows[0]?.count || 0);
-    if (count >= 8) return null;
-    const isPrimary = input.isPrimary === true || count === 0;
-    if (isPrimary) {
-      await this.pool.query('UPDATE product_images SET is_primary = false WHERE company_id = $1 AND product_id = $2', [companyId, productId]);
-    }
-    const result = await this.pool.query(
-      `INSERT INTO product_images (
-         company_id, product_id, image_url, image_alt_text, sort_order,
-         is_primary, mime_type, size_bytes
-       )
-       SELECT $1, p.id, $3, $4, $5, $6, $7, $8
-       FROM products p
-       WHERE p.company_id = $1 AND p.id = $2
-       RETURNING *`,
-      [
-        companyId,
-        productId,
-        input.imageUrl,
-        input.imageAltText || null,
-        Number.isInteger(Number(input.sortOrder)) ? Number(input.sortOrder) : count,
-        isPrimary,
-        input.mimeType || null,
-        input.sizeBytes ?? null,
-      ]
-    );
-    const image = result.rows[0] ? this.mapImage(result.rows[0]) : null;
-    if (image?.isPrimary) await this.syncLegacyPrimaryImage(companyId, productId, image.url, image.altText);
-    return image;
+    return this.inScope(companyId, async (db) => {
+      if (!await lockProduct(db, companyId, productId)) return null;
+      return this.addImageUsing(db, companyId, productId, input);
+    });
   }
 
   async updateImage(companyId: number, productId: number, imageId: number, input: Partial<ProductImageInput>): Promise<ProductImage | null> {
-    if (input.isPrimary === true) {
-      await this.pool.query('UPDATE product_images SET is_primary = false WHERE company_id = $1 AND product_id = $2', [companyId, productId]);
-    }
-    const result = await this.pool.query(
-      `UPDATE product_images
-       SET image_url = COALESCE($4, image_url),
-           image_alt_text = COALESCE($5, image_alt_text),
-           sort_order = COALESCE($6, sort_order),
-           is_primary = COALESCE($7, is_primary),
-           mime_type = COALESCE($8, mime_type),
-           size_bytes = COALESCE($9, size_bytes),
-           updated_at = NOW()
-       WHERE company_id = $1 AND product_id = $2 AND id = $3
-       RETURNING *`,
-      [
-        companyId,
-        productId,
-        imageId,
-        input.imageUrl || null,
-        input.imageAltText ?? null,
-        input.sortOrder === undefined ? null : Number(input.sortOrder),
-        input.isPrimary ?? null,
-        input.mimeType ?? null,
-        input.sizeBytes ?? null,
-      ]
-    );
-    const image = result.rows[0] ? this.mapImage(result.rows[0]) : null;
-    if (image?.isPrimary) await this.syncLegacyPrimaryImage(companyId, productId, image.url, image.altText);
-    return image;
+    return this.inScope(companyId, async (db) => {
+      if (!await lockProduct(db, companyId, productId)) return null;
+      return this.updateImageUsing(db, companyId, productId, imageId, input);
+    });
   }
 
   async deleteImage(companyId: number, productId: number, imageId: number): Promise<boolean> {
-    const result = await this.pool.query(
-      'DELETE FROM product_images WHERE company_id = $1 AND product_id = $2 AND id = $3 RETURNING is_primary',
-      [companyId, productId, imageId]
-    );
-    if (!result.rows[0]) return false;
-    if (result.rows[0].is_primary) {
-      const next = await this.pool.query(
-        `UPDATE product_images
-         SET is_primary = true, updated_at = NOW()
-         WHERE id = (
-           SELECT id FROM product_images
-           WHERE company_id = $1 AND product_id = $2
-           ORDER BY sort_order ASC, id ASC
-           LIMIT 1
-         )
-         RETURNING *`,
-        [companyId, productId]
+    return this.inScope(companyId, async (db) => {
+      const product = await lockProduct(db, companyId, productId);
+      if (!product) return false;
+      const removed = await db.query(
+        'DELETE FROM product_images WHERE company_id = $1 AND product_id = $2 AND id = $3 RETURNING id',
+        [companyId, productId, imageId],
       );
-      if (next.rows[0]) {
-        const image = this.mapImage(next.rows[0]);
-        await this.syncLegacyPrimaryImage(companyId, productId, image.url, image.altText);
-      } else {
-        await this.syncLegacyPrimaryImage(companyId, productId, null, null);
+      if (!removed.rows.length) return false;
+      const primary = await this.syncPrimaryImage(db, companyId, productId);
+      if (product.status === 'active' && !primary) {
+        throw new InventoryValidationError('La oferta activa necesita conservar una imagen principal');
       }
-    }
-    return true;
+      return true;
+    });
   }
 
   async adjustStock(companyId: number, productId: number, input: StockAdjustmentInput): Promise<{ product: Product; movement: StockMovement } | null> {
-    const result = await this.pool.query(
-        `WITH updated AS (
-         UPDATE products
-         SET stock_available = stock_available + $3,
-             updated_at = NOW()
-         WHERE company_id = $1 AND id = $2 AND stock_available + $3 >= 0
-         RETURNING *
-       ),
-       movement AS (
-         INSERT INTO stock_movements (
-           company_id, product_id, actor_user_id, movement_type, quantity,
-           stock_available_after, stock_reserved_after, notes, commercial_item_id, delta_available, delta_reserved
-         )
-         SELECT company_id, id, $4, 'adjustment', $3, stock_available, stock_reserved, $5, id, $3, 0
-         FROM updated
-         RETURNING *
-       )
-       SELECT to_jsonb(updated.*) AS product, to_jsonb(movement.*) AS movement
-       FROM updated, movement`,
-      [companyId, productId, input.delta, input.actorUserId || null, input.notes || null]
-    );
-    const row = result.rows[0];
-    if (!row) return null;
-    return {
-      product: this.mapProduct(row.product),
-      movement: this.mapMovement(row.movement),
-    };
+    return this.inScope(companyId, async (db) => {
+      if (!await lockProduct(db, companyId, productId)) return null;
+      const { rows: [updated] } = await db.query(`
+        UPDATE products SET stock_available = stock_available + $3::integer, updated_at = NOW()
+        WHERE company_id = $1 AND id = $2
+          AND stock_available::bigint + $3::integer BETWEEN 0 AND 2147483647
+        RETURNING *
+      `, [companyId, productId, input.delta]);
+      if (!updated) throw new InventoryValidationError('Disponibilidad insuficiente o fuera de rango');
+      const movement = await this.recordAdjustment(db, updated, input);
+      const product = (await this.getUsing(db, companyId, productId)) ?? this.mapProduct(updated);
+      return { product, movement };
+    });
   }
 
   async setCatalogAssignments(companyId: number, productId: number, assignments: CatalogAssignmentInput[] | number[]): Promise<void> {
-    const normalized = this.normalizeAssignmentList(assignments);
-    await this.pool.query(
-      'DELETE FROM catalog_items WHERE company_id = $1 AND commercial_item_id = $2',
-      [companyId, productId]
-    );
-    for (const assignment of normalized) {
-      await this.pool.query(
-        `INSERT INTO catalog_items (company_id, catalog_id, commercial_item_id, section_id, sort_order)
-         SELECT $1, c.id, $2, cs.id, 0
-         FROM catalogs c
-         LEFT JOIN catalog_sections cs
-           ON cs.company_id = c.company_id
-          AND cs.catalog_id = c.id
-          AND cs.id = $4
-          AND cs.status <> 'archived'
-         WHERE c.company_id = $1
-           AND c.id = $3
-           AND c.status <> 'archived'
-           AND ($4::bigint IS NULL OR cs.id IS NOT NULL)
-         ON CONFLICT (catalog_id, commercial_item_id)
-         DO UPDATE SET section_id = EXCLUDED.section_id`,
-        [companyId, productId, assignment.catalogId, assignment.sectionId || null]
-      );
+    return this.inScope(companyId, async (db) => {
+      if (!await lockProduct(db, companyId, productId)) {
+        throw new InventoryReferenceNotFound('Item de catalogo no encontrado');
+      }
+      await this.writeAssignments(db, companyId, productId, this.normalizeAssignmentList(assignments));
+    });
+  }
+
+  private async writeAssignments(
+    db: Queryable, companyId: number, productId: number, assignments: CatalogAssignmentInput[],
+  ): Promise<void> {
+    const ordered = [...assignments].sort((first, second) => first.catalogId - second.catalogId);
+    for (const { catalogId, sectionId } of ordered) {
+      await requireAssignableCatalog(db, companyId, catalogId, sectionId ?? null);
     }
+    await db.query(
+      'DELETE FROM catalog_items WHERE company_id = $1 AND commercial_item_id = $2',
+      [companyId, productId],
+    );
+    for (const { catalogId, sectionId } of ordered) {
+      await db.query(`
+        INSERT INTO catalog_items (company_id, catalog_id, commercial_item_id, section_id, sort_order)
+        VALUES ($1, $2, $3, $4, 0)
+      `, [companyId, catalogId, productId, sectionId ?? null]);
+    }
+  }
+
+  private async recordAdjustment(db: Queryable, product: Row, input: StockAdjustmentInput): Promise<StockMovement> {
+    const { rows: [movement] } = await db.query(`
+      INSERT INTO stock_movements (company_id, product_id, actor_user_id, movement_type, quantity,
+        stock_available_after, stock_reserved_after, notes, commercial_item_id, delta_available, delta_reserved)
+      VALUES ($1, $2, $3, 'adjustment', $4, $5, $6, $7, $2, $4, 0)
+      RETURNING *
+    `, [product.company_id, product.id, input.actorUserId ?? null, input.delta,
+      product.stock_available, product.stock_reserved, input.notes ?? null]);
+    return this.mapMovement(movement);
+  }
+
+  private requirePublicationImage(product: Product): void {
+    if (product.status === 'active' && !product.primaryImage?.url) {
+      throw new InventoryValidationError('La oferta necesita una imagen principal antes de publicarse');
+    }
+  }
+
+  private async insertImage(
+    db: Queryable, companyId: number, productId: number, input: ProductImageInput, isPrimary: boolean, sortOrder: number,
+  ): Promise<Row> {
+    const { rows: [image] } = await db.query(`
+      INSERT INTO product_images (company_id, product_id, image_url, image_alt_text, sort_order,
+        is_primary, mime_type, size_bytes)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *
+    `, [companyId, productId, input.imageUrl, input.imageAltText || null,
+      input.sortOrder ?? sortOrder, isPrimary, input.mimeType || null, input.sizeBytes ?? null]);
+    return image;
+  }
+
+  private async clearPrimaryImage(db: Queryable, companyId: number, productId: number): Promise<void> {
+    await db.query(`
+      UPDATE product_images SET is_primary = false, updated_at = NOW()
+      WHERE company_id = $1 AND product_id = $2 AND is_primary
+    `, [companyId, productId]);
+  }
+
+  private async addImageUsing(db: Queryable, companyId: number, productId: number, input: ProductImageInput): Promise<ProductImage> {
+    const { rows: [existing] } = await db.query(`
+      SELECT COUNT(*)::int AS count, bool_or(is_primary) AS has_primary
+      FROM product_images WHERE company_id = $1 AND product_id = $2
+    `, [companyId, productId]);
+    if (existing.count >= 8) throw new InventoryValidationError('El item permite hasta 8 imagenes');
+    if (input.isPrimary && existing.has_primary) await this.clearPrimaryImage(db, companyId, productId);
+    const image = await this.insertImage(db, companyId, productId, input, input.isPrimary === true || !existing.has_primary, existing.count);
+    await this.syncPrimaryImage(db, companyId, productId);
+    return this.mapImage(image);
+  }
+
+  private async updateImageUsing(
+    db: Queryable, companyId: number, productId: number, imageId: number, input: Partial<ProductImageInput>,
+  ): Promise<ProductImage | null> {
+    const { rows: [current] } = await db.query(
+      'SELECT is_primary FROM product_images WHERE company_id = $1 AND product_id = $2 AND id = $3',
+      [companyId, productId, imageId],
+    );
+    if (!current) return null;
+    if (input.isPrimary === true && !current.is_primary) await this.clearPrimaryImage(db, companyId, productId);
+    const { rows: [updated] } = await db.query(`
+      UPDATE product_images SET image_url = COALESCE($4, image_url),
+        image_alt_text = COALESCE($5, image_alt_text), sort_order = COALESCE($6, sort_order),
+        is_primary = COALESCE($7, is_primary), mime_type = COALESCE($8, mime_type),
+        size_bytes = COALESCE($9, size_bytes), updated_at = NOW()
+      WHERE company_id = $1 AND product_id = $2 AND id = $3 RETURNING *
+    `, [companyId, productId, imageId, input.imageUrl || null, input.imageAltText ?? null,
+      input.sortOrder ?? null, input.isPrimary ?? null, input.mimeType ?? null, input.sizeBytes ?? null]);
+    const primary = await this.syncPrimaryImage(db, companyId, productId, input.isPrimary === false ? imageId : null);
+    return primary && Number(primary.id) === imageId ? this.mapImage(primary) : this.mapImage(updated);
+  }
+
+  private async replaceImages(
+    db: Queryable, companyId: number, productId: number, images: ProductImageInput[],
+    legacyImageUrl?: string | null, legacyAltText?: string | null,
+  ): Promise<void> {
+    await db.query('DELETE FROM product_images WHERE company_id = $1 AND product_id = $2', [companyId, productId]);
+    const gallery = images.length ? images.slice(0, 8)
+      : legacyImageUrl ? [{ imageUrl: legacyImageUrl, imageAltText: legacyAltText }] : [];
+    // Older editors submit the first image as primary as well as the explicit selection.
+    let primaryIndex = 0;
+    gallery.forEach((image, index) => {
+      if ('isPrimary' in image && image.isPrimary === true) primaryIndex = index;
+    });
+    for (const [index, image] of gallery.entries()) {
+      await this.insertImage(db, companyId, productId, image, index === primaryIndex, index);
+    }
+    await this.syncPrimaryImage(db, companyId, productId);
+  }
+
+  private async ensurePrimaryImage(
+    db: Queryable, companyId: number, productId: number, imageUrl: string, imageAltText: string | null,
+  ): Promise<void> {
+    const { rows: [existing] } = await db.query(`
+      SELECT id FROM product_images WHERE company_id = $1 AND product_id = $2 AND image_url = $3
+      ORDER BY is_primary DESC, sort_order, id LIMIT 1
+    `, [companyId, productId, imageUrl]);
+    if (existing) {
+      await this.updateImageUsing(db, companyId, productId, Number(existing.id), { isPrimary: true, imageAltText });
+    } else {
+      await this.addImageUsing(db, companyId, productId, { imageUrl, imageAltText, isPrimary: true });
+    }
+  }
+
+  private async syncPrimaryImage(db: Queryable, companyId: number, productId: number, demotedId: number | null = null) {
+    const { rows: [selected] } = await db.query(`
+      SELECT * FROM product_images WHERE company_id = $1 AND product_id = $2
+      ORDER BY is_primary DESC, (id = $3::bigint), sort_order, id LIMIT 1
+    `, [companyId, productId, demotedId]);
+    let primary = selected;
+    if (selected && !selected.is_primary) {
+      const { rows } = await db.query(`
+        UPDATE product_images SET is_primary = true, updated_at = NOW()
+        WHERE company_id = $1 AND product_id = $2 AND id = $3 RETURNING *
+      `, [companyId, productId, selected.id]);
+      primary = rows[0];
+    }
+    await db.query(`
+      UPDATE products SET image_url = $3, image_alt_text = $4, updated_at = NOW()
+      WHERE company_id = $1 AND id = $2
+    `, [companyId, productId, primary?.image_url ?? null, primary?.image_alt_text ?? null]);
+    return primary;
   }
 
   private baseProductSelect(): string {
@@ -457,7 +537,8 @@ export class ProductRepositoryPg {
        AND c.company_id = p.company_id
       LEFT JOIN catalog_sections cs
         ON cs.id = ci.section_id
-       AND cs.company_id = p.company_id`;
+       AND cs.company_id = p.company_id
+       AND cs.catalog_id = c.id`;
   }
 
   private mapProduct(row: Row): Product {
@@ -586,47 +667,6 @@ export class ProductRepositoryPg {
     if (input.stockAvailable !== undefined) return Number(input.stockAvailable);
     if (input.availabilityType === 'capacity' && input.capacity !== undefined && input.capacity !== null) return Number(input.capacity);
     return 0;
-  }
-
-  private async replaceImagesFromInput(companyId: number, productId: number, images?: ProductImageInput[], legacyImageUrl?: string | null, legacyAltText?: string | null): Promise<void> {
-    if (!images || images.length === 0) {
-      await this.ensurePrimaryImage(companyId, productId, legacyImageUrl || null, legacyAltText || null);
-      return;
-    }
-    await this.pool.query('DELETE FROM product_images WHERE company_id = $1 AND product_id = $2', [companyId, productId]);
-    const limited = images.slice(0, 8);
-    const hasPrimary = limited.some((image) => image.isPrimary === true);
-    for (let index = 0; index < limited.length; index += 1) {
-      await this.addImage(companyId, productId, {
-        ...limited[index],
-        sortOrder: Number.isInteger(Number(limited[index].sortOrder)) ? Number(limited[index].sortOrder) : index,
-        isPrimary: hasPrimary ? limited[index].isPrimary === true : index === 0,
-      });
-    }
-  }
-
-  private async ensurePrimaryImage(companyId: number, productId: number, imageUrl: string | null, imageAltText: string | null): Promise<void> {
-    if (!imageUrl) return;
-    const existing = await this.pool.query(
-      'SELECT id FROM product_images WHERE company_id = $1 AND product_id = $2 AND image_url = $3 LIMIT 1',
-      [companyId, productId, imageUrl]
-    );
-    if (existing.rows[0]) {
-      await this.updateImage(companyId, productId, Number(existing.rows[0].id), { isPrimary: true, imageAltText });
-      return;
-    }
-    await this.addImage(companyId, productId, {
-      imageUrl,
-      imageAltText,
-      isPrimary: true,
-    });
-  }
-
-  private async syncLegacyPrimaryImage(companyId: number, productId: number, imageUrl: string | null, imageAltText: string | null): Promise<void> {
-    await this.pool.query(
-      'UPDATE products SET image_url = $3, image_alt_text = $4, updated_at = NOW() WHERE company_id = $1 AND id = $2',
-      [companyId, productId, imageUrl, imageAltText]
-    );
   }
 
   private mapImage(row: Row): ProductImage {

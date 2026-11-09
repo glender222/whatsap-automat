@@ -64,8 +64,10 @@ export class CatalogService {
   }
 
   private assertCatalogInput(input: Partial<CatalogInput>, requireName: boolean): void {
-    if (requireName && !String(input.name || '').trim()) throw this.validationError('Nombre de catalogo requerido');
-    if (input.name !== undefined && !String(input.name).trim()) throw this.validationError('Nombre de catalogo requerido');
+    if ((requireName || input.name !== undefined) &&
+        (typeof input.name !== 'string' || !input.name.trim() || input.name.trim().length > 120)) {
+      throw this.validationError('Nombre de catalogo invalido');
+    }
     if (input.status && !CATALOG_STATUSES.includes(input.status)) throw this.validationError('Estado de catalogo invalido');
     if (input.sortOrder !== undefined && (!Number.isInteger(Number(input.sortOrder)) || Number(input.sortOrder) < 0)) {
       throw this.validationError('Orden de catalogo invalido');
@@ -73,8 +75,10 @@ export class CatalogService {
   }
 
   private assertSectionInput(input: Partial<CatalogSectionInput>, requireName: boolean): void {
-    if (requireName && !String(input.name || '').trim()) throw this.validationError('Nombre de seccion requerido');
-    if (input.name !== undefined && !String(input.name).trim()) throw this.validationError('Nombre de seccion requerido');
+    if ((requireName || input.name !== undefined) &&
+        (typeof input.name !== 'string' || !input.name.trim() || input.name.trim().length > 140)) {
+      throw this.validationError('Nombre de seccion invalido');
+    }
     if (input.status && !CATALOG_STATUSES.includes(input.status)) throw this.validationError('Estado de seccion invalido');
     if (input.sortOrder !== undefined && (!Number.isInteger(Number(input.sortOrder)) || Number(input.sortOrder) < 0)) {
       throw this.validationError('Orden de seccion invalido');
@@ -103,11 +107,11 @@ export class CatalogService {
   }
 
   private assertCatalogId(catalogId: number): void {
-    if (!Number.isInteger(catalogId) || catalogId <= 0) throw this.validationError('Catalogo invalido');
+    if (!Number.isSafeInteger(catalogId) || catalogId <= 0) throw this.validationError('Catalogo invalido');
   }
 
   private assertItemId(commercialItemId: number): void {
-    if (!Number.isInteger(commercialItemId) || commercialItemId <= 0) throw this.validationError('Item de catalogo invalido');
+    if (!Number.isSafeInteger(commercialItemId) || commercialItemId <= 0) throw this.validationError('Item de catalogo invalido');
   }
 
   private validationError(message: string): Error & { statusCode?: number; code?: string } {

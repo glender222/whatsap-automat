@@ -1,11 +1,12 @@
 import { NextFunction, Response, Router } from 'express';
+import type { Pool } from 'pg';
 import pool from '../config/database';
-import { JwtRequest, resolveWhatsappCompanyId } from '../middleware/jwtAuth';
+import { JwtRequest, resolveWhatsappCompanyId, toPositiveInt } from '../middleware/jwtAuth';
 import { CatalogRepositoryPg, CatalogService } from '../modules/inventory';
 
 function parsePositiveInt(value: unknown): number | null {
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+  const parsed = toPositiveInt(value);
+  return Number.isSafeInteger(parsed) ? parsed : null;
 }
 
 function requireAdmin(req: JwtRequest, res: Response): boolean {
@@ -18,9 +19,9 @@ function requireAdmin(req: JwtRequest, res: Response): boolean {
   return false;
 }
 
-export default function createCatalogRoutes(): Router {
+export default function createCatalogRoutes(database: Pool = pool): Router {
   const router = Router();
-  const service = new CatalogService(new CatalogRepositoryPg(pool));
+  const service = new CatalogService(new CatalogRepositoryPg(database));
 
   router.get('/', async (req: JwtRequest, res: Response, next: NextFunction) => {
     try {
@@ -72,8 +73,9 @@ export default function createCatalogRoutes(): Router {
     try {
       const id = parsePositiveInt(req.params.id);
       const commercialItemId = parsePositiveInt(req.body?.commercialItemId);
-      const sectionId = req.body?.sectionId === null || req.body?.sectionId === undefined ? null : parsePositiveInt(req.body?.sectionId);
-      if (!id || !commercialItemId) return res.status(400).json({ success: false, message: 'Catalogo o item invalido' });
+      const requestedSection = req.body?.sectionId;
+      const sectionId = requestedSection == null ? null : parsePositiveInt(requestedSection);
+      if (!id || !commercialItemId || (requestedSection != null && sectionId === null)) return res.status(400).json({ success: false, message: 'Catalogo o item invalido' });
       const added = await service.addItem(resolveWhatsappCompanyId(req), id, commercialItemId, sectionId);
       return res.status(added ? 201 : 200).json({ success: true, data: { added } });
     } catch (error) {
