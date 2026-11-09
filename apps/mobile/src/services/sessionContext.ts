@@ -5,6 +5,7 @@ import type { MobileApprovalCommand, MobileTextCommand } from './apiClient';
 export const SessionContext = createContext<{
   session: AuthSession;
   signOut: () => void;
+  isSessionActive: () => boolean;
   pendingReplies: ReadonlyMap<string, MobileTextCommand>;
   rememberReply: (chatId: string, command: MobileTextCommand) => void;
   forgetReply: (chatId: string, command: MobileTextCommand) => void;

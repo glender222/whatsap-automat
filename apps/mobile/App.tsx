@@ -47,25 +47,26 @@ export default function App() {
 
   useEffect(restoreSession, [restoreSession]);
 
-  const clearSession = useCallback(async () => {
+  const clearSession = useCallback(async (revoke = false) => {
+    let previous = currentSession.current;
     currentSession.current = null;
     setSession(undefined);
     setStorageError(null);
     setPendingReplies(new Map());
     approvalAttempts.current.clear();
     try {
-      await authStorage.clearAuthSession();
+      previous = (await authStorage.clearAuthSession()) ?? previous;
       updateSession(null);
     } catch {
       setStorageError('clear');
+    } finally {
+      if (revoke && previous) void apiClient.signOut(previous).catch(() => undefined);
     }
   }, []);
 
-  useEffect(() => handleUnauthorized((token) => {
-    if (currentSession.current?.accessToken === token) {
-      setSignInNotice('Tu sesión terminó. Inicia sesión para continuar.');
-      void clearSession();
-    }
+  useEffect(() => handleUnauthorized(() => {
+    setSignInNotice('Tu sesión terminó. Inicia sesión para continuar.');
+    void clearSession();
   }), [clearSession]);
 
   async function signIn(value: AuthSession) {
@@ -74,10 +75,8 @@ export default function App() {
   }
 
   function signOut() {
-    const previous = currentSession.current;
     setSignInNotice('');
-    void clearSession();
-    if (previous) void apiClient.signOut(previous).catch(() => undefined);
+    void clearSession(true);
   }
 
   const rememberReply = useCallback((chatId: string, command: MobileTextCommand) => {
@@ -93,6 +92,8 @@ export default function App() {
       return next;
     });
   }, []);
+
+  const isSessionActive = useCallback(() => currentSession.current === session, [session]);
 
   let screen = (
     <View style={styles.center}>
@@ -112,7 +113,7 @@ export default function App() {
     screen = <SignInScreen onSignIn={signIn} notice={signInNotice} />;
   } else if (session) {
     screen = (
-      <SessionContext.Provider value={{ session, signOut, pendingReplies, rememberReply, forgetReply, approvalAttempts: approvalAttempts.current }}>
+      <SessionContext.Provider value={{ session, signOut, isSessionActive, pendingReplies, rememberReply, forgetReply, approvalAttempts: approvalAttempts.current }}>
         <NavigationContainer theme={navigationTheme}>
           <Stack.Navigator screenOptions={{ headerShown: false }}>
             <Stack.Screen name="Inbox" component={InboxScreen} />

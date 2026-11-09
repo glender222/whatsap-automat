@@ -224,21 +224,24 @@ test('sends CAS version to the real takeover endpoint and reads the version retu
   assert.deepEqual(await apiClient.takeoverConversation(8, 3), result);
 });
 
-test('reports CAS conflicts and notifies the active session only on 401', async () => {
+test('preserves CAS conflicts and does not invalidate the session for an unclassified 401', async () => {
   await authStorage.saveAuthSession(session);
-  const invalidatedTokens: string[] = [];
-  const stop = handleUnauthorized((token) => invalidatedTokens.push(token));
+  let invalidated = false;
+  const stop = handleUnauthorized(() => { invalidated = true; });
   try {
     const metadata = { currentVersion: 4, ownerType: 'human', ownerId: '71' };
     globalThis.fetch = async () => json(409, { status: 409, detail: 'Versión vencida', metadata });
     await assert.rejects(apiClient.takeoverConversation('8', 3), (error: unknown) =>
       error instanceof MobileApiError && error.status === 409 && error.message === 'Versión vencida'
       && error.metadata?.currentVersion === 4 && error.metadata?.ownerId === '71');
-    assert.deepEqual(invalidatedTokens, []);
+    assert.equal(invalidated, false);
 
-    globalThis.fetch = async () => json(401, { success: false, message: 'Sesión vencida' });
-    await assert.rejects(apiClient.listConversations(), { status: 401 });
-    assert.deepEqual(invalidatedTokens, [session.accessToken]);
+    globalThis.fetch = async (input) => {
+      assert.equal(input, `${session.apiUrl}/api/v1/conversations/8/messages`);
+      return json(401, { success: false, error: 'El token de Meta no es valido o expiro.' });
+    };
+    await assert.rejects(apiClient.sendMessage({ conversationId: 8, expectedVersion: 3, key: 'send-1', text: 'Hola' }), { status: 401 });
+    assert.equal(invalidated, false);
   } finally {
     stop();
   }

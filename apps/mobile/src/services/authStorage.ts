@@ -6,6 +6,11 @@ export interface AuthSession {
   apiUrl: string;
 }
 
+export interface AuthSessionSnapshot {
+  revision: number;
+  session: AuthSession;
+}
+
 export interface StorageBackend {
   getItem(key: string): Promise<string | null>;
   setItem(key: string, value: string): Promise<void>;
@@ -60,6 +65,9 @@ const LEGACY_KEYS = [
 export class AuthStorageService {
   private static readonly instance = new AuthStorageService();
   private backend: StorageBackend = createStorageBackend();
+  private revision = 0;
+  private readable = true;
+  private pending: Promise<void> = Promise.resolve();
 
   private constructor() {}
 
@@ -68,14 +76,53 @@ export class AuthStorageService {
   }
 
   setBackendForTest(backend: StorageBackend): void {
+    this.revision++;
+    this.readable = true;
     this.backend = backend;
   }
 
-  async saveAuthSession(session: AuthSession): Promise<void> {
-    await this.backend.setItem(SESSION_KEY, JSON.stringify(session));
+  private serialize<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.pending.then(operation);
+    this.pending = result.then(() => undefined, () => undefined);
+    return result;
+  }
+
+  isCurrent(revision: number): boolean {
+    return this.revision === revision;
+  }
+
+  saveAuthSession(session: AuthSession): Promise<void> {
+    const revision = ++this.revision;
+    this.readable = false;
+    return this.serialize(async () => {
+      await this.backend.setItem(SESSION_KEY, JSON.stringify(session));
+      if (this.isCurrent(revision)) this.readable = true;
+    });
   }
 
   async getAuthSession(): Promise<AuthSession | null> {
+    return (await this.getSnapshot())?.session ?? null;
+  }
+
+  getSnapshot(): Promise<AuthSessionSnapshot | null> {
+    const revision = this.revision;
+    return this.serialize(async () => {
+      if (!this.readable || !this.isCurrent(revision)) return null;
+      const session = await this.readSession();
+      return session && this.isCurrent(revision) ? { revision, session } : null;
+    });
+  }
+
+  rotateAccessToken(previous: AuthSessionSnapshot, accessToken: string): Promise<AuthSessionSnapshot | null> {
+    return this.serialize(async () => {
+      if (!this.isCurrent(previous.revision)) return null;
+      const session = { ...previous.session, accessToken };
+      await this.backend.setItem(SESSION_KEY, JSON.stringify(session));
+      return this.isCurrent(previous.revision) ? { revision: previous.revision, session } : null;
+    });
+  }
+
+  private async readSession(purgeMalformed = true): Promise<AuthSession | null> {
     const raw = await this.backend.getItem(SESSION_KEY);
     if (!raw) return null;
 
@@ -91,11 +138,21 @@ export class AuthStorageService {
     } catch {
       // Treat stale or corrupted secure storage as a signed-out session.
     }
-    await this.clearAuthSession();
+    if (purgeMalformed) await this.deleteSession();
     return null;
   }
 
-  async clearAuthSession(): Promise<void> {
+  clearAuthSession(): Promise<AuthSession | null> {
+    this.revision++;
+    this.readable = false;
+    return this.serialize(async () => {
+      const previous = await this.readSession(false).catch(() => null);
+      await this.deleteSession();
+      return previous;
+    });
+  }
+
+  private async deleteSession(): Promise<void> {
     await this.backend.deleteItem(SESSION_KEY);
     await Promise.allSettled(LEGACY_KEYS.map((key) => this.backend.deleteItem(key)));
   }

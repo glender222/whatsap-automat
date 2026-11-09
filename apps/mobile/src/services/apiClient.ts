@@ -1,4 +1,4 @@
-import { authStorage, type AuthSession } from './authStorage';
+import { authStorage, type AuthSession, type AuthSessionSnapshot } from './authStorage';
 
 interface ApiEnvelope<T> {
   success: boolean;
@@ -102,6 +102,7 @@ export class MobileApiError extends Error {
     public readonly status: number,
     message: string,
     public readonly metadata?: { currentVersion?: unknown; ownerId?: unknown; ownerType?: unknown; reasonCode?: unknown },
+    public readonly accessTokenExpired = false,
   ) {
     super(message);
     this.name = 'MobileApiError';
@@ -125,9 +126,9 @@ export function normalizeServerUrl(input: string, allowLocalHttp = false): strin
   return `${protocol}://${host}${port ? `:${port}` : ''}`;
 }
 
-let onUnauthorized: ((accessToken: string) => void) | undefined;
+let onUnauthorized: (() => void) | undefined;
 
-export function handleUnauthorized(callback: (accessToken: string) => void): () => void {
+export function handleUnauthorized(callback: () => void): () => void {
   onUnauthorized = callback;
   return () => { if (onUnauthorized === callback) onUnauthorized = undefined; };
 }
@@ -146,8 +147,6 @@ async function request<T>(
   const timeout = setTimeout(() => controller.abort(), 15_000);
   try {
     const response = await fetch(`${origin}/api${path}`, { ...init, headers, signal: controller.signal });
-    if (response.status === 401 && accessToken) onUnauthorized?.(accessToken);
-
     const body = await response.json().catch(() => null);
     if (!response.ok || !body || (format !== 'canonical' && body.success !== true)) {
       const message = body?.userMessage ?? body?.detail ?? body?.message ?? body?.error;
@@ -155,6 +154,8 @@ async function request<T>(
         response.status,
         typeof message === 'string' ? message : `El servidor no pudo completar la solicitud (${response.status}).`,
         body?.metadata && typeof body.metadata === 'object' ? body.metadata : undefined,
+        response.status === 401 && (body?.code === 'ACCESS_TOKEN_EXPIRED' ||
+          (body?.success === false && body?.error === 'Token invalido o expirado' && body?.details === 'jwt expired')),
       );
     }
     return format === 'envelope' ? (body as ApiEnvelope<T>).data : body as T;
@@ -163,11 +164,86 @@ async function request<T>(
   }
 }
 
+function sessionEnded() {
+  return new MobileApiError(401, 'Tu sesión terminó. Inicia sesión nuevamente.');
+}
+
+async function requestAccessToken(origin: string, refreshToken: string): Promise<string> {
+  const data = await request<{ accessToken?: unknown }>(origin, '/auth/refresh', {
+    method: 'POST', body: JSON.stringify({ refreshToken }),
+  });
+  if (typeof data?.accessToken !== 'string' || !data.accessToken) {
+    throw new MobileApiError(502, 'El servidor no devolvió una renovación válida.');
+  }
+  return data.accessToken;
+}
+
+function invalidate(snapshot: AuthSessionSnapshot) {
+  if (authStorage.isCurrent(snapshot.revision)) onUnauthorized?.();
+}
+
+async function refreshSession(original: AuthSessionSnapshot, origin: string): Promise<AuthSessionSnapshot> {
+  const { session } = original;
+  if (typeof session.refreshToken !== 'string' || !session.refreshToken) {
+    invalidate(original);
+    throw sessionEnded();
+  }
+
+  let accessToken: string;
+  try {
+    accessToken = await requestAccessToken(origin, session.refreshToken);
+  } catch (error) {
+    if (error instanceof MobileApiError && error.status === 401) invalidate(original);
+    throw error;
+  }
+  if (!authStorage.isCurrent(original.revision)) throw sessionEnded();
+
+  // Refresh returns only a token. Verify its account and tenant before replaying an operation.
+  const user = await request<{ id?: unknown; companyId?: unknown }>(origin, '/auth/me', undefined, accessToken);
+  if (String(user?.id) !== session.userId || String(user?.companyId) !== session.tenantId) {
+    invalidate(original);
+    throw sessionEnded();
+  }
+  const refreshed = await authStorage.rotateAccessToken(original, accessToken);
+  if (!refreshed) throw sessionEnded();
+  return refreshed;
+}
+
+let pendingRefresh: { revision: number; promise: Promise<AuthSessionSnapshot> } | undefined;
+
+async function refreshAfterExpiry(original: AuthSessionSnapshot, origin: string): Promise<AuthSessionSnapshot> {
+  const latest = await authStorage.getSnapshot();
+  if (!latest || latest.revision !== original.revision || !authStorage.isCurrent(original.revision)) throw sessionEnded();
+  if (latest.session.accessToken !== original.session.accessToken) return latest;
+  if (pendingRefresh?.revision === original.revision) return pendingRefresh.promise;
+
+  const promise = refreshSession(original, origin).finally(() => {
+    if (pendingRefresh?.promise === promise) pendingRefresh = undefined;
+  });
+  pendingRefresh = { revision: original.revision, promise };
+  return promise;
+}
+
 async function authenticated<T>(path: string, init?: RequestInit, format?: ResponseFormat): Promise<T> {
-  const session = await authStorage.getAuthSession();
-  if (!session) throw new MobileApiError(401, 'Tu sesión terminó. Inicia sesión nuevamente.');
-  const origin = normalizeServerUrl(session.apiUrl, typeof __DEV__ !== 'undefined' && __DEV__);
-  return request<T>(origin, path, init, session.accessToken, format);
+  const original = await authStorage.getSnapshot();
+  if (!original || !authStorage.isCurrent(original.revision)) throw sessionEnded();
+  const origin = normalizeServerUrl(original.session.apiUrl, typeof __DEV__ !== 'undefined' && __DEV__);
+  const execute = async (snapshot: AuthSessionSnapshot) => {
+    if (!authStorage.isCurrent(snapshot.revision)) throw sessionEnded();
+    try {
+      return await request<T>(origin, path, init, snapshot.session.accessToken, format);
+    } finally {
+      if (!authStorage.isCurrent(snapshot.revision)) throw sessionEnded();
+    }
+  };
+
+  try {
+    return await execute(original);
+  } catch (error) {
+    if (!(error instanceof MobileApiError && error.accessTokenExpired)) throw error;
+    const refreshed = await refreshAfterExpiry(original, origin);
+    return execute(refreshed);
+  }
 }
 
 function isMobileApproval(value: unknown): value is MobileApproval {
@@ -233,12 +309,19 @@ export const apiClient = {
   },
 
   async signOut(session: AuthSession): Promise<void> {
-    if (!session.refreshToken) return;
+    if (typeof session.refreshToken !== 'string' || !session.refreshToken) return;
     const origin = normalizeServerUrl(session.apiUrl, typeof __DEV__ !== 'undefined' && __DEV__);
-    await request(origin, '/auth/logout', {
+    const init = {
       method: 'POST',
       body: JSON.stringify({ refreshToken: session.refreshToken }),
-    }, session.accessToken);
+    };
+    try {
+      await request(origin, '/auth/logout', init, session.accessToken);
+    } catch (error) {
+      if (!(error instanceof MobileApiError && error.accessTokenExpired)) throw error;
+      const accessToken = await requestAccessToken(origin, session.refreshToken);
+      await request(origin, '/auth/logout', init, accessToken);
+    }
   },
 
   listConversations(offset = 0): Promise<MobileConversation[]> {

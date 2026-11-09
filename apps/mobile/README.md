@@ -25,6 +25,8 @@ npx expo export --platform all
 
 Las credenciales nativas se guardan en Expo SecureStore. La vista web conserva la sesión en memoria hasta que se recarga la página. El historial se actualiza al volver a la app y cada 15 segundos mientras la pantalla está activa.
 
+Cuando caduca el token de acceso, el cliente agrupa las renovaciones concurrentes y verifica la cuenta y el espacio de trabajo antes de repetir cada operación una sola vez. Si la renovación falla de forma temporal, la sesión sigue abierta. Cuando el servidor revoca la renovación o el usuario cierra sesión, se requiere iniciar sesión de nuevo.
+
 Para responder, el operador toma el control de la conversación y el servidor comprueba la versión y la ventana de atención. Si la entrega queda sin confirmar, el cliente pausa los envíos nuevos y permite reintentar la misma solicitud con su clave original mientras la sesión permanece abierta. El historial del servidor distingue los mensajes aceptados, fallidos y sin confirmar.
 
 La bandeja muestra **Aprobaciones** cuando el servidor concede `approvals.review`. Una decisión ordinaria requiere confirmación y usa la versión de la solicitud y una clave que se conserva durante la sesión para reintentar la misma decisión. Las solicitudes de riesgo alto, financiero, irreversible o sin verificar permanecen visibles con la decisión bloqueada hasta contar con los controles de verificación correspondientes.

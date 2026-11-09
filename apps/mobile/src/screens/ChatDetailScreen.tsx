@@ -55,7 +55,7 @@ const acceptedNotice = 'WhatsApp aceptó el mensaje.';
 const failedNotice = 'El servidor confirmó que el mensaje no se envió.';
 
 export function ChatDetailScreen({ route, navigation }: Props) {
-  const { session, pendingReplies, rememberReply, forgetReply } = useSession();
+  const { session, isSessionActive, pendingReplies, rememberReply, forgetReply } = useSession();
   const [chat, setChat] = useState(route.params.chat);
   const [messages, setMessages] = useState<MobileMessage[]>([]);
   const [draft, setDraft] = useState('');
@@ -99,6 +99,7 @@ export function ChatDetailScreen({ route, navigation }: Props) {
           : apiClient.listMessages(chatId).then((messages) => ({ messages, nextCursor: null })),
         apiClient.getChatSessionStatus(chatId),
       ]);
+      if (!isSessionActive()) return;
       const active = sessionResult.status === 'fulfilled' && typeof sessionResult.value.hasActiveSession === 'boolean'
         ? sessionResult.value.hasActiveSession : null;
       if (sessionResult.status === 'fulfilled') updateOwnership(sessionResult.value);
@@ -117,6 +118,7 @@ export function ChatDetailScreen({ route, navigation }: Props) {
       let fresh = page;
       if (conversationId != null && pendingKey && !page.some((message) => message.clientRequestId === pendingKey)) {
         const exact = await apiClient.listConversationMessages(conversationId, undefined, pendingKey).catch(() => null);
+        if (!isSessionActive()) return;
         const match = exact?.messages.find((message) => message.clientRequestId === pendingKey && message.fromMe);
         if (match) fresh = [...page, match];
       }
@@ -139,7 +141,7 @@ export function ChatDetailScreen({ route, navigation }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [chatId, conversationId, pendingKey, updateOwnership]);
+  }, [chatId, conversationId, isSessionActive, pendingKey, updateOwnership]);
   const refresh = useRefreshOnFocus(load);
 
   useEffect(() => {
