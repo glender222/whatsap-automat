@@ -1,5 +1,6 @@
 import { NextFunction, Response } from 'express';
 import pool from '../config/database';
+import { withTenantTransaction } from '../db/TenantScopedUoW';
 import { JwtRequest, resolveWhatsappCompanyId } from './jwtAuth';
 
 export interface DbQueryable {
@@ -25,6 +26,15 @@ import path from 'path';
 const CHAT_ID_REGEX = /^[a-zA-Z0-9_\-+.:@]+$/;
 const MESSAGE_ID_REGEX = /^[a-zA-Z0-9_\-+.:@=]+$/;
 const VOUCHER_ID_REGEX = /^[a-zA-Z0-9_\-.]+$/;
+
+export function queryTenantResource(db: DbQueryable, companyId: number, sql: string, parameters: unknown[]) {
+  if (db !== pool) return db.query(sql, parameters);
+  return withTenantTransaction(companyId, (client) => client.query(sql, parameters));
+}
+
+export function isInternalChatId(value: string): boolean {
+  return /^[1-9]\d{0,9}$/.test(value) && Number(value) <= 2147483647;
+}
 
 export function createResourceAuth(db: DbQueryable = pool) {
   return {
@@ -58,11 +68,11 @@ export function createResourceAuth(db: DbQueryable = pool) {
         }
 
         const numericId = Number(chatIdStr);
-        const isNumericId = Number.isInteger(numericId) && numericId > 0 && !chatIdStr.includes('@');
+        const isNumericId = isInternalChatId(chatIdStr);
 
         if (isNumericId) {
           // Direct SQL tenant isolation: filter by company_id in SQL
-          const result = await db.query(
+          const result = await queryTenantResource(db, companyId,
             `SELECT id, company_id, external_conversation_id FROM conversations WHERE id = $1 AND company_id = $2 LIMIT 1`,
             [numericId, companyId]
           );
@@ -81,7 +91,7 @@ export function createResourceAuth(db: DbQueryable = pool) {
           }
 
           // Not found for this tenant: verify whether it exists for another tenant
-          const existence = await db.query(
+          const existence = await queryTenantResource(db, companyId,
             `SELECT id, company_id FROM conversations WHERE id = $1 LIMIT 1`,
             [numericId]
           );
@@ -102,7 +112,7 @@ export function createResourceAuth(db: DbQueryable = pool) {
 
         const candidates = normalizeChatIdCandidates(chatIdStr);
         // Direct SQL tenant isolation: filter by company_id in SQL
-        const result = await db.query(
+        const result = await queryTenantResource(db, companyId,
           `SELECT id, company_id, external_conversation_id FROM conversations
            WHERE external_conversation_id = ANY($1::varchar[]) AND company_id = $2
            ORDER BY last_message_at DESC NULLS LAST, id DESC
@@ -135,7 +145,7 @@ export function createResourceAuth(db: DbQueryable = pool) {
         }
 
         // Not found for this tenant: check if registered for ANY other tenant
-        const existence = await db.query(
+        const existence = await queryTenantResource(db, companyId,
           `SELECT id, company_id FROM conversations
            WHERE external_conversation_id = ANY($1::varchar[])
            LIMIT 1`,
@@ -190,7 +200,7 @@ export function createResourceAuth(db: DbQueryable = pool) {
         }
 
         // Direct SQL tenant isolation: filter by m.company_id in SQL
-        const result = await db.query(
+        const result = await queryTenantResource(db, companyId,
           `SELECT m.id AS message_id, m.company_id, a.id AS attachment_id, a.internal_path, a.provider_media_id
            FROM messages m
            LEFT JOIN message_attachments a ON a.message_id = m.id
@@ -218,7 +228,7 @@ export function createResourceAuth(db: DbQueryable = pool) {
         }
 
         // Not found for this tenant: check if exists for ANY other tenant
-        const existence = await db.query(
+        const existence = await queryTenantResource(db, companyId,
           `SELECT m.id AS message_id, m.company_id
            FROM messages m
            LEFT JOIN message_attachments a ON a.message_id = m.id
@@ -287,7 +297,7 @@ export function createResourceAuth(db: DbQueryable = pool) {
         const escapedParam = paramStr.replace(/([%_\\])/g, '\\$1');
         const searchPattern = `%${escapedParam}`;
         // Direct SQL tenant isolation: filter by company_id in SQL
-        const result = await db.query(
+        const result = await queryTenantResource(db, companyId,
           `SELECT id, company_id, file_url FROM payment_vouchers
            WHERE (file_url LIKE $1 OR id::text = $2) AND company_id = $3
            LIMIT 1`,
@@ -307,7 +317,7 @@ export function createResourceAuth(db: DbQueryable = pool) {
         }
 
         // Not found for this tenant: check if exists for ANY other tenant
-        const existence = await db.query(
+        const existence = await queryTenantResource(db, companyId,
           `SELECT id, company_id FROM payment_vouchers
            WHERE file_url LIKE $1 OR id::text = $2
            LIMIT 1`,
@@ -338,11 +348,3 @@ const defaultResourceAuth = createResourceAuth(pool);
 export const requireChatTenantAccess = defaultResourceAuth.requireChatTenantAccess;
 export const requireMediaTenantAccess = defaultResourceAuth.requireMediaTenantAccess;
 export const requireVoucherTenantAccess = defaultResourceAuth.requireVoucherTenantAccess;
-
-module.exports = {
-  createResourceAuth,
-  normalizeChatIdCandidates,
-  requireChatTenantAccess,
-  requireMediaTenantAccess,
-  requireVoucherTenantAccess,
-};

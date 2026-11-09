@@ -1,7 +1,6 @@
 const { asyncHandler } = require('../middleware/errorHandler');
 const AuthService = require('../services/authService');
 const User = require('../models/User');
-const { verifyToken } = require('../utils/jwt');
 
 class AuthController {
   constructor(whatsappService) {
@@ -83,7 +82,6 @@ class AuthController {
    */
   refresh = asyncHandler(async (req, res) => {
     const { refreshToken } = req.body;
-    const userId = req.user.userId;
 
     if (!refreshToken) {
       return res.status(400).json({
@@ -92,7 +90,7 @@ class AuthController {
       });
     }
 
-    const result = await AuthService.refreshAccessToken(refreshToken, userId);
+    const result = await AuthService.refreshAccessToken(refreshToken);
 
     res.json({
       success: true,
@@ -104,7 +102,7 @@ class AuthController {
    * GET /api/auth/me - Obtener usuario autenticado
    */
   getMe = asyncHandler(async (req, res) => {
-    const user = await User.findById(req.user.userId);
+    const user = await User.findById(req.user.userId, req.whatsappCompanyId);
 
     if (!user) {
       return res.status(404).json({
@@ -117,7 +115,7 @@ class AuthController {
       success: true,
       data: {
         ...user,
-        companyId: user.company_id || 1
+        companyId: user.company_id
       }
     });
   });
@@ -128,7 +126,7 @@ class AuthController {
   logout = asyncHandler(async (req, res) => {
     const { refreshToken } = req.body;
 
-    await AuthService.logout(refreshToken);
+    await AuthService.logout(req.user.userId, refreshToken);
 
     res.json({
       success: true,
@@ -150,7 +148,7 @@ class AuthController {
       });
     }
 
-    const result = await AuthService.createStation(req.user.userId, nombre, email, password);
+    const result = await AuthService.createStation(req.user.userId, nombre, email, password, req.whatsappCompanyId);
 
     res.status(200).json({
       success: true,
@@ -170,7 +168,7 @@ class AuthController {
       });
     }
 
-    const employees = await User.findEmployeesByOwner(req.user.userId);
+    const employees = await User.findEmployeesByOwner(req.user.userId, req.whatsappCompanyId);
 
     res.json({
       success: true,
@@ -189,7 +187,7 @@ class AuthController {
       });
     }
 
-    const result = await AuthService.updateEmployee(req.user.userId, req.params.id, req.body);
+    const result = await AuthService.updateEmployee(req.user.userId, req.params.id, req.body, req.whatsappCompanyId);
 
     res.json({
       success: true,
@@ -209,7 +207,7 @@ class AuthController {
       });
     }
 
-    await AuthService.deactivateEmployee(req.user.userId, req.params.id);
+    await AuthService.deactivateEmployee(req.user.userId, req.params.id, req.whatsappCompanyId);
 
     res.json({
       success: true,

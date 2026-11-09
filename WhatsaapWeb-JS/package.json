@@ -9,7 +9,7 @@
     "dev:tunnel": "tsx scripts/dev-tunnel.ts",
     "dev:legacy": "nodemon index.js",
     "dev:ts": "tsx watch src/index.ts",
-    "build": "tsc",
+    "build": "tsc && node scripts/copy-runtime-assets.cjs",
     "typecheck": "tsc --noEmit",
     "typecheck:scripts": "tsc --noEmit -p tsconfig.scripts.json",
     "db:migrate": "tsx scripts/db-migrate.ts",

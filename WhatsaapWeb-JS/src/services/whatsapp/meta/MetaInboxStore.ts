@@ -1,5 +1,7 @@
-import { Pool, PoolClient } from 'pg';
+import { Pool } from 'pg';
 import pool from '../../../config/database';
+import { TenantScopedUoW } from '../../../db/TenantScopedUoW';
+import { Queryable } from '../../../shared/UnitOfWorkPort';
 
 function toUnixSeconds(value: unknown): number | null {
   if (!value) return null;
@@ -23,15 +25,21 @@ export interface ServiceWindowStatus {
   lastCustomerMessageAt: Date | null;
   conversationStatus: string | null;
   reason: 'service_window_open' | 'service_window_closed' | 'conversation_not_found';
+  conversationId?: string;
+  stateVersion?: number;
+  assignedUserId?: string | null;
+  aiPaused?: boolean;
 }
 
 export class MetaInboxStore {
   readonly pool: Pool;
   private io: any;
   private readonly companyId: number;
+  private readonly tenantWork: TenantScopedUoW;
 
   constructor({ db = pool as Pool, io = null, companyId }: MetaInboxStoreOptions) {
     this.pool = db;
+    this.tenantWork = new TenantScopedUoW(db);
     this.io = io;
     this.companyId = companyId;
   }
@@ -49,6 +57,10 @@ export class MetaInboxStore {
     this.io = io;
   }
 
+  private query(sql: string, parameters?: unknown[]) {
+    return this.tenantWork.run(this.companyId, (client) => client.query(sql, parameters));
+  }
+
   normalizePhone(value: string): string {
     return String(value || '')
       .replace('@c.us', '')
@@ -58,7 +70,7 @@ export class MetaInboxStore {
 
   async ensureAccount(metaConfig: any): Promise<Record<string, unknown> | null> {
     if (!metaConfig.phoneNumberId) return null;
-    const result = await this.pool.query(
+    const result = await this.query(
       `INSERT INTO whatsapp_business_accounts (
          company_id, provider, waba_id, phone_number_id,
          display_phone_number, business_phone_number, graph_version,
@@ -90,9 +102,13 @@ export class MetaInboxStore {
   }
 
   async getChats({ limit = 50, offset = 0 } = {}): Promise<Record<string, unknown>[]> {
-    const result = await this.pool.query(
+    const result = await this.query(
       `SELECT
          c.external_conversation_id AS id,
+         c.id AS conversation_id,
+         c.version AS state_version,
+         c.assigned_user_id,
+         c.ia_paused,
          COALESCE(c.title, ct.display_name, ct.name, ct.profile_name, ct.phone, c.external_conversation_id) AS name,
          c.last_message_at,
          c.unread_count,
@@ -100,7 +116,7 @@ export class MetaInboxStore {
          c.status,
          c.service_window_expires_at
        FROM conversations c
-       LEFT JOIN contacts ct ON ct.id = c.contact_id
+       LEFT JOIN contacts ct ON ct.id = c.contact_id AND ct.company_id = c.company_id
        WHERE c.company_id = $1
          AND c.channel = 'whatsapp'
          AND c.archived_at IS NULL
@@ -111,6 +127,10 @@ export class MetaInboxStore {
 
     return result.rows.map((row) => ({
       id: row.id,
+      conversationId: String(row.conversation_id),
+      stateVersion: row.state_version,
+      assignedUserId: row.assigned_user_id == null ? null : String(row.assigned_user_id),
+      aiPaused: Boolean(row.ia_paused),
       name: row.name,
       lastMessageTimestamp: toUnixSeconds(row.last_message_at),
       unreadCount: row.unread_count || 0,
@@ -129,7 +149,7 @@ export class MetaInboxStore {
       beforeSql = `AND m.occurred_at < $${params.length}`;
     }
 
-    const result = await this.pool.query(
+    const result = await this.query(
       `SELECT m.*, a.provider_media_id, a.mime_type, a.filename, a.size_bytes
        FROM conversations c
        JOIN messages m ON m.conversation_id = c.id
@@ -165,8 +185,12 @@ export class MetaInboxStore {
   }
 
   async getServiceWindowStatus(chatId: string): Promise<ServiceWindowStatus> {
-    const result = await this.pool.query(
+    const result = await this.query(
       `SELECT
+         id,
+         version,
+         assigned_user_id,
+         ia_paused,
          service_window_expires_at,
          last_customer_message_at,
          status
@@ -185,6 +209,12 @@ export class MetaInboxStore {
       serviceWindowExpiresAt: expiresAt,
       lastCustomerMessageAt: row?.last_customer_message_at || null,
       conversationStatus: row?.status || null,
+      ...(row && {
+        conversationId: String(row.id),
+        stateVersion: row.version,
+        assignedUserId: row.assigned_user_id == null ? null : String(row.assigned_user_id),
+        aiPaused: Boolean(row.ia_paused),
+      }),
       reason: hasActiveSession
         ? 'service_window_open'
         : (row ? 'service_window_closed' : 'conversation_not_found'),
@@ -193,7 +223,7 @@ export class MetaInboxStore {
 
   async listTemplates({ approvedOnly = true } = {}): Promise<Record<string, unknown>[]> {
     const statusFilter = approvedOnly ? `AND UPPER(COALESCE(status, '')) = 'APPROVED'` : '';
-    const result = await this.pool.query(
+    const result = await this.query(
       `SELECT
          id,
          template_name,
@@ -249,7 +279,7 @@ export class MetaInboxStore {
   }>, wabaId?: string | null): Promise<void> {
     for (const template of templates) {
       if (!template.name || !template.language) continue;
-      await this.pool.query(
+      await this.query(
         `INSERT INTO whatsapp_message_templates (
            company_id, provider, waba_id, template_name, language_code,
            category, status, components_json, external_template_id,
@@ -280,7 +310,7 @@ export class MetaInboxStore {
   }
 
   async findLatestInboundProviderMessageId(chatId: string): Promise<string | null> {
-    const result = await this.pool.query(
+    const result = await this.query(
       `SELECT m.provider_message_id
        FROM conversations c
        JOIN messages m ON m.conversation_id = c.id
@@ -298,14 +328,14 @@ export class MetaInboxStore {
 
   async markConversationRead(chatId: string): Promise<void> {
     const normalizedChatId = this.normalizePhone(chatId);
-    await this.pool.query(
+    await this.query(
       `UPDATE conversations
        SET unread_count = 0, updated_at = NOW()
        WHERE company_id = $1 AND channel = 'whatsapp' AND external_conversation_id = $2`,
       [this.companyId, normalizedChatId]
     );
 
-    await this.pool.query(
+    await this.query(
       `UPDATE messages m
        SET status = 'read', read_at = COALESCE(read_at, NOW())
        FROM conversations c
@@ -319,7 +349,7 @@ export class MetaInboxStore {
     );
   }
 
-  private async upsertContact(client: PoolClient, input: { externalContactId: string; phone: string; name: string | null; rawProfile: unknown }): Promise<any> {
+  private async upsertContact(client: Queryable, input: { externalContactId: string; phone: string; name: string | null; rawProfile: unknown }): Promise<any> {
     const result = await client.query(
       `INSERT INTO contacts (
          company_id, channel, provider, external_contact_id,
@@ -351,7 +381,7 @@ export class MetaInboxStore {
   }
 
   private async upsertConversation(
-    client: PoolClient,
+    client: Queryable,
     input: { externalConversationId: string; contactId: number; title: string; inboundAt: Date | null; preview: string | null; direction: 'inbound' | 'outbound' }
   ): Promise<any> {
     const serviceWindowExpiresAt = input.inboundAt
@@ -421,9 +451,7 @@ export class MetaInboxStore {
   }
 
   async persistInboundMessage({ message, contact, metadata, value }: any): Promise<Record<string, unknown>> {
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN');
+    const result = await this.tenantWork.run(this.companyId, async (client) => {
       const providerMessageId = message.id;
       const event = await client.query(
         `INSERT INTO whatsapp_webhook_events (
@@ -444,7 +472,6 @@ export class MetaInboxStore {
       );
 
       if (!event.rows[0]) {
-        await client.query('ROLLBACK');
         return { duplicate: true };
       }
 
@@ -511,7 +538,6 @@ export class MetaInboxStore {
         `UPDATE whatsapp_webhook_events SET processed_at = NOW(), processing_status = 'processed' WHERE id = $1`,
         [event.rows[0].id]
       );
-      await client.query('COMMIT');
 
       const payload = {
         id: providerMessageId,
@@ -525,21 +551,15 @@ export class MetaInboxStore {
         filename: message?.document?.filename || null,
         chatId: externalContactId,
       };
-      this.emitMessage(externalContactId, payload);
-      await this.emitChatsUpdated();
       return { duplicate: false, message: payload };
-    } catch (error) {
-      await client.query('ROLLBACK').catch(() => undefined);
-      throw error;
-    } finally {
-      client.release();
-    }
+    });
+
+    if (result.message) await this.emitUpdate(result.message);
+    return result;
   }
 
   async persistStatus({ status, metadata, value }: any): Promise<Record<string, unknown>> {
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN');
+    return this.tenantWork.run(this.companyId, async (client) => {
       const providerMessageId = status.id;
       const occurredAt = new Date(Number(status.timestamp || Math.floor(Date.now() / 1000)) * 1000);
       const event = await client.query(
@@ -560,7 +580,6 @@ export class MetaInboxStore {
         ]
       );
       if (!event.rows[0]) {
-        await client.query('ROLLBACK');
         return { duplicate: true };
       }
 
@@ -595,14 +614,8 @@ export class MetaInboxStore {
         );
       }
       await client.query(`UPDATE whatsapp_webhook_events SET processed_at = NOW(), processing_status = 'processed' WHERE id = $1`, [event.rows[0].id]);
-      await client.query('COMMIT');
       return { duplicate: false };
-    } catch (error) {
-      await client.query('ROLLBACK').catch(() => undefined);
-      throw error;
-    } finally {
-      client.release();
-    }
+    });
   }
 
   async persistOutbound(input: {
@@ -621,9 +634,7 @@ export class MetaInboxStore {
       metadata?: unknown;
     } | null;
   }): Promise<Record<string, unknown>> {
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN');
+    const { row, payload } = await this.tenantWork.run(this.companyId, async (client) => {
       const externalContactId = this.normalizePhone(input.chatId);
       const contact = await this.upsertContact(client, { externalContactId, phone: externalContactId, name: null, rawProfile: null });
       const conversation = await this.upsertConversation(client, {
@@ -691,7 +702,6 @@ export class MetaInboxStore {
          WHERE id = $1`,
         [conversation.id, input.body || (input.template ? `[Template: ${input.template.name}]` : '[Mensaje]')]
       );
-      await client.query('COMMIT');
       const row = result.rows[0];
       const payload = {
         id: input.providerMessageId || String(row.id),
@@ -705,19 +715,15 @@ export class MetaInboxStore {
         filename: input.media?.filename || null,
         chatId: externalContactId,
       };
-      this.emitMessage(externalContactId, payload);
-      await this.emitChatsUpdated();
-      return row;
-    } catch (error) {
-      await client.query('ROLLBACK').catch(() => undefined);
-      throw error;
-    } finally {
-      client.release();
-    }
+      return { row, payload };
+    });
+
+    await this.emitUpdate(payload);
+    return row;
   }
 
   async findMediaAttachment(messageId: string): Promise<Record<string, unknown> | null> {
-    const result = await this.pool.query(
+    const result = await this.query(
       `SELECT
          a.id AS attachment_id,
          a.message_id,
@@ -757,7 +763,7 @@ export class MetaInboxStore {
     sha256?: string | null;
     metadata?: unknown;
   }): Promise<void> {
-    await this.pool.query(
+    await this.query(
       `UPDATE message_attachments
        SET internal_path = $2,
            mime_type = COALESCE($3, mime_type),
@@ -778,14 +784,17 @@ export class MetaInboxStore {
     );
   }
 
-  private emitMessage(chatId: string, payload: unknown): void {
+  private async emitUpdate(payload: unknown): Promise<void> {
     if (!this.io) return;
-    this.io.to(chatId).emit('message', payload);
-    this.io.emit('message', payload);
-  }
-
-  private async emitChatsUpdated(): Promise<void> {
-    if (!this.io) return;
-    this.io.emit('chats-updated', await this.getChats());
+    try {
+      const room = this.io.to(`tenant:${this.companyId}`);
+      room.emit('message', payload);
+      room.emit('chats-updated', await this.getChats());
+    } catch (error) {
+      // Persistence already committed. A refresh failure must not trigger a resend.
+      console.warn('No se pudo actualizar la bandeja tras persistir el mensaje', {
+        code: error instanceof Error ? error.name : 'CHAT_REFRESH_FAILED',
+      });
+    }
   }
 }

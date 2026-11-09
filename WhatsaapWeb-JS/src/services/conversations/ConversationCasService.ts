@@ -136,11 +136,11 @@ export class ConversationCasService {
           UPDATE conversations
           SET owner_type = 'human',
               owner_id = $1,
-              assigned_user_id = $2,
+              assigned_user_id = $2::integer,
               ownership_epoch = ownership_epoch + 1,
               version = version + 1,
               ia_paused = true,
-              ia_paused_by = $2,
+              ia_paused_by = $2::integer,
               ia_paused_at = NOW(),
               updated_at = NOW()
           WHERE id = $3 AND company_id = $4 AND version = $5

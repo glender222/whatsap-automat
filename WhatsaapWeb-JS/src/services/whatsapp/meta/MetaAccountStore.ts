@@ -1,6 +1,8 @@
 import { Pool } from 'pg';
 import pool from '../../../config/database';
 import config from '../../../config/index';
+import { TenantScopedUoW } from '../../../db/TenantScopedUoW';
+import { PgUnitOfWork } from '../../../shared/PgUnitOfWork';
 import SecretCipher from '../../security/SecretCipher';
 import { MetaCloudConfig } from './MetaCloudClient';
 
@@ -29,9 +31,17 @@ export interface MetaConnectionInput {
 
 export class MetaAccountStore {
   private readonly cipher: SecretCipher | null;
+  private readonly tenantWork: TenantScopedUoW;
+  private readonly webhookWork: PgUnitOfWork;
 
-  constructor(private readonly db: Pool = pool as Pool) {
+  constructor(db: Pool = pool as Pool) {
     this.cipher = config.security.tokenEncryptionKey ? new SecretCipher() : null;
+    this.tenantWork = new TenantScopedUoW(db);
+    this.webhookWork = new PgUnitOfWork(db);
+  }
+
+  private query(companyId: number, sql: string, parameters: unknown[]) {
+    return this.tenantWork.run(companyId, (client) => client.query(sql, parameters));
   }
 
   async ensureEnvAccount(companyId: number, metaConfig: any): Promise<Record<string, unknown> | null> {
@@ -67,7 +77,7 @@ export class MetaAccountStore {
     const tokenLastFour = encryptedToken ? lastFour(input.accessToken) : null;
     const status = input.status || (input.accessToken ? 'connected' : 'missing_token');
 
-    const result = await this.db.query(
+    const result = await this.query(companyId,
       `INSERT INTO whatsapp_business_accounts (
          company_id, provider, waba_id, phone_number_id,
          display_phone_number, business_phone_number, graph_version,
@@ -149,7 +159,7 @@ export class MetaAccountStore {
   }
 
   async getAccountForCompany(companyId: number): Promise<Record<string, any> | null> {
-    const result = await this.db.query(
+    const result = await this.query(companyId,
       `SELECT *
        FROM whatsapp_business_accounts
        WHERE company_id = $1
@@ -164,24 +174,22 @@ export class MetaAccountStore {
     return result.rows[0] || null;
   }
 
-  async findByPhoneNumberId(phoneNumberId: string): Promise<Record<string, any> | null> {
-    const result = await this.db.query(
-      `SELECT *
-       FROM whatsapp_business_accounts
-       WHERE provider = 'meta-cloud'
-         AND phone_number_id = $1
-         AND status <> 'disconnected'
-       ORDER BY
-         CASE status WHEN 'connected' THEN 0 WHEN 'configured' THEN 1 WHEN 'missing_token' THEN 2 ELSE 3 END,
-         updated_at DESC
-       LIMIT 1`,
-      [phoneNumberId]
-    );
-    return result.rows[0] || null;
+  async findByPhoneNumberId(phoneNumberId: string): Promise<{ company_id: number } | null> {
+    return this.webhookWork.transaction(async ({ client }) => {
+      await client.query("SELECT set_config('app.verified_meta_phone_number', $1, true)", [phoneNumberId]);
+      const { rows } = await client.query(
+        `SELECT company_id
+         FROM whatsapp_business_accounts
+         WHERE provider = 'meta-cloud' AND phone_number_id = $1 AND status <> 'disconnected'
+         LIMIT 2`,
+        [phoneNumberId]
+      );
+      return rows.length === 1 ? rows[0] : null;
+    });
   }
 
   async disconnect(companyId: number): Promise<void> {
-    await this.db.query(
+    await this.query(companyId,
       `UPDATE whatsapp_business_accounts
        SET status = 'disconnected',
            disconnected_at = NOW(),
@@ -192,7 +200,7 @@ export class MetaAccountStore {
   }
 
   async recordLastError(companyId: number, message: string | null): Promise<void> {
-    await this.db.query(
+    await this.query(companyId,
       `UPDATE whatsapp_business_accounts
        SET last_error_message = $2,
            updated_at = NOW()

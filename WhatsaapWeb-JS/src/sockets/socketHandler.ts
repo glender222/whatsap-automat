@@ -1,6 +1,6 @@
 import { Server, Socket } from 'socket.io';
 import pool from '../config/database';
-import { DbQueryable, normalizeChatIdCandidates } from '../middleware/resourceAuth';
+import { DbQueryable, isInternalChatId, normalizeChatIdCandidates, queryTenantResource } from '../middleware/resourceAuth';
 import { socketJwtAuthMiddleware, AuthenticatedSocketData } from './socketAuth';
 
 const CHAT_ID_REGEX = /^[a-zA-Z0-9_\-+.:@]+$/;
@@ -134,16 +134,16 @@ export class SocketHandler {
         // 4. Verificación de propiedad del chat en PostgreSQL
         try {
           const numericId = Number(chatId);
-          const isNumericId = Number.isInteger(numericId) && numericId > 0 && !chatId.includes('@');
+          const isNumericId = isInternalChatId(chatId);
 
           if (isNumericId) {
-            const result = await this.db.query(
+            const result = await queryTenantResource(this.db, companyId,
               `SELECT id, company_id, external_conversation_id FROM conversations WHERE id = $1 AND company_id = $2 LIMIT 1`,
               [numericId, companyId]
             );
 
             if (!result.rows || result.rows.length === 0) {
-              const existence = await this.db.query(
+              const existence = await queryTenantResource(this.db, companyId,
                 `SELECT id, company_id FROM conversations WHERE id = $1 LIMIT 1`,
                 [numericId]
               );
@@ -170,7 +170,7 @@ export class SocketHandler {
             }
           } else {
             const candidates = normalizeChatIdCandidates(chatId);
-            const result = await this.db.query(
+            const result = await queryTenantResource(this.db, companyId,
               `SELECT id, company_id, external_conversation_id FROM conversations
                WHERE external_conversation_id = ANY($1::varchar[]) AND company_id = $2
                ORDER BY last_message_at DESC NULLS LAST, id DESC
@@ -179,7 +179,7 @@ export class SocketHandler {
             );
 
             if (!result.rows || result.rows.length === 0) {
-              const existence = await this.db.query(
+              const existence = await queryTenantResource(this.db, companyId,
                 `SELECT id, company_id FROM conversations
                  WHERE external_conversation_id = ANY($1::varchar[])
                  LIMIT 1`,

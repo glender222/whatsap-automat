@@ -613,8 +613,8 @@ describe('Security Mitigations Regression Suite (P0 Hardening & Verification)', 
       const pool = require('../config/database');
       const { createWhatsAppRoutes } = require('../routes/whatsappRoutes');
 
-      const originalQuery = pool.query;
-      pool.query = async () => ({ rows: [] });
+      const originalConnect = pool.connect;
+      pool.connect = async () => ({ query: async () => ({ rows: [] }), release() {} });
 
       const mockService = {
         getCompanyStatus: async () => ({}),
@@ -662,7 +662,11 @@ describe('Security Mitigations Regression Suite (P0 Hardening & Verification)', 
               let data = '';
               clientRes.on('data', (chunk: any) => (data += chunk));
               clientRes.on('end', () => {
-                resolve({ statusCode: clientRes.statusCode, body: JSON.parse(data) });
+                try {
+                  resolve({ statusCode: clientRes.statusCode, body: JSON.parse(data) });
+                } catch (error) {
+                  reject(error);
+                }
               });
             }
           );
@@ -675,7 +679,7 @@ describe('Security Mitigations Regression Suite (P0 Hardening & Verification)', 
         assert.equal(response.body.success, true);
         assert.equal(response.body.data.messageId, 'msg-123');
       } finally {
-        pool.query = originalQuery;
+        pool.connect = originalConnect;
         await new Promise<void>((resolve) => server.close(() => resolve()));
       }
     });

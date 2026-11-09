@@ -303,7 +303,7 @@ export default function createConversationRoutes(
         );
       }
 
-      const activeUserId = userId(req) || toPositiveInt(req.body?.userId);
+      const activeUserId = userId(req);
       if (!activeUserId) {
         res.setHeader('Content-Type', 'application/problem+json');
         return res.status(400).json(
@@ -427,7 +427,7 @@ export default function createConversationRoutes(
         );
       }
 
-      const activeUserId = userId(req) || toPositiveInt(req.body?.userId);
+      const activeUserId = userId(req);
       if (!activeUserId) {
         res.setHeader('Content-Type', 'application/problem+json');
         return res.status(400).json(
@@ -546,7 +546,7 @@ export default function createConversationRoutes(
         );
       }
 
-      const activeUserId = userId(req) || toPositiveInt(req.body?.userId);
+      const activeUserId = userId(req);
       if (!activeUserId) {
         res.setHeader('Content-Type', 'application/problem+json');
         return res.status(400).json(

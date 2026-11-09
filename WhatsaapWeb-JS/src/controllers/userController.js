@@ -7,7 +7,7 @@ class UserController {
    * GET /api/auth/me - Obtener información del usuario autenticado
    */
   getMe = asyncHandler(async (req, res) => {
-    const user = await User.findById(req.user.userId);
+    const user = await User.findById(req.user.userId, req.whatsappCompanyId);
 
     if (!user) {
       return res.status(404).json({
@@ -34,7 +34,7 @@ class UserController {
       });
     }
 
-    const employees = await User.findEmployeesByOwner(req.user.userId);
+    const employees = await User.findEmployeesByOwner(req.user.userId, req.whatsappCompanyId);
 
     res.json({
       success: true,

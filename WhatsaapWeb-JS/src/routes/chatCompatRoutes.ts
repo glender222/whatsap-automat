@@ -3,7 +3,7 @@ import WhatsAppService from '../services/whatsappService';
 import config from '../config/index';
 import { JwtRequest, resolveWhatsappCompanyId } from '../middleware/jwtAuth';
 import { requireChatTenantAccess } from '../middleware/resourceAuth';
-import pool from '../config/database';
+import { withTenantTransaction } from '../db/TenantScopedUoW';
 import { OperationalRecordRepositoryPg, OperationalRecordService } from '../modules/operations';
 import AgentService from '../services/ai/AgentService';
 
@@ -11,7 +11,6 @@ const multer = require('multer') as any;
 
 export function createChatCompatRoutes(whatsappService: WhatsAppService): Router {
   const router = Router();
-  const operationalRecords = new OperationalRecordService(new OperationalRecordRepositoryPg(pool));
   const agentService = new AgentService();
   const upload = multer({
     dest: config.multer.dest,
@@ -86,11 +85,11 @@ export function createChatCompatRoutes(whatsappService: WhatsAppService): Router
     try {
       const companyId = resolveWhatsappCompanyId(req as JwtRequest);
       const chatId = String(req.params.chatId);
-      const result = await operationalRecords.completeServiceSession({
-        companyId,
-        chatId,
-        userId: getUserId(req as JwtRequest),
-      });
+      const result = await withTenantTransaction(companyId, (client) =>
+        new OperationalRecordService(new OperationalRecordRepositoryPg(client)).completeServiceSession({
+          companyId, chatId, userId: getUserId(req as JwtRequest),
+        })
+      );
       await agentService.closeChatAiSessions(companyId, chatId);
 
       res.json({
@@ -130,11 +129,11 @@ export function createChatCompatRoutes(whatsappService: WhatsAppService): Router
       });
 
       const messageId = sent?.id?._serialized || sent?.id || null;
-      operationalRecords.recordMessageSent({
-        companyId,
-        chatId: String(req.params.chatId),
-        userId: getUserId(req as JwtRequest),
-      }, messageId ? String(messageId) : null).catch((error) => {
+      await withTenantTransaction(companyId, (client) =>
+        new OperationalRecordService(new OperationalRecordRepositoryPg(client)).recordMessageSent({
+          companyId, chatId: String(req.params.chatId), userId: getUserId(req as JwtRequest),
+        }, messageId ? String(messageId) : null)
+      ).catch((error) => {
         console.warn('No se pudo registrar accion operativa de mensaje enviado:', error?.message || error);
       });
 

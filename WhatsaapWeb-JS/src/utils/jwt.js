@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken');
+const { randomUUID } = require('node:crypto');
 const config = require('../config');
 
 const JWT_SECRET = config.jwt.secret;
@@ -25,6 +26,7 @@ function generateAccessToken(payload) {
 function generateRefreshToken(payload) {
   return jwt.sign(payload, JWT_SECRET, {
     expiresIn: JWT_REFRESH_EXPIRY,
+    jwtid: randomUUID(),
     algorithm: 'HS256'
   });
 }
@@ -36,7 +38,7 @@ function generateRefreshToken(payload) {
  */
 function verifyToken(token) {
   try {
-    return jwt.verify(token, JWT_SECRET);
+    return jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
   } catch (error) {
     console.error('Error verificando token:', error.message);
     return null;

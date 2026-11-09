@@ -210,7 +210,7 @@ function createAuthRoutes(whatsappService) {
   // JWT Routes (Requieren autenticación)
   // ========================
 
-  router.post('/refresh', validateJWT, authController.refresh);
+  router.post('/refresh', authController.refresh);
   router.get('/me', validateJWT, authController.getMe);
   router.post('/logout', validateJWT, authController.logout);
   router.post('/create-station', validateJWT, requireAdmin, authController.createStation);

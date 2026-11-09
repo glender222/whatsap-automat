@@ -85,7 +85,7 @@ export class WhatsAppService {
 
   constructor() {
     this.provider = (config.whatsapp.provider || 'webjs') as Provider;
-    this.whatsappClient = this.provider === 'meta-cloud' ? null : new (require('../../src/services/whatsapp/WhatsAppClient'))();
+    this.whatsappClient = this.provider === 'meta-cloud' ? null : new (require('./whatsapp/WhatsAppClient'))();
     this.metaClient = this.provider === 'meta-cloud' ? new MetaCloudClient(config.meta) : null;
     this.metaAccountStore = this.provider === 'meta-cloud' ? new MetaAccountStore() : null;
     this.agentService = new AgentService();

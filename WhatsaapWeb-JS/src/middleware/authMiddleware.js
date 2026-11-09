@@ -1,38 +1,13 @@
-const { asyncHandler } = require('./errorHandler');
-const { extractTokenFromHeader, verifyToken } = require('../utils/jwt');
+const { requireJwt, toPositiveInt } = require('./jwtAuth');
 
 /**
  * Middleware para validar JWT token
  */
-const validateJWT = asyncHandler(async (req, res, next) => {
-  const authHeader = req.headers.authorization;
-  const token = extractTokenFromHeader(authHeader);
-
-  if (!token) {
-    return res.status(401).json({
-      success: false,
-      error: 'Token no proporcionado',
-      details: 'Se requiere un token Bearer en el header Authorization'
-    });
+const validateJWT = (req, res, next) => requireJwt(req, res, () => {
+  if (!toPositiveInt(req.user?.userId) || !req.whatsappCompanyId) {
+    return res.status(403).json({ success: false, error: 'Sesión sin usuario o empresa válidos' });
   }
-
-  const payload = verifyToken(token);
-
-  if (!payload) {
-    return res.status(401).json({
-      success: false,
-      error: 'Token inválido o expirado',
-      details: 'El token no es válido o ha expirado'
-    });
-  }
-
-  // Agregar payload al request y propagar companyId
-  req.user = payload;
-  const companyId = Number(payload.companyId || payload.company_id || payload.tenantId);
-  if (Number.isInteger(companyId) && companyId > 0) {
-    req.whatsappCompanyId = companyId;
-  }
-  next();
+  return next();
 });
 
 /**

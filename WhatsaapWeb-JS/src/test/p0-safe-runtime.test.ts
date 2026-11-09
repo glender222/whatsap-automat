@@ -56,7 +56,16 @@ test('Meta en development puede usar el token de .env sin persistirlo si no hay 
   try {
     config.security.tokenEncryptionKey = '';
     config.meta.accessToken = envOnlyToken;
-    const store = new MetaAccountStore({ query } as any);
+    const statements: string[] = [];
+    const store = new MetaAccountStore({
+      connect: async () => ({
+        query: async (sql: string, params: unknown[]) => {
+          statements.push(sql);
+          return params ? query(sql, params) : { rows: [] };
+        },
+        release() {},
+      }),
+    } as any);
     const account = await store.ensureEnvAccount(1, {
       graphVersion: 'v25.0',
       phoneNumberId: 'test-phone-number-id',
@@ -66,6 +75,8 @@ test('Meta en development puede usar el token de .env sin persistirlo si no hay 
     });
 
     const parameters = query.mock.calls[0].arguments[1] as unknown[];
+    assert.deepEqual(statements.slice(0, 2), ['BEGIN', "SET LOCAL app.current_tenant_id = '1'"]);
+    assert.equal(statements.at(-1), 'COMMIT');
     assert.equal(parameters[6], 'META_WA_ACCESS_TOKEN');
     assert.equal(parameters[7], null);
     assert.equal(parameters[8], null);

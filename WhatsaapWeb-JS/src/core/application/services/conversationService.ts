@@ -40,8 +40,8 @@ export interface StatusIngestResult {
 }
 
 export interface LegacyEventEmitter {
-  emitMessage?(chatId: string, payload: unknown): void;
-  emitChatsUpdated?(chats: unknown[]): void;
+  emitMessage?(companyId: number, payload: unknown): void;
+  emitChatsUpdated?(companyId: number, chats: unknown[]): void;
 }
 
 /**
@@ -117,10 +117,10 @@ export class ConversationService {
     };
 
     if (this.legacyEmitter?.emitMessage) {
-      this.legacyEmitter.emitMessage(dto.externalConversationId, legacyPayload);
+      this.legacyEmitter.emitMessage(companyId, legacyPayload);
     }
     if (this.legacyEmitter?.emitChatsUpdated) {
-      this.legacyEmitter.emitChatsUpdated([
+      this.legacyEmitter.emitChatsUpdated(companyId, [
         {
           id: result.conversation.externalConversationId,
           name: result.contact.name ?? result.contact.externalContactId,

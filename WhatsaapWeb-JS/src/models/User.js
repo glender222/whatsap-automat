@@ -1,5 +1,8 @@
 const pool = require('../config/database');
-const { hashPassword } = require('../utils/password');
+const { withTenantTransaction } = require('../db/TenantScopedUoW');
+const { PgUnitOfWork } = require('../shared/PgUnitOfWork');
+
+const authLookup = new PgUnitOfWork(pool);
 
 class User {
   /**
@@ -88,8 +91,7 @@ class User {
   /**
    * Crear un nuevo usuario
    */
-  static async create(nombre, email, passwordHash, rol = 'EMPLEADO', idPadre = null) {
-    const companyId = await this.resolveCompanyIdForUser(rol, idPadre);
+  static async create(nombre, email, passwordHash, rol, idPadre, companyId, client) {
     const query = `
       INSERT INTO usuarios (nombre, email, password_hash, rol, id_padre, company_id, activo)
       VALUES ($1, $2, $3, $4, $5, $6, true)
@@ -97,7 +99,7 @@ class User {
     `;
     
     try {
-      const result = await pool.query(query, [nombre, email, passwordHash, rol, idPadre, companyId]);
+      const result = await client.query(query, [nombre, email, passwordHash, rol, idPadre, companyId]);
       return result.rows[0];
     } catch (error) {
       if (error.code === '23505') { // Unique violation
@@ -119,42 +121,45 @@ class User {
       WHERE email = $1 AND activo = true
     `;
     
-    const result = await pool.query(query, [email]);
-    return result.rows[0] || null;
+    return authLookup.transaction(async ({ client }) => {
+      await client.query("SELECT set_config('app.login_email', $1, true)", [email]);
+      const result = await client.query(query, [email]);
+      return result.rows[0] || null;
+    });
   }
 
   /**
    * Buscar usuario por ID
    */
-  static async findById(id) {
+  static async findById(id, companyId) {
     const query = `
       SELECT id, nombre, email, rol, id_padre, company_id, activo, fecha_creacion
       FROM usuarios
       WHERE id = $1 AND activo = true
     `;
     
-    const result = await pool.query(query, [id]);
+    const result = await withTenantTransaction(companyId, (client) => client.query(query, [id]));
     return result.rows[0] || null;
   }
 
   /**
    * Obtener todos los empleados de un dueño
    */
-  static async findEmployeesByOwner(ownerId) {
+  static async findEmployeesByOwner(ownerId, companyId) {
     const query = `
       SELECT id, nombre, email, rol, id_padre, company_id, activo, fecha_creacion
       FROM usuarios
       WHERE id_padre = $1 AND activo = true
     `;
     
-    const result = await pool.query(query, [ownerId]);
+    const result = await withTenantTransaction(companyId, (client) => client.query(query, [ownerId]));
     return result.rows;
   }
 
   /**
    * Obtener un empleado específico del dueño autenticado
    */
-  static async findEmployeeByOwner(ownerId, employeeId) {
+  static async findEmployeeByOwner(ownerId, employeeId, companyId) {
     const query = `
       SELECT id, nombre, email, rol, id_padre, company_id, activo, fecha_creacion
       FROM usuarios
@@ -164,22 +169,14 @@ class User {
         AND activo = true
     `;
 
-    const result = await pool.query(query, [employeeId, ownerId]);
+    const result = await withTenantTransaction(companyId, (client) => client.query(query, [employeeId, ownerId]));
     return result.rows[0] || null;
-  }
-
-  static async resolveCompanyIdForUser(rol, idPadre) {
-    if (rol === 'EMPLEADO' && idPadre) {
-      const owner = await this.findById(idPadre);
-      return owner?.company_id || 1;
-    }
-    return 1;
   }
 
   /**
    * Guardar refresh token
    */
-  static async saveRefreshToken(usuarioId, token, expiresIn) {
+  static async saveRefreshToken(usuarioId, token, expiresIn, db = pool) {
     const expiresAt = new Date(Date.now() + expiresIn);
     const query = `
       INSERT INTO refresh_tokens (usuario_id, token, expira_en)
@@ -187,7 +184,7 @@ class User {
       RETURNING id
     `;
     
-    const result = await pool.query(query, [usuarioId, token, expiresAt]);
+    const result = await db.query(query, [usuarioId, token, expiresAt]);
     return result.rows[0];
   }
 
@@ -207,14 +204,14 @@ class User {
   /**
    * Revocar refresh token
    */
-  static async revokeRefreshToken(token) {
+  static async revokeRefreshToken(usuarioId, token) {
     const query = `
       UPDATE refresh_tokens
       SET revocado = true
-      WHERE token = $1
+      WHERE token = $1 AND usuario_id = $2
     `;
     
-    await pool.query(query, [token]);
+    await pool.query(query, [token, usuarioId]);
   }
 
   /**
@@ -248,7 +245,7 @@ class User {
   /**
    * Actualizar un empleado validando pertenencia al dueño
    */
-  static async updateEmployeeForOwner(ownerId, employeeId, data) {
+  static async updateEmployeeForOwner(ownerId, employeeId, data, companyId) {
     const allowedFields = ['nombre', 'email', 'password_hash'];
     const fields = [];
     const values = [];
@@ -279,7 +276,7 @@ class User {
     `;
 
     try {
-      const result = await pool.query(query, values);
+      const result = await withTenantTransaction(companyId, (client) => client.query(query, values));
       return result.rows[0] || null;
     } catch (error) {
       if (error.code === '23505') {
@@ -309,7 +306,7 @@ class User {
   /**
    * Desactivar un empleado validando pertenencia al dueño
    */
-  static async deactivateEmployeeForOwner(ownerId, employeeId) {
+  static async deactivateEmployeeForOwner(ownerId, employeeId, companyId) {
     const query = `
       UPDATE usuarios
       SET activo = false, fecha_actualizacion = CURRENT_TIMESTAMP
@@ -320,7 +317,7 @@ class User {
       RETURNING id, nombre, email, activo
     `;
 
-    const result = await pool.query(query, [employeeId, ownerId]);
+    const result = await withTenantTransaction(companyId, (client) => client.query(query, [employeeId, ownerId]));
     return result.rows[0] || null;
   }
 }

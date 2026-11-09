@@ -41,11 +41,11 @@ export function createConversationCore(
   const adapter = new WhatsappWebAdapter(legacyService, defaultCompanyId);
 
   const legacyEmitter: LegacyEventEmitter = {
-    emitMessage: (chatId: string, payload: unknown) => {
-      if (io) io.to(chatId).emit('message', payload);
+    emitMessage: (companyId, payload) => {
+      if (io) io.to(`tenant:${companyId}`).emit('message', payload);
     },
-    emitChatsUpdated: (chats: unknown[]) => {
-      if (io) io.emit('chats-updated', chats);
+    emitChatsUpdated: (companyId, chats) => {
+      if (io) io.to(`tenant:${companyId}`).emit('chats-updated', chats);
     },
   };
 
