@@ -303,7 +303,7 @@ export class MetaCloudClient {
     templateName: string,
     languageCode = 'en_US',
     components?: unknown[],
-    options: { redirect?: RequestRedirect } = {},
+    options: { redirect?: RequestRedirect; callbackData?: string } = {},
   ): Promise<MetaSendResult> {
     const template: Record<string, unknown> = {
       name: templateName,
@@ -318,6 +318,7 @@ export class MetaCloudClient {
         messaging_product: 'whatsapp',
         to: this.normalizeRecipient(to),
         type: 'template',
+        ...(options.callbackData && { biz_opaque_callback_data: options.callbackData }),
         template,
       },
     });

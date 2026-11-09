@@ -4,6 +4,7 @@ import { Queryable } from '../../shared/UnitOfWorkPort';
 import MetaAccountStore from '../whatsapp/meta/MetaAccountStore';
 import { isDefiniteMetaMessageRejection, MetaCloudClient, type MetaSendResult } from '../whatsapp/meta/MetaCloudClient';
 import { CampaignRequestError } from './CampaignRequestError';
+import { campaignCallbackPrefix, metaMessageIdPattern } from './CampaignMetaReceipt';
 
 export const defaultWhatsAppCampaignLanguage = 'es_CO';
 
@@ -47,7 +48,7 @@ export class WhatsAppCampaignTransport {
     return { id: account.connection_id as string, accountId: account.phone_number_id as string };
   }
 
-  async send(command: SendMessageCommandV1, expectedAccountId: string): Promise<SendMessageResultV1> {
+  async send(command: SendMessageCommandV1, expectedAccountId: string, deliveryId: string): Promise<SendMessageResultV1> {
     const client = await this.uow.run(command.tenantId, async (database) => {
       const account = await this.findAccount(database, Number(command.tenantId), command.connectionId);
       if (account.phone_number_id !== expectedAccountId) throw this.accountUnavailable();
@@ -62,6 +63,7 @@ export class WhatsAppCampaignTransport {
       throw new CampaignRequestError(400, 'INVALID_WHATSAPP_MESSAGE', 'Usa un mensaje de texto o una plantilla de WhatsApp.');
     }
     let result: MetaSendResult;
+    const options = { redirect: 'error' as const, callbackData: campaignCallbackPrefix + deliveryId };
     try {
       result = message.kind === 'template' && message.templateId
         ? await client.sendTemplate(
@@ -71,16 +73,16 @@ export class WhatsAppCampaignTransport {
             ? message.parameters.languageCode
             : defaultWhatsAppCampaignLanguage,
           Array.isArray(message.parameters?.components) ? message.parameters.components : undefined,
-          { redirect: 'error' },
+          options,
         )
-        : await client.sendText(recipient, message.text || '', { redirect: 'error' });
+        : await client.sendText(recipient, message.text || '', options);
     } catch (error) {
       if (isDefiniteMetaMessageRejection(error)) {
         throw new CampaignRequestError(502, 'CAMPAIGN_PROVIDER_REJECTED', 'WhatsApp rechazó el mensaje.');
       }
       throw new CampaignRequestError(502, 'CAMPAIGN_PROVIDER_OUTCOME_UNKNOWN', 'No se confirmó el resultado del envío a WhatsApp.');
     }
-    if (typeof result.providerMessageId !== 'string' || !result.providerMessageId.trim()) {
+    if (typeof result.providerMessageId !== 'string' || !metaMessageIdPattern.test(result.providerMessageId)) {
       throw new CampaignRequestError(502, 'CAMPAIGN_PROVIDER_ACK_MISSING', 'El proveedor no devolvió un identificador de envío.');
     }
     return {

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import { randomUUID } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
+import { createServer } from 'node:http';
 import test from 'node:test';
 import express from 'express';
 import jwt from 'jsonwebtoken';
@@ -8,7 +9,7 @@ import { Pool } from 'pg';
 
 test('campaign API persists scoped drafts, real counts, suppression and acknowledged delivery', {
   skip: process.env.CAMPAIGN_SMOKE !== '1' && 'Use a dedicated migrated *_smoke database and set CAMPAIGN_SMOKE=1',
-  timeout: 40000,
+  timeout: 90000,
 }, async (context) => {
   const { default: config } = await import('../config');
   const { default: pool } = await import('../config/database');
@@ -20,6 +21,8 @@ test('campaign API persists scoped drafts, real counts, suppression and acknowle
   const { EmailAdapter } = await import('../services/channels/EmailAdapter');
   const { default: MetaAccountStore } = await import('../services/whatsapp/meta/MetaAccountStore');
   const { MetaInboxStore } = await import('../services/whatsapp/meta/MetaInboxStore');
+  const { default: WhatsAppService } = await import('../services/whatsappService');
+  const { default: createMetaWebhookRoutes } = await import('../routes/metaWebhookRoutes');
 
   assert.match(config.database.name, /_smoke$/);
   assert.equal(config.database.host, '127.0.0.1');
@@ -89,9 +92,16 @@ test('campaign API persists scoped drafts, real counts, suppression and acknowle
     skipPacingDelay: true, channelAdapters: new Map([['email', adapter]]),
   });
   const app = express();
-  app.use(express.json());
+  const metaSecret = 'campaign-local-signed-receipt-fixture';
+  const originalProvider = config.whatsapp.provider;
+  const originalMetaSecret = config.meta.appSecret;
+  config.whatsapp.provider = 'meta-cloud';
+  config.meta.appSecret = metaSecret;
+  context.after(() => { config.whatsapp.provider = originalProvider; config.meta.appSecret = originalMetaSecret; });
+  app.use(express.json({ verify: (req, _res, buf) => { Object.assign(req, { rawBody: buf }); } }));
   app.use('/api/v1', createRoutes({ dispatcher, consent, segments }));
   app.use('/production', createRoutes());
+  app.use('/api/webhooks/meta/whatsapp', createMetaWebhookRoutes(new WhatsAppService()));
   const server = app.listen(0, '127.0.0.1');
   context.after(() => {
     allowProvider();
@@ -101,6 +111,19 @@ test('campaign API persists scoped drafts, real counts, suppression and acknowle
   const address = server.address();
   assert.ok(address && typeof address !== 'string');
   const base = `http://127.0.0.1:${address.port}`;
+
+  async function receipt(phone: string, status: Record<string, unknown>, secret = metaSecret, expected = 200) {
+    const raw = JSON.stringify({ object: 'whatsapp_business_account', entry: [{ changes: [{ field: 'messages', value: {
+      metadata: { phone_number_id: phone }, statuses: [status],
+    } }] }] });
+    const response = await fetch(`${base}/api/webhooks/meta/whatsapp`, { method: 'POST', headers: {
+      'content-type': 'application/json', 'x-hub-signature-256': `sha256=${createHmac('sha256', secret).update(raw).digest('hex')}`,
+    }, body: raw });
+    const result = await response.json();
+    assert.equal(response.status, expected, JSON.stringify(result));
+    return result;
+  }
+  const now = () => String(Math.floor(Date.now() / 1000));
 
   function sendRequest(path: string, companyId: number, body?: unknown, role = 'ADMIN') {
     return fetch(base + path, {
@@ -190,23 +213,36 @@ test('campaign API persists scoped drafts, real counts, suppression and acknowle
   const metaRequests: Array<{ url: string; authorization: string | null; body: Record<string, unknown> }> = [];
   let releaseMeta!: () => void;
   const holdFirstProviderResponse = new Promise<void>((resolve) => { releaseMeta = resolve; });
+  let enterMeta!: () => void;
+  const firstProviderRequest = new Promise<void>((resolve) => { enterMeta = resolve; });
   let confirmMeta = true;
   let rejectMeta = false;
   const realFetch = globalThis.fetch;
+  const graphServer = createServer(async (req, res) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) chunks.push(Buffer.from(chunk));
+    metaRequests.push({
+      url: `https://graph.facebook.com${req.url}`, authorization: req.headers.authorization ?? null,
+      body: JSON.parse(Buffer.concat(chunks).toString()),
+    });
+    assert.equal(req.method, 'POST');
+    const number = metaRequests.length;
+    if (number === 1) { enterMeta(); await holdFirstProviderResponse; }
+    res.setHeader('content-type', 'application/json');
+    if (rejectMeta) res.writeHead(400).end(JSON.stringify({ error: { code: 100, message: 'Fixture rejection' } }));
+    else if (!confirmMeta) res.destroy();
+    else res.end(JSON.stringify({ messages: [{ id: `wamid.smoke-${number}` }] }));
+  }).listen(0, '127.0.0.1');
+  await once(graphServer, 'listening');
+  const graphAddress = graphServer.address();
+  assert.ok(graphAddress && typeof graphAddress !== 'string');
+  context.after(() => { graphServer.close(); });
   const fetchFixture: typeof fetch = async (input, init) => {
     const url = new URL(String(input));
     if (url.origin === base) return realFetch(input, init);
     assert.equal(url.origin, 'https://graph.facebook.com');
     assert.equal(init?.redirect, 'error');
-    metaRequests.push({
-      url: url.href,
-      authorization: new Headers(init?.headers).get('Authorization'),
-      body: JSON.parse(String(init?.body)),
-    });
-    const number = metaRequests.length;
-    if (number === 1) await holdFirstProviderResponse;
-    if (rejectMeta) return Response.json({ error: { code: 100, message: 'Fixture rejection' } }, { status: 400 });
-    return Response.json(confirmMeta ? { messages: [{ id: `wamid.smoke.${number}` }] } : {});
+    return realFetch(`http://127.0.0.1:${graphAddress.port}${url.pathname}${url.search}`, init);
   };
   globalThis.fetch = fetchFixture;
   context.after(() => {
@@ -269,6 +305,12 @@ test('campaign API persists scoped drafts, real counts, suppression and acknowle
   const requestBody = { reviewKey: review.reviewKey };
   const dispatches = [sendRequest(whatsappDispatch, tenant, requestBody), sendRequest(whatsappDispatch, tenant, requestBody)];
   const firstResponse = await Promise.race(dispatches);
+  await Promise.race([firstProviderRequest, Promise.all(dispatches).then(() => { throw new Error('Graph did not receive the first send'); })]);
+  const earlyCallback = metaRequests[0].body.biz_opaque_callback_data;
+  assert.match(String(earlyCallback), /^automat-campaign:del_[a-f0-9-]{36}$/);
+  const earlyReceipt = { id: 'wamid.smoke-1', status: 'delivered', timestamp: now(), recipient_id: '51987570123',
+    biz_opaque_callback_data: earlyCallback };
+  await receipt(metaPhoneId, earlyReceipt);
   releaseMeta();
   assert.equal(firstResponse.status, 409);
   const outcomes = await Promise.all(dispatches);
@@ -276,12 +318,14 @@ test('campaign API persists scoped drafts, real counts, suppression and acknowle
   assert.ok(acceptedDispatch);
   const { data: sentWhatsApp } = await acceptedDispatch.json();
   assert.equal(sentWhatsApp.statsDispatched, 1);
+  assert.equal(sentWhatsApp.statsDelivered, 1);
   assert.equal(sentWhatsApp.connectionId, `wa-meta-${tenant}-${metaPhoneId}`);
   const scopedConnections = await tenantScopedUoW.run(tenant, (client) => client.query(
     'SELECT id FROM channel_connections WHERE account_id = $1', [metaPhoneId],
   ));
   assert.deepEqual(scopedConnections.rows, [{ id: sentWhatsApp.connectionId }]);
-  assert.equal((await dispatcher.getDeliveries(whatsappCampaign.id, tenant))[0]?.providerMessageId, 'wamid.smoke.1');
+  assert.equal((await dispatcher.getDeliveries(whatsappCampaign.id, tenant))[0]?.providerMessageId, 'wamid.smoke-1');
+  assert.equal((await dispatcher.getDeliveries(whatsappCampaign.id, tenant))[0]?.status, 'delivered');
   await request(whatsappDispatch, tenant, 200, {});
   await request(whatsappDispatch, other, 404, {});
   assert.deepEqual(metaRequests, [{
@@ -289,6 +333,7 @@ test('campaign API persists scoped drafts, real counts, suppression and acknowle
     authorization: `Bearer ${fixtureToken}`,
     body: {
       messaging_product: 'whatsapp', to: '51987570123', type: 'template',
+      biz_opaque_callback_data: earlyCallback,
       template: { name: 'aviso', language: { code: 'es_CO' } },
     },
   }]);
@@ -317,7 +362,7 @@ test('campaign API persists scoped drafts, real counts, suppression and acknowle
   assert.equal(unconfirmed.data.statsFailed, 0);
   const [unconfirmedDelivery] = await dispatcher.getDeliveries(missingAck.id, tenant);
   assert.equal(unconfirmedDelivery.status, 'pending');
-  assert.equal(unconfirmedDelivery.errorCode, 'CAMPAIGN_PROVIDER_ACK_MISSING');
+  assert.equal(unconfirmedDelivery.errorCode, 'CAMPAIGN_PROVIDER_OUTCOME_UNKNOWN');
   const pendingReview = await request(`/production/campaigns/${missingAck.id}/dispatch-review`, tenant, 200);
   assert.equal(pendingReview.data.blockedByUnconfirmedDelivery, true);
   assert.equal(pendingReview.data.unattemptedCount, 1);
@@ -326,6 +371,56 @@ test('campaign API persists scoped drafts, real counts, suppression and acknowle
   const replay = await request(`/production/campaigns/${missingAck.id}/dispatch`, tenant, 409, {});
   assert.equal(replay.error, 'CAMPAIGN_DELIVERY_UNCONFIRMED');
   assert.equal(metaRequests.length, attemptedBeforeReplay);
+
+  const otherTenantPhone = String(BigInt(metaPhoneId) + 2n);
+  const accounts = new MetaAccountStore();
+  await accounts.upsertConnection(tenant, { phoneNumberId: otherMetaPhoneId, accessToken: 'test-other-line' });
+  await accounts.upsertConnection(other, { phoneNumberId: otherTenantPhone, accessToken: 'test-other-tenant' });
+  const uncertain = metaRequests[attemptedBeforePause].body;
+  const confirmation = {
+    id: 'wamid.campaign-recovered', status: 'delivered', timestamp: now(), recipient_id: uncertain.to,
+    biz_opaque_callback_data: uncertain.biz_opaque_callback_data,
+  };
+  await receipt(metaPhoneId, confirmation, 'wrong-secret', 403);
+  for (const [line, patch] of [
+    [otherMetaPhoneId, {}], [otherTenantPhone, {}],
+    [metaPhoneId, { recipient_id: '51987572123' }],
+    [metaPhoneId, { timestamp: String(Number(now()) - 3600) }],
+    [metaPhoneId, { timestamp: String(Number(now()) + 3600) }],
+    [metaPhoneId, { biz_opaque_callback_data: undefined }],
+    [metaPhoneId, { biz_opaque_callback_data: earlyCallback }],
+  ] as const) await receipt(line, { ...confirmation, ...patch });
+  assert.equal((await dispatcher.getDeliveries(missingAck.id, tenant))[0]?.status, 'pending');
+  await receipt(metaPhoneId, confirmation);
+  assert.equal((await receipt(metaPhoneId, confirmation)).results[0].duplicate, true);
+  const recoveredReview = await request(`/production/campaigns/${missingAck.id}/dispatch-review`, tenant, 200);
+  assert.equal(recoveredReview.data.campaignStatus, 'paused');
+  assert.equal(recoveredReview.data.blockedByUnconfirmedDelivery, false);
+  assert.match((await request(`/production/campaigns/${missingAck.id}`, tenant, 200)).data.pauseReason, /se concilió/);
+  assert.equal(metaRequests.length, attemptedBeforeReplay);
+
+  confirmMeta = true;
+  const resumed = await request(`/production/campaigns/${missingAck.id}/dispatch`, tenant, 200, { reviewKey: recoveredReview.data.reviewKey });
+  assert.equal(resumed.data.status, 'completed');
+  assert.equal(resumed.data.statsDispatched, 2);
+  assert.equal(resumed.data.statsDelivered, 1);
+  assert.equal(metaRequests.length, attemptedBeforeReplay + 1);
+  const continued = metaRequests.at(-1)!.body;
+  assert.notEqual(continued.to, uncertain.to);
+  const continuedReceipt = {
+    id: `wamid.smoke-${metaRequests.length}`, status: 'read', timestamp: now(), recipient_id: continued.to,
+    biz_opaque_callback_data: continued.biz_opaque_callback_data,
+  };
+  await receipt(metaPhoneId, continuedReceipt);
+  await receipt(metaPhoneId, { ...continuedReceipt, status: 'failed' });
+  await receipt(metaPhoneId, { ...confirmation, status: 'sent' });
+  const closedCampaign = await request(`/production/campaigns/${missingAck.id}`, tenant, 200);
+  assert.equal(closedCampaign.data.status, 'completed');
+  assert.equal(closedCampaign.data.statsDelivered, 2);
+  assert.equal(closedCampaign.data.statsFailed, 0);
+  const settled = await dispatcher.getDeliveries(missingAck.id, tenant);
+  assert.ok(settled.every(({ status }) => status === 'delivered'));
+  assert.equal(settled.find(({ destination }) => destination === uncertain.to)?.providerMessageId, confirmation.id);
 
   await setContacts([contacts[0]]);
   rejectMeta = true;

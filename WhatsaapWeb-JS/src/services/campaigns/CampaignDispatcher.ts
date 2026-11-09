@@ -3,6 +3,8 @@ import {
   CampaignDefinitionV1,
   CreateCampaignCommandV1,
   CampaignDeliveryV1,
+  SendMessageCommandV1,
+  SendMessageResultV1,
   createCampaignCommandV1Schema,
   ChannelAdapterV1,
 } from '@whatsap-automat/contracts';
@@ -12,9 +14,10 @@ import { ConsentService, consentService } from './ConsentService';
 import { SegmentationService, segmentationService, RecipientRecord } from './SegmentationService';
 import { CampaignRequestError } from './CampaignRequestError';
 import { defaultWhatsAppCampaignLanguage, WhatsAppCampaignTransport } from './WhatsAppCampaignTransport';
+import { lockMetaReceipt } from '../whatsapp/meta/MetaCanonicalReceipt';
+import { lockCampaign, reconciledDeliveryMessage, refreshCampaignStats, unconfirmedDeliveryMessage } from './CampaignMetaReceipt';
 
 const audienceLimit = 1000;
-const unconfirmedDeliveryMessage = 'Hay entregas sin confirmar que requieren conciliación.';
 
 export interface DispatcherOptions {
   readonly skipPacingDelay?: boolean; // For deterministic unit tests
@@ -299,7 +302,8 @@ export class CampaignDispatcher {
     const whatsapp = this.uow && !adapter && campaign.channel === 'whatsapp-cloud'
       ? this.options?.whatsappTransport
       : undefined;
-    let send = adapter?.send.bind(adapter);
+    let send: ((command: SendMessageCommandV1, deliveryId: string) => Promise<SendMessageResultV1>) | undefined =
+      adapter?.send.bind(adapter);
     let whatsappAccountId: string | undefined;
     if (!send && !whatsapp) {
       throw new CampaignRequestError(409, 'CAMPAIGN_CHANNEL_UNAVAILABLE', 'El canal todavía no tiene un transporte de campañas operativo.');
@@ -337,7 +341,7 @@ export class CampaignDispatcher {
           const selected = await whatsapp.resolveConnection(client, tenantId, campaign.connectionId);
           campaign.connectionId = selected.id;
           whatsappAccountId = selected.accountId;
-          send = (command) => whatsapp.send(command, selected.accountId);
+          send = (command, deliveryId) => whatsapp.send(command, selected.accountId, deliveryId);
         }
         const connection = await client.query(
           `SELECT account_id FROM channel_connections
@@ -518,14 +522,15 @@ export class CampaignDispatcher {
         campaignId,
         tenantId,
         contactId: recipient.contactId || null,
-        destination: recipient.destination,
+        destination: whatsapp ? key : recipient.destination,
         idempotencyKey,
         status: 'pending',
         renderedPayload: {},
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
-      await this.saveDelivery(tenantId, delivery);
+      await this.saveDelivery(tenantId, delivery, whatsappAccountId && campaign.connectionId
+        ? { phone: whatsappAccountId, connection: campaign.connectionId } : undefined);
       try {
         const result = await send({
           schemaVersion: 1,
@@ -538,7 +543,7 @@ export class CampaignDispatcher {
           message: campaign.templateId
             ? { kind: 'template', templateId: campaign.templateId, parameters: campaign.templateVariables }
             : { kind: 'text', text: campaign.contentBody || '' },
-        });
+        }, delivery.id);
         if (!result.accepted) {
           throw new CampaignRequestError(502, 'CAMPAIGN_PROVIDER_REJECTED', 'El proveedor no aceptó el mensaje.');
         }
@@ -563,7 +568,15 @@ export class CampaignDispatcher {
           attemptFailed++;
         }
       }
-      await this.saveDelivery(tenantId, delivery);
+      if (whatsapp) {
+        const persistedStatus = await this.saveWhatsAppOutcome(tenantId, delivery);
+        if (persistedStatus === 'pending') {
+          campaign.status = 'paused';
+          campaign.pauseReason = unconfirmedDeliveryMessage;
+        }
+      } else {
+        await this.saveDelivery(tenantId, delivery);
+      }
       if (evaluateCircuitBreaker()) break;
 
       // Pacing delay (token bucket pacing)
@@ -591,6 +604,21 @@ export class CampaignDispatcher {
       this.memoryCampaigns.set(campaignId, campaign);
     } else {
       await this.uow.run(tenantId, async (client) => {
+        if (whatsapp) {
+          await lockCampaign(client, tenantId, campaignId);
+          const totals = await refreshCampaignStats(client, tenantId, campaignId);
+          campaign.statsDispatched = totals.stats_dispatched;
+          campaign.statsDelivered = totals.stats_delivered;
+          campaign.statsFailed = totals.stats_failed;
+          campaign.statsSuppressed = totals.stats_suppressed;
+          if (campaign.pauseReason === unconfirmedDeliveryMessage && !totals.has_pending) {
+            campaign.pauseReason = reconciledDeliveryMessage;
+          }
+          if (campaign.status === 'completed' || campaign.status === 'failed') {
+            campaign.status = campaign.statsDispatched === 0 && campaign.statsFailed > 0 ? 'failed' : 'completed';
+            campaign.completedAt = campaign.status === 'completed' ? campaign.completedAt || new Date().toISOString() : null;
+          }
+        }
         await client.query(
           `UPDATE campaigns SET status = $1, started_at = $2, completed_at = $3,
             stats_total = $4, stats_dispatched = $5, stats_failed = $6, stats_suppressed = $7,
@@ -675,7 +703,9 @@ export class CampaignDispatcher {
     });
   }
 
-  private async saveDelivery(tenantId: number, delivery: CampaignDeliveryV1): Promise<void> {
+  private async saveDelivery(
+    tenantId: number, delivery: CampaignDeliveryV1, meta?: { phone: string; connection: string },
+  ): Promise<void> {
     if (!this.uow) {
       this.memoryDeliveries.set(delivery.id, delivery);
       return;
@@ -684,8 +714,8 @@ export class CampaignDispatcher {
       await client.query(
         `INSERT INTO campaign_deliveries
           (id, campaign_id, tenant_id, contact_id, destination, idempotency_key, status, suppression_reason,
-           provider_message_id, error_code, error_message, dispatched_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+           provider_message_id, error_code, error_message, dispatched_at, meta_phone_number_id, meta_connection_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
          ON CONFLICT (id) DO UPDATE SET
            status = EXCLUDED.status, provider_message_id = EXCLUDED.provider_message_id,
            error_code = EXCLUDED.error_code, error_message = EXCLUDED.error_message,
@@ -694,8 +724,50 @@ export class CampaignDispatcher {
           delivery.id, delivery.campaignId, tenantId, delivery.contactId ?? null, delivery.destination,
           delivery.idempotencyKey, delivery.status, delivery.suppressionReason ?? null, delivery.providerMessageId ?? null,
           delivery.errorCode ?? null, delivery.errorMessage ?? null, delivery.dispatchedAt ?? null,
+          meta?.phone ?? null, meta?.connection ?? null,
         ],
       );
+    });
+  }
+
+  private async saveWhatsAppOutcome(tenantId: number, delivery: CampaignDeliveryV1): Promise<string> {
+    if (!this.uow) throw new Error('WhatsApp campaign delivery requires a transaction.');
+    return this.uow.run(tenantId, async (db) => {
+      let providerId = delivery.providerMessageId ?? null;
+      let outcome = delivery.status;
+      let errorCode = delivery.errorCode ?? null;
+      let errorMessage = delivery.errorMessage ?? null;
+      if (providerId) await lockMetaReceipt(db, tenantId, providerId);
+      await lockCampaign(db, tenantId, delivery.campaignId);
+      if (providerId) {
+        const collision = await db.query(`
+          SELECT 1 FROM campaign_deliveries d JOIN campaigns c ON c.id = d.campaign_id AND c.tenant_id = d.tenant_id
+          WHERE d.tenant_id = $1 AND c.channel = 'whatsapp-cloud' AND d.provider_message_id = $2 AND d.id <> $3
+          UNION ALL SELECT 1 FROM messages WHERE company_id = $1 AND channel = 'whatsapp' AND provider_message_id = $2
+        `, [tenantId, providerId, delivery.id]);
+        if (collision.rows.length) {
+          providerId = null;
+          outcome = 'pending';
+          errorCode = 'CAMPAIGN_PROVIDER_OUTCOME_UNKNOWN';
+          errorMessage = 'No se confirmó el envío al proveedor.';
+        }
+      }
+      const { rows: [result] } = await db.query(`
+        UPDATE campaign_deliveries SET
+          status = CASE WHEN status = 'pending' THEN $3 ELSE status END,
+          provider_message_id = COALESCE(provider_message_id, $4),
+          dispatched_at = CASE WHEN $4::varchar IS NOT NULL THEN COALESCE(dispatched_at, $5) ELSE dispatched_at END,
+          error_code = CASE WHEN status = 'pending' THEN $6 ELSE error_code END,
+          error_message = CASE WHEN status = 'pending' THEN $7 ELSE error_message END,
+          updated_at = clock_timestamp()
+        WHERE tenant_id = $1 AND id = $2 AND meta_phone_number_id IS NOT NULL
+          AND (status = 'pending' OR ($4::varchar IS NOT NULL AND provider_message_id = $4))
+        RETURNING status
+      `, [tenantId, delivery.id, outcome, providerId, delivery.dispatchedAt ?? null, errorCode, errorMessage]);
+      if (result) return result.status;
+      const { rows: [current] } = await db.query('SELECT status FROM campaign_deliveries WHERE tenant_id = $1 AND id = $2',
+        [tenantId, delivery.id]);
+      return current?.status ?? 'pending';
     });
   }
 

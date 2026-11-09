@@ -4,6 +4,7 @@ import pool from '../../../config/database';
 import { TenantScopedUoW } from '../../../db/TenantScopedUoW';
 import { Queryable } from '../../../shared/UnitOfWorkPort';
 import { applyCanonicalMetaStatuses, correlateCanonicalMetaStatus, lockMetaReceipt } from './MetaCanonicalReceipt';
+import { applyCampaignMetaReceipt, campaignCallbackPrefix } from '../../campaigns/CampaignMetaReceipt';
 
 function toUnixSeconds(value: unknown): number | null {
   if (!value) return null;
@@ -585,8 +586,10 @@ export class MetaInboxStore {
         await lockMetaReceipt(client, this.companyId, providerMessageId);
       }
       const legacyKey = `status:${providerMessageId}:${status.status}:${status.timestamp || ''}`;
-      const callbackData = typeof status.biz_opaque_callback_data === 'string' &&
-        status.biz_opaque_callback_data.startsWith('automat:') ? status.biz_opaque_callback_data : null;
+      const opaque = status.biz_opaque_callback_data;
+      const campaignCallback = typeof opaque === 'string' && opaque.startsWith(campaignCallbackPrefix);
+      const canonicalCallback = typeof opaque === 'string' && opaque.startsWith('automat:');
+      const callbackData = campaignCallback || canonicalCallback ? opaque : null;
       const receiptIdentity = [
         providerMessageId, status.status, status.timestamp ?? null, metadata?.phone_number_id ?? null, status.recipient_id ?? null,
       ];
@@ -624,12 +627,15 @@ export class MetaInboxStore {
       }
 
       const eventId = String(event.rows[0].id);
-      if (typeof providerMessageId === 'string' && callbackData) {
+      if (typeof providerMessageId === 'string' && canonicalCallback) {
         await correlateCanonicalMetaStatus(client, this.companyId, providerMessageId, eventId);
       }
-      const canonical = typeof providerMessageId === 'string' &&
+      if (typeof providerMessageId === 'string' && campaignCallback) {
+        await applyCampaignMetaReceipt(client, this.companyId, providerMessageId, eventId);
+      }
+      const canonical = !campaignCallback && typeof providerMessageId === 'string' &&
         await applyCanonicalMetaStatuses(client, this.companyId, providerMessageId, eventId);
-      if (!canonical) {
+      if (!canonical && !campaignCallback) {
         const messageResult = await client.query(
           `SELECT * FROM messages WHERE company_id = $1 AND channel = 'whatsapp' AND provider_message_id = $2 LIMIT 1`,
           [this.companyId, providerMessageId]
