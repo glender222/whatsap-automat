@@ -1,4 +1,5 @@
 import type { MobileConversation } from '../services/apiClient';
+import type { MobileAttachment } from '../services/attachmentData';
 
 export type RootStackParamList = {
   Inbox: undefined;
@@ -7,6 +8,7 @@ export type RootStackParamList = {
   };
   Approvals: undefined;
   ApprovalDetail: { approvalId: string };
+  AttachmentDetail: { conversationId: string; messageId: string; attachment: MobileAttachment };
 };
 
 export const DARK_THEME = {

@@ -1,4 +1,8 @@
 import { authStorage, type AuthSession, type AuthSessionSnapshot } from './authStorage';
+import {
+  downloadMimeType, isAttachmentId, isMatchingImage, isPreviewImage, MAX_ATTACHMENT_BYTES, parseAttachments,
+  type AttachmentBytes, type MobileAttachment,
+} from './attachmentData';
 
 interface ApiEnvelope<T> {
   success: boolean;
@@ -35,6 +39,7 @@ export interface MobileMessage {
   type?: string;
   status?: string;
   clientRequestId?: string | null;
+  attachments?: MobileAttachment[];
 }
 
 interface ConversationMessagePage {
@@ -44,6 +49,7 @@ interface ConversationMessagePage {
     direction: 'inbound' | 'outbound';
     deliveryState: string;
     clientRequestId: string | null;
+    channel?: string;
     causedBy: { type: string };
     attachments: unknown[];
     createdAt: string;
@@ -137,16 +143,21 @@ type ResponseFormat = 'envelope' | 'legacy-status' | 'canonical';
 
 async function request<T>(
   origin: string, path: string, init: RequestInit = {}, accessToken?: string, format: ResponseFormat = 'envelope',
+  read?: (response: Response) => Promise<T>,
 ): Promise<T> {
   const headers = new Headers(init.headers);
-  headers.set('Accept', 'application/json, application/problem+json');
+  if (!headers.has('Accept')) headers.set('Accept', 'application/json, application/problem+json');
   if (init.body) headers.set('Content-Type', 'application/json');
   if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`);
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15_000);
+  const abort = () => controller.abort();
+  if (init.signal?.aborted) abort();
+  else init.signal?.addEventListener('abort', abort, { once: true });
+  const timeout = setTimeout(abort, read ? 30_000 : 15_000);
   try {
     const response = await fetch(`${origin}/api${path}`, { ...init, headers, signal: controller.signal });
+    if (response.ok && read) return await read(response);
     const body = await response.json().catch(() => null);
     if (!response.ok || !body || (format !== 'canonical' && body.success !== true)) {
       const message = body?.userMessage ?? body?.detail ?? body?.message ?? body?.error;
@@ -161,7 +172,45 @@ async function request<T>(
     return format === 'envelope' ? (body as ApiEnvelope<T>).data : body as T;
   } finally {
     clearTimeout(timeout);
+    init.signal?.removeEventListener('abort', abort);
   }
+}
+
+async function readAttachment(response: Response): Promise<AttachmentBytes> {
+  if (response.status !== 200 || !response.body) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new MobileApiError(502, 'El servidor no devolvió el archivo completo.');
+  }
+  const length = response.headers.get('Content-Length');
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    if (length !== null && Number(length) > MAX_ATTACHMENT_BYTES) throw new MobileApiError(413, 'El archivo supera el límite de 10 MB.');
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      size += chunk.value.byteLength;
+      if (size > MAX_ATTACHMENT_BYTES) throw new MobileApiError(413, 'El archivo supera el límite de 10 MB.');
+      chunks.push(chunk.value);
+    }
+  } catch (error) {
+    await reader.cancel().catch(() => undefined);
+    throw error;
+  } finally {
+    reader.releaseLock();
+  }
+  if (size === 0) throw new MobileApiError(502, 'El archivo está vacío.');
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  const mimeType = downloadMimeType(response.headers.get('Content-Type'));
+  const imageMismatch = isPreviewImage(mimeType) && !isMatchingImage({ bytes, mimeType });
+  const pdfMismatch = mimeType === 'application/pdf' && String.fromCharCode(...bytes.subarray(0, 5)) !== '%PDF-';
+  return { bytes, mimeType: imageMismatch || pdfMismatch ? 'application/octet-stream' : mimeType };
 }
 
 function sessionEnded() {
@@ -224,23 +273,27 @@ async function refreshAfterExpiry(original: AuthSessionSnapshot, origin: string)
   return promise;
 }
 
-async function authenticated<T>(path: string, init?: RequestInit, format?: ResponseFormat): Promise<T> {
+async function authenticated<T>(
+  path: string, init?: RequestInit, format?: ResponseFormat, read?: (response: Response) => Promise<T>,
+): Promise<T> {
   const original = await authStorage.getSnapshot();
   if (!original || !authStorage.isCurrent(original.revision)) throw sessionEnded();
   const origin = normalizeServerUrl(original.session.apiUrl, typeof __DEV__ !== 'undefined' && __DEV__);
   const execute = async (snapshot: AuthSessionSnapshot) => {
     if (!authStorage.isCurrent(snapshot.revision)) throw sessionEnded();
+    if (init?.signal?.aborted) throw new Error('Solicitud cancelada.');
     try {
-      return await request<T>(origin, path, init, snapshot.session.accessToken, format);
+      return await request<T>(origin, path, init, snapshot.session.accessToken, format, read);
     } finally {
       if (!authStorage.isCurrent(snapshot.revision)) throw sessionEnded();
+      if (init?.signal?.aborted) throw new Error('Solicitud cancelada.');
     }
   };
 
   try {
     return await execute(original);
   } catch (error) {
-    if (!(error instanceof MobileApiError && error.accessTokenExpired)) throw error;
+    if (init?.signal?.aborted || !(error instanceof MobileApiError && error.accessTokenExpired)) throw error;
     const refreshed = await refreshAfterExpiry(original, origin);
     return execute(refreshed);
   }
@@ -344,17 +397,28 @@ export const apiClient = {
       'canonical',
     );
     return {
-      messages: page.items.map((message): MobileMessage => ({
-        id: message.id,
-        body: message.body,
-        fromMe: message.direction === 'outbound',
-        timestamp: Date.parse(message.createdAt),
-        type: message.attachments.length ? 'attachment' : 'text',
-        status: message.deliveryState,
-        clientRequestId: message.causedBy.type === 'human' ? message.clientRequestId : null,
-      })),
+      messages: page.items.map((message): MobileMessage => {
+        const attachments = message.channel === 'whatsapp-cloud' ? parseAttachments(message.attachments) : [];
+        return {
+          id: message.id,
+          body: message.body,
+          fromMe: message.direction === 'outbound',
+          timestamp: Date.parse(message.createdAt),
+          type: message.attachments.length ? 'attachment' : 'text',
+          status: message.deliveryState,
+          clientRequestId: message.causedBy.type === 'human' ? message.clientRequestId : null,
+          ...(attachments.length ? { attachments } : {}),
+        };
+      }),
       nextCursor: page.nextCursor,
     };
+  },
+
+  async getConversationAttachment(conversationId: string, messageId: string, attachmentId: string, signal: AbortSignal) {
+    if (![conversationId, messageId, attachmentId].every(isAttachmentId)) throw new MobileApiError(404, 'El adjunto no está disponible.');
+    return authenticated(`/v1/conversations/${conversationId}/messages/${messageId}/attachments/${attachmentId}`, {
+      headers: { Accept: '*/*' }, cache: 'no-store', redirect: 'error', credentials: 'omit', signal,
+    }, 'canonical', readAttachment);
   },
 
   getChatSessionStatus(chatId: string): Promise<ChatSessionStatus> {

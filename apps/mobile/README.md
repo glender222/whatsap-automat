@@ -31,6 +31,8 @@ Para responder, el operador toma el control de la conversación y el servidor co
 
 La bandeja muestra **Aprobaciones** cuando el servidor concede `approvals.review`. Una decisión ordinaria requiere confirmación y usa la versión de la solicitud y una clave que se conserva durante la sesión para reintentar la misma decisión. Las solicitudes de riesgo alto, financiero, irreversible o sin verificar permanecen visibles con la decisión bloqueada hasta contar con los controles de verificación correspondientes.
 
+En WhatsApp Cloud, la conversación permite seleccionar cada adjunto disponible. El cliente descarga bajo demanda hasta 10 MiB desde el servidor autenticado. La vista previa de imágenes usa memoria. **Descargar archivo** guarda una copia en el navegador o en la carpeta elegida mediante el selector nativo. La aplicación no crea archivos temporales para este recorrido. Queda pendiente probar la vista previa y el selector en Android e iOS físicos.
+
 ## Distribución
 
 Una exportación de Expo verifica los paquetes JavaScript para Android, iOS y web. Los instaladores nativos requieren un proyecto de compilación configurado, credenciales de firma y validación en un dispositivo.

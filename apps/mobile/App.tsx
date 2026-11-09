@@ -10,6 +10,7 @@ import { SessionContext } from './src/services/sessionContext';
 import { SignInScreen } from './src/screens/SignInScreen';
 import { InboxScreen } from './src/screens/InboxScreen';
 import { ChatDetailScreen } from './src/screens/ChatDetailScreen';
+import { AttachmentDetailScreen } from './src/screens/AttachmentDetailScreen';
 import { ApprovalDetailScreen, ApprovalsScreen } from './src/screens/ApprovalsScreen';
 import { DARK_THEME as colors, type RootStackParamList } from './src/types/navigation';
 
@@ -118,6 +119,7 @@ export default function App() {
           <Stack.Navigator screenOptions={{ headerShown: false }}>
             <Stack.Screen name="Inbox" component={InboxScreen} />
             <Stack.Screen name="ChatDetail" component={ChatDetailScreen} />
+            <Stack.Screen name="AttachmentDetail" component={AttachmentDetailScreen} />
             <Stack.Screen name="Approvals" component={ApprovalsScreen} />
             <Stack.Screen name="ApprovalDetail" component={ApprovalDetailScreen} />
           </Stack.Navigator>

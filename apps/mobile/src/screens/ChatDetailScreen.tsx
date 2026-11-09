@@ -17,6 +17,7 @@ import ArrowLeft from 'lucide-react-native/icons/arrow-left';
 import Send from 'lucide-react-native/icons/send';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { apiClient, MobileApiError, type MobileChatOwnership, type MobileMessage, type MobileTextCommand } from '../services/apiClient';
+import { isAttachmentId, safeAttachmentName } from '../services/attachmentData';
 import { useSession } from '../services/sessionContext';
 import { useRefreshOnFocus } from '../services/useRefreshOnFocus';
 import { TakeoverButton } from '../components/TakeoverButton';
@@ -303,7 +304,20 @@ export function ChatDetailScreen({ route, navigation }: Props) {
             const time = timestamp ? new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
             return (
               <View style={[styles.bubble, item.fromMe && styles.outbound]}>
-                <Text style={styles.message}>{item.body || (item.type && item.type !== 'text' ? 'Archivo adjunto' : 'Mensaje sin texto')}</Text>
+                {item.body || !item.attachments?.length ? (
+                  <Text style={styles.message}>{item.body || (item.type && item.type !== 'text' ? 'Archivo adjunto' : 'Mensaje sin texto')}</Text>
+                ) : null}
+                {isAttachmentId(String(conversationId)) && isAttachmentId(item.id) ? item.attachments?.map((attachment) => {
+                  const filename = safeAttachmentName(attachment.filename, attachment.mimeType);
+                  return (
+                    <Pressable key={attachment.id} accessibilityRole="button" accessibilityLabel={`Ver adjunto ${filename}`}
+                      style={styles.attachment} onPress={() => navigation.navigate('AttachmentDetail', {
+                        conversationId: String(conversationId), messageId: item.id, attachment,
+                      })}>
+                      <Text numberOfLines={2} style={styles.attachmentName}>{filename}</Text>
+                    </Pressable>
+                  );
+                }) : null}
                 <Text style={styles.secondary}>{[time, item.fromMe && item.status ? deliveryLabels[item.status] : ''].filter(Boolean).join(' · ')}</Text>
               </View>
             );
@@ -375,6 +389,8 @@ const styles = StyleSheet.create({
   bubble: { maxWidth: '86%', alignSelf: 'flex-start', padding: 12, gap: 5, borderRadius: 14, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
   outbound: { alignSelf: 'flex-end', backgroundColor: '#134e4a', borderColor: '#0f766e' },
   message: { color: colors.textPrimary, fontSize: 15, lineHeight: 21 },
+  attachment: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 10, borderRadius: 8, backgroundColor: colors.surfaceLight },
+  attachmentName: { color: colors.accent, fontSize: 14, fontWeight: '700' },
   secondary: { color: colors.textSecondary, fontSize: 12 },
   notice: { color: colors.textSecondary, fontSize: 13, lineHeight: 19, paddingHorizontal: 14, paddingVertical: 8 },
   empty: { minHeight: 120, alignItems: 'center', justifyContent: 'center', gap: 8 },
