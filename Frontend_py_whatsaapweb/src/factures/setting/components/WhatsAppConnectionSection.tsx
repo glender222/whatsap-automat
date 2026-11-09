@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState, type FormEvent } from 'react';
 import { WhatsAppService } from '../services/whatsappService';
 import { CompanyService, type CompanyOverview, type WhatsAppConnectionPayload } from '../services/companyService';
 
@@ -41,13 +41,17 @@ const WhatsAppConnectionSection: React.FC<WhatsAppConnectionSectionProps> = ({
     webhookVerifyToken: '',
   });
   const [saving, setSaving] = useState(false);
+  const submitting = useRef(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const whatsapp = companyOverview?.whatsapp;
   const isMetaCloud = whatsapp?.provider === 'meta-cloud';
+  const isLegacy = whatsapp?.provider === 'webjs' && !loadingOverview;
   const displayNumber = whatsapp?.displayPhoneNumber || numeroAfiliado;
-  const statusLabel = whatsapp?.connected ? 'Conectado' : whatsapp?.configured ? 'Configurado' : 'Pendiente';
-  const statusClass = whatsapp?.connected || whatsapp?.configured
+  const statusLabel = isMetaCloud
+    ? whatsapp?.accountStatus === 'disconnected' ? 'Desconectado' : whatsapp?.configured ? 'Configurado' : 'Pendiente'
+    : whatsapp?.connected ? 'Conectado' : 'Pendiente';
+  const statusClass = statusLabel === 'Conectado' || statusLabel === 'Configurado'
     ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800'
     : 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800';
   const tokenInfo = whatsapp?.tokenConfigured
@@ -71,12 +75,15 @@ const WhatsAppConnectionSection: React.FC<WhatsAppConnectionSectionProps> = ({
     setForm((current) => ({ ...current, [field]: value }));
   };
 
-  const handleSaveConnection = async () => {
+  const handleSaveConnection = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (submitting.current || loadingOverview || !isMetaCloud || !canManageConnection || !form.phoneNumberId.trim()) return;
+    submitting.current = true;
     setSaving(true);
     setSaveMessage(null);
     setSaveError(null);
     try {
-      await CompanyService.saveWhatsAppConnection({
+      const saved = await CompanyService.saveWhatsAppConnection({
         ...form,
         phoneNumberId: form.phoneNumberId.trim(),
         accessToken: form.accessToken?.trim() || undefined,
@@ -87,12 +94,14 @@ const WhatsAppConnectionSection: React.FC<WhatsAppConnectionSectionProps> = ({
         businessId: form.businessId?.trim() || undefined,
         webhookVerifyToken: form.webhookVerifyToken?.trim() || undefined,
       });
+      if (saved.companyId !== companyOverview?.company.id) throw new Error('El servidor no confirmó el guardado para esta empresa.');
       setForm((current) => ({ ...current, accessToken: '' }));
-      setSaveMessage('Conexion WhatsApp guardada para esta empresa.');
+      setSaveMessage('Datos de conexión guardados para esta empresa.');
       await onConnectionSaved?.();
-    } catch (error: any) {
-      setSaveError(error?.response?.data?.message || error?.message || 'No se pudo guardar la conexion');
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'No se pudo guardar la conexión.');
     } finally {
+      submitting.current = false;
       setSaving(false);
     }
   };
@@ -110,7 +119,7 @@ const WhatsAppConnectionSection: React.FC<WhatsAppConnectionSectionProps> = ({
           <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-3">
             <div className="text-xs uppercase text-gray-500 dark:text-gray-400">Proveedor</div>
             <div className="mt-1 text-sm font-medium text-gray-900 dark:text-gray-100">
-              {isMetaCloud ? 'Meta Cloud API' : whatsapp?.provider || 'WhatsApp Web'}
+              {isMetaCloud ? 'Meta Cloud API' : whatsapp?.provider === 'webjs' ? 'WhatsApp Web' : whatsapp?.provider}
             </div>
           </div>
           <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-3">
@@ -128,9 +137,10 @@ const WhatsAppConnectionSection: React.FC<WhatsAppConnectionSectionProps> = ({
         </span>
         <div className="flex items-center gap-2 flex-wrap">
           <span className="px-3 md:px-4 py-1 rounded-full bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-gray-800 dark:text-gray-200 text-base md:text-lg font-mono min-w-[100px] text-center">
-            {loadingOverview ? 'Cargando...' : WhatsAppService.formatNumeroAfiliado(displayNumber || null)}
+            {loadingOverview ? <span role="status">Cargando…</span> : companyOverview
+              ? WhatsAppService.formatNumeroAfiliado(displayNumber || null) : 'Estado no disponible'}
           </span>
-          {!isMetaCloud && !numeroAfiliado && onAfiliar && (
+          {isLegacy && !numeroAfiliado && onAfiliar && (
             <button
               className="px-3 md:px-4 py-1.5 md:py-1 rounded-lg bg-blue-600 dark:bg-blue-700 text-white text-sm md:text-base font-medium hover:bg-blue-700 dark:hover:bg-blue-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               onClick={onAfiliar}
@@ -139,7 +149,7 @@ const WhatsAppConnectionSection: React.FC<WhatsAppConnectionSectionProps> = ({
               Afiliar
             </button>
           )}
-          {!isMetaCloud && numeroAfiliado && onDesafiliar && (
+          {isLegacy && numeroAfiliado && onDesafiliar && (
             <button
               className="px-3 md:px-4 py-1.5 md:py-1 rounded-lg bg-red-600 dark:bg-red-700 text-white text-sm md:text-base font-medium hover:bg-red-700 dark:hover:bg-red-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               onClick={onDesafiliar}
@@ -181,9 +191,9 @@ const WhatsAppConnectionSection: React.FC<WhatsAppConnectionSectionProps> = ({
       )}
 
       {isMetaCloud && canManageConnection && (
-        <div className="mt-5 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+        <form onSubmit={handleSaveConnection} aria-labelledby="whatsapp-meta-settings" className="mt-5 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
           <div className="mb-3">
-            <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+            <h3 id="whatsapp-meta-settings" className="text-sm font-semibold text-gray-900 dark:text-gray-100">
               Meta Cloud API
             </h3>
             <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -197,6 +207,8 @@ const WhatsAppConnectionSection: React.FC<WhatsAppConnectionSectionProps> = ({
               <input
                 value={form.phoneNumberId}
                 onChange={(event) => updateField('phoneNumberId', event.target.value)}
+                inputMode="numeric"
+                required
                 className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
                 placeholder="1141867852333596"
               />
@@ -234,6 +246,7 @@ const WhatsAppConnectionSection: React.FC<WhatsAppConnectionSectionProps> = ({
               </span>
               <input
                 type="password"
+                autoComplete="off"
                 value={form.accessToken || ''}
                 onChange={(event) => updateField('accessToken', event.target.value)}
                 className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
@@ -261,26 +274,25 @@ const WhatsAppConnectionSection: React.FC<WhatsAppConnectionSectionProps> = ({
           </div>
 
           <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <div className="text-xs text-gray-500 dark:text-gray-400">
-              Webhook: <span className="font-mono">/api/webhooks/meta/whatsapp</span>. Guarda un token nuevo si ves errores 401.
+            <div className="min-w-0 text-xs text-gray-500 dark:text-gray-400">
+              Webhook <span className="break-all font-mono">/api/webhooks/meta/whatsapp</span>. Guarda un token nuevo si ves errores 401.
             </div>
             <button
-              type="button"
-              onClick={handleSaveConnection}
-              disabled={saving || !form.phoneNumberId.trim()}
-              className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+              type="submit"
+              disabled={saving || loadingOverview || !form.phoneNumberId.trim()}
+              className="min-h-11 rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {saving ? 'Guardando...' : 'Guardar conexión'}
             </button>
           </div>
 
-          {saveMessage && <div className="mt-3 text-sm text-emerald-600 dark:text-emerald-400">{saveMessage}</div>}
-          {saveError && <div className="mt-3 text-sm text-red-600 dark:text-red-400">{saveError}</div>}
-        </div>
+          {saveMessage && <div role="status" className="mt-3 text-sm text-emerald-700 dark:text-emerald-300">{saveMessage}</div>}
+          {saveError && <div role="alert" className="mt-3 text-sm text-red-700 dark:text-red-300">{saveError}</div>}
+        </form>
       )}
       
       {/* Modal QR */}
-      {!isMetaCloud && afiliando && (
+      {isLegacy && afiliando && (
         <div className="flex flex-col items-center mt-4 px-4 bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-700 rounded-xl p-6 border-2 border-gray-200 dark:border-gray-600">
           <div className="text-gray-800 dark:text-gray-200 mb-4 text-base md:text-lg font-semibold">
             Conecta tu WhatsApp

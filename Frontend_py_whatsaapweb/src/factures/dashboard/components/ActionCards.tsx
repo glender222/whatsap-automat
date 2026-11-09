@@ -64,9 +64,8 @@ export default function ActionCards({ stats, loadState }: Props) {
     <div className="grid grid-cols-1 gap-6 sm:grid-cols-3">
       {CARDS.map((card) => {
         const Icon = card.icon;
-        const count =
-          loadState === 'error' ? null : Number(stats[card.countKey] || 0);
-        const isUrgent = card.showPulse && count && count > 0;
+        const count = loadState === 'ready' ? stats[card.countKey] : null;
+        const isUrgent = card.showPulse && count !== null && count > 0;
 
         return (
           <button
@@ -88,7 +87,7 @@ export default function ActionCards({ stats, loadState }: Props) {
             <div>
               <h4 className="mb-1 text-base font-bold text-[#10231C]">{card.title}</h4>
               <p className="text-[13px] font-medium text-[#5B6F66]">
-                {loadState === 'error' ? 'No disponible' : count === null ? '—' : card.countLabel(count)}
+                {loadState === 'error' ? 'No disponible' : count === null ? 'Cargando…' : card.countLabel(count)}
               </p>
             </div>
           </button>

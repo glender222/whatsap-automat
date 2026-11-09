@@ -39,7 +39,7 @@ export const workspaceSections: WorkspaceSection[] = [
     label: 'Operación',
     links: [
       { to: '/gestion-web/inicio', label: 'Bandeja de entrada', icon: Inbox },
-      { to: '/dashboard', label: 'Resumen', icon: LayoutDashboard, exact: true },
+      { to: '/dashboard', label: 'Resumen', icon: LayoutDashboard, exact: true, adminOnly: true },
       { to: '/dashboard/handoff', label: 'Escalaciones', icon: Hand },
       { to: '/gestion-web/reportes', label: 'Reportes', icon: BarChart3 },
     ],

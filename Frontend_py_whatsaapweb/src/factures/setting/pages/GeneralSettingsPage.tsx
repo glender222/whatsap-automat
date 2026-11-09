@@ -17,21 +17,24 @@ const GeneralSettingsPage: React.FC = () => {
   const settings = useSettings();
   const [companyOverview, setCompanyOverview] = useState<CompanyOverview | null>(null);
   const [loadingOverview, setLoadingOverview] = useState(true);
+  const [overviewError, setOverviewError] = useState(false);
 
   const refreshCompanyOverview = async () => {
     setLoadingOverview(true);
+    setOverviewError(false);
     try {
-      setCompanyOverview(await CompanyService.getOverview());
-    } catch (error: any) {
-      console.warn('No se pudo cargar la empresa WhatsApp:', error?.message || error);
+      const overview = await CompanyService.getOverview();
+      setCompanyOverview(overview);
+      if (overview.whatsapp.provider === 'webjs') void connection.fetchNumeroAfiliado();
+    } catch {
+      setCompanyOverview(null);
+      setOverviewError(true);
     } finally {
       setLoadingOverview(false);
     }
   };
 
-  // Cargar número afiliado al montar
   useEffect(() => {
-    connection.fetchNumeroAfiliado();
     refreshCompanyOverview();
     // eslint-disable-next-line
   }, []);
@@ -47,6 +50,10 @@ const GeneralSettingsPage: React.FC = () => {
               <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
                 WhatsApp Business
               </h2>
+              {overviewError && <div role="alert" className="mb-4 rounded-lg border border-red-200 p-3 text-sm text-red-800 dark:border-red-800 dark:text-red-200">
+                <p>No pudimos comprobar la configuración de WhatsApp.</p>
+                <button type="button" onClick={refreshCompanyOverview} className="min-h-11 font-semibold underline">Volver a cargar la conexión</button>
+              </div>}
               <WhatsAppConnectionSection
                 numeroAfiliado={connection.numeroAfiliado}
                 afiliando={connection.afiliando}

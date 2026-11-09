@@ -1,4 +1,3 @@
-import { useMemo } from 'react';
 import { Loader2, RefreshCw, Wifi, WifiOff } from 'lucide-react';
 import { useDashboardStats } from '../hooks/useDashboardStats';
 import QuickStatsRow from '../components/QuickStatsRow';
@@ -7,8 +6,7 @@ import MessageHeatmap from '../components/MessageHeatmap';
 import SlaAlertsList from '../components/SlaAlertsList';
 import HandoffWidget from '../components/HandoffWidget';
 
-function formatLastUpdated(date: Date | null): string {
-  if (!date) return 'Sin datos aún';
+function formatLastUpdated(date: Date): string {
   return new Intl.DateTimeFormat('es-PE', {
     hour: '2-digit',
     minute: '2-digit',
@@ -33,27 +31,21 @@ export default function DashboardPage() {
   } = useDashboardStats(7, 20);
 
   const isOnline = whatsappState === 'ready' && Boolean(whatsappStatus?.connected);
-  const isLoadingAll = useMemo(
-    () =>
-      quickStatsState === 'loading' &&
-      actionCardsState === 'loading' &&
-      heatmapState === 'loading' &&
-      slaAlertsState === 'loading',
-    [quickStatsState, actionCardsState, heatmapState, slaAlertsState]
-  );
+  const isLoading = [quickStatsState, actionCardsState, heatmapState, slaAlertsState, whatsappState].includes('loading');
 
   return (
     <div className="min-h-full bg-[#F7FAF8] p-6 lg:p-10">
       <div className="mx-auto w-full max-w-7xl space-y-8 pb-20">
         <section className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-center gap-4">
             <div>
               <h2 className="text-2xl font-bold tracking-tight text-[#10231C]">Centro de Operaciones</h2>
               <p className="mt-1 text-sm text-[#5B6F66]">
-                Panel operativo en tiempo real · última actualización {formatLastUpdated(lastUpdated)}
+                {lastUpdated ? `Última actualización de métricas ${formatLastUpdated(lastUpdated)}` : 'Sin métricas confirmadas todavía'}
               </p>
             </div>
             <div
+              role="status"
               className={`flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold shadow-sm ${
                 isOnline
                   ? 'border-[#006d2f]/20 bg-[#006d2f]/5 text-[#006d2f]'
@@ -61,15 +53,17 @@ export default function DashboardPage() {
               }`}
             >
               {whatsappState === 'loading' ? (
-                <Loader2 className="h-3 w-3 animate-spin" />
+                <><Loader2 className="h-3 w-3 shrink-0 animate-spin" aria-hidden="true" /> Verificando WhatsApp…</>
+              ) : whatsappState === 'error' ? (
+                <>Estado de WhatsApp no disponible</>
               ) : isOnline ? (
                 <>
                   <span className="h-2 w-2 animate-pulse rounded-full bg-[#006d2f]" />
-                  En línea
+                  {whatsappStatus?.provider === 'meta-cloud' ? 'WhatsApp configurado' : 'En línea'}
                 </>
               ) : (
                 <>
-                  <WifiOff className="h-3.5 w-3.5" />
+                  <WifiOff className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                   Desconectado
                 </>
               )}
@@ -79,12 +73,13 @@ export default function DashboardPage() {
           <button
             type="button"
             onClick={() => reloadAll()}
-            className="inline-flex items-center gap-2 rounded-[10px] border border-[#D9E5DF] bg-white px-4 py-2 text-sm font-semibold text-[#10231C] transition hover:bg-[#EEF4F1]"
+            disabled={isLoading}
+            className="inline-flex min-h-11 items-center gap-2 rounded-[10px] border border-[#D9E5DF] bg-white px-4 py-2 text-sm font-semibold text-[#10231C] transition hover:bg-[#EEF4F1] disabled:opacity-60"
           >
-            {isLoadingAll ? (
-              <Loader2 className="h-4 w-4 animate-spin text-[#128C7E]" />
+            {isLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin text-[#128C7E]" aria-hidden="true" />
             ) : (
-              <RefreshCw className="h-4 w-4 text-[#128C7E]" />
+              <RefreshCw className="h-4 w-4 text-[#128C7E]" aria-hidden="true" />
             )}
             Actualizar
           </button>
@@ -93,7 +88,7 @@ export default function DashboardPage() {
         <QuickStatsRow stats={quickStats} loadState={quickStatsState} />
 
         <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
-          <div className="space-y-8 lg:col-span-2">
+          <div className="min-w-0 space-y-8 lg:col-span-2">
             <ActionCards stats={actionCards} loadState={actionCardsState} />
             <MessageHeatmap data={heatmap} loadState={heatmapState} />
           </div>

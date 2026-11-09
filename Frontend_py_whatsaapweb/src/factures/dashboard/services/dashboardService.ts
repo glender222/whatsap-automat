@@ -60,6 +60,9 @@ export type WhatsappStatusSummary = {
 };
 
 function unwrap<T>(response: { data: { success: boolean; data: T } }): T {
+  if (response.data?.success !== true || response.data.data == null) {
+    throw new Error('El servidor no confirmó los datos del resumen.');
+  }
   return response.data.data;
 }
 
@@ -91,9 +94,13 @@ export const dashboardService = {
 
   async getWhatsappStatus(): Promise<WhatsappStatusSummary> {
     const response = await api.get('/whatsapp/status');
-    const data = response.data?.data || response.data;
+    const data = response.data?.data ?? response.data;
+    const connected = data?.connected ?? data?.isReady ?? data?.isConnected;
+    if (response.data?.success === false || typeof connected !== 'boolean') {
+      throw new Error('El servidor no confirmó el estado de WhatsApp.');
+    }
     return {
-      connected: Boolean(data?.connected ?? data?.isReady),
+      connected,
       provider: data?.provider || 'unknown',
       accountStatus: data?.accountStatus ?? null,
     };

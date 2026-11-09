@@ -59,6 +59,7 @@ export function useDashboardStats(heatmapDays = 7, slaLimit = 20): DashboardStat
       if (!mountedRef.current) return;
       setQuickStats(data);
       setQuickStatsState('ready');
+      setLastUpdated(new Date());
     } catch (error) {
       if (!mountedRef.current) return;
       console.error('Error cargando quick stats:', error);
@@ -73,6 +74,7 @@ export function useDashboardStats(heatmapDays = 7, slaLimit = 20): DashboardStat
       if (!mountedRef.current) return;
       setActionCards(data);
       setActionCardsState('ready');
+      setLastUpdated(new Date());
     } catch (error) {
       if (!mountedRef.current) return;
       console.error('Error cargando action cards:', error);
@@ -87,6 +89,7 @@ export function useDashboardStats(heatmapDays = 7, slaLimit = 20): DashboardStat
       if (!mountedRef.current) return;
       setHeatmap(data);
       setHeatmapState('ready');
+      setLastUpdated(new Date());
     } catch (error) {
       if (!mountedRef.current) return;
       console.error('Error cargando heatmap:', error);
@@ -101,6 +104,7 @@ export function useDashboardStats(heatmapDays = 7, slaLimit = 20): DashboardStat
       if (!mountedRef.current) return;
       setSlaAlerts(data);
       setSlaAlertsState('ready');
+      setLastUpdated(new Date());
     } catch (error) {
       if (!mountedRef.current) return;
       console.error('Error cargando SLA alerts:', error);
@@ -130,7 +134,6 @@ export function useDashboardStats(heatmapDays = 7, slaLimit = 20): DashboardStat
       reloadSlaAlerts(),
       reloadWhatsapp(),
     ]);
-    if (mountedRef.current) setLastUpdated(new Date());
   }, [reloadQuickStats, reloadActionCards, reloadHeatmap, reloadSlaAlerts, reloadWhatsapp]);
 
   useEffect(() => {
@@ -149,7 +152,6 @@ export function useDashboardStats(heatmapDays = 7, slaLimit = 20): DashboardStat
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => {
         targets.forEach((fn) => fn());
-        setLastUpdated(new Date());
       }, 3000);
     };
 

@@ -74,7 +74,7 @@ function AppRoutesInner() {
 
       <Route element={<PrivateRoute><DashboardLayout /></PrivateRoute>}>
         <Route path="/dashboard">
-          <Route index element={<DashboardPage />} />
+          <Route index element={<PrivateRoute adminOnly><DashboardPage /></PrivateRoute>} />
           <Route path="pagos" element={<PaymentsPage />} />
           <Route path="handoff" element={<HandoffPage />} />
           <Route path="ia/dominios" element={<PrivateRoute adminOnly><AiDomainsPage /></PrivateRoute>} />

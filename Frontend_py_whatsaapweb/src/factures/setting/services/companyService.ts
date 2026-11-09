@@ -69,6 +69,9 @@ export interface WhatsAppConnectionPayload {
 export class CompanyService {
   static async getOverview(): Promise<CompanyOverview> {
     const { data } = await api.get('/company/me');
+    if (data?.success !== true || !data.data?.company?.id || !data.data?.whatsapp?.provider) {
+      throw new Error('El servidor no confirmó la configuración de esta empresa.');
+    }
     return data.data;
   }
 
@@ -83,6 +86,9 @@ export class CompanyService {
 
   static async saveWhatsAppConnection(payload: WhatsAppConnectionPayload): Promise<WhatsAppCompanyConnection> {
     const { data } = await api.post('/company/whatsapp/connection', payload);
+    if (data?.success !== true || data.data?.provider !== 'meta-cloud' || data.data.phoneNumberId !== payload.phoneNumberId) {
+      throw new Error('El servidor no confirmó los datos de conexión guardados.');
+    }
     return data.data;
   }
 
