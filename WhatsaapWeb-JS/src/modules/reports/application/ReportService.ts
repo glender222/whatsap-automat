@@ -156,7 +156,8 @@ export class ReportService {
 
   private escapeCsv(value: unknown): string {
     const text = String(value ?? '');
-    return `"${text.replace(/"/g, '""')}"`;
+    const formula = typeof value === 'string' && /^(?:[\t\r\n]|\s*[=+@-])/.test(text);
+    return `"${formula ? "'" : ''}${text.replace(/"/g, '""')}"`;
   }
 
   private escapeXml(value: string): string {

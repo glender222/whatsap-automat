@@ -8,7 +8,7 @@ const MAX_RANGE_DAYS = 366;
 
 function parsePositiveInt(value: unknown): number | undefined {
   const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
 
 function todayInTimezone(timezone: string): string {
@@ -28,7 +28,9 @@ function dateDaysAgo(value: string, days: number): string {
 
 function parseDate(value: unknown, fallback: string): string {
   const text = String(value || fallback);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(text) || Number.isNaN(Date.parse(`${text}T00:00:00Z`))) {
+  const date = new Date(`${text}T00:00:00Z`);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text) || text.startsWith('0000')
+      || Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== text) {
     throw createRequestError('Fecha invalida. Usa formato YYYY-MM-DD.');
   }
   return text;
@@ -72,7 +74,7 @@ function parseFilters(req: JwtRequest, options: { exportMode?: boolean } = {}): 
     actorUserId: parsePositiveInt(req.query.actorUserId),
     status: req.query.status ? String(req.query.status).trim() : undefined,
     limit: Math.min(parsePositiveInt(req.query.limit) || (options.exportMode ? 5000 : 50), maxLimit),
-    offset: Math.max(Number(req.query.offset || 0) || 0, 0),
+    offset: parsePositiveInt(req.query.offset) || 0,
   };
 }
 
@@ -109,15 +111,14 @@ export default function createReportRoutes(): Router {
     try {
       const filters = parseFilters(req);
       const metrics = await service.getMetrics(resolveWhatsappCompanyId(req), filters);
+      const periodDays = (Date.parse(filters.endDate) - Date.parse(filters.startDate)) / 86_400_000 + 1;
       const peakDay = [...metrics.messagesByDay].sort((a, b) => b.count - a.count)[0] || null;
       res.json({
         success: true,
         data: {
           period: { start: filters.startDate, end: filters.endDate, timezone: filters.timezone },
           totalMessages: metrics.totalMessages,
-          averageDaily: metrics.messagesByDay.length
-            ? Math.round(metrics.totalMessages / metrics.messagesByDay.length)
-            : 0,
+          averageDaily: Math.round(metrics.totalMessages / periodDays),
           peakDay,
           messagesByDay: metrics.messagesByDay,
         },

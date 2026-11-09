@@ -1,3 +1,5 @@
+import { Pool } from 'pg';
+import { withTenantTransaction } from '../../../../db/TenantScopedUoW';
 import { Queryable } from '../../../../shared/UnitOfWorkPort';
 import { ReportRepositoryPort } from '../../application/ports/ReportRepositoryPort';
 import {
@@ -12,126 +14,127 @@ import {
 type Row = Record<string, any>;
 
 export class ReportRepositoryPg implements ReportRepositoryPort {
-  constructor(private readonly pool: Queryable) {}
+  constructor(private readonly pool: Pool) {}
 
-  async getMetrics(companyId: number, filters: ReportFilters): Promise<ReportMetrics> {
+  private withSnapshot<T>(companyId: number, work: (db: Queryable) => Promise<T>): Promise<T> {
+    return withTenantTransaction(companyId, async (db) => {
+      await db.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY');
+      return work(db);
+    }, this.pool);
+  }
+
+  getMetrics(companyId: number, filters: ReportFilters): Promise<ReportMetrics> {
+    return this.withSnapshot(companyId, (db) => this.readMetrics(db, companyId, filters));
+  }
+
+  private async readMetrics(db: Queryable, companyId: number, filters: ReportFilters): Promise<ReportMetrics> {
     const messageScope = this.buildMessageScope(companyId, filters, 'm', 'c');
     const conversationScope = this.buildConversationScope(companyId, filters, 'c');
 
-    const [
-      chatResult,
-      messageResult,
-      unreadResult,
-      responseResult,
-      tagResult,
-      dayResult,
-      topChatResult,
-      typeResult,
-    ] = await Promise.all([
-      this.pool.query(
-        `SELECT COUNT(DISTINCT c.id)::int AS count
-         FROM conversations c
-         WHERE ${conversationScope.sql}`,
-        conversationScope.params
-      ),
-      this.pool.query(
-        `SELECT COUNT(*)::int AS count
+    const chatResult = await db.query(
+      `SELECT COUNT(DISTINCT c.id)::int AS count
+       FROM conversations c
+       WHERE ${conversationScope.sql}`,
+      conversationScope.params
+    );
+    const messageResult = await db.query(
+      `SELECT COUNT(*)::int AS count
+       FROM messages m
+       JOIN conversations c ON c.id = m.conversation_id
+       WHERE ${messageScope.sql}`,
+      messageScope.params
+    );
+    const unreadResult = await db.query(
+      `SELECT COALESCE(SUM(c.unread_count), 0)::int AS count
+       FROM conversations c
+       WHERE ${conversationScope.sql}`,
+      conversationScope.params
+    );
+    const responseResult = await db.query(
+      `WITH inbound AS (
+         SELECT m.conversation_id, m.occurred_at
          FROM messages m
          JOIN conversations c ON c.id = m.conversation_id
-         WHERE ${messageScope.sql}`,
-        messageScope.params
-      ),
-      this.pool.query(
-        `SELECT COALESCE(SUM(c.unread_count), 0)::int AS count
-         FROM conversations c
-         WHERE ${conversationScope.sql}`,
-        conversationScope.params
-      ),
-      this.pool.query(
-        `WITH inbound AS (
-           SELECT m.conversation_id, m.occurred_at
-           FROM messages m
-           JOIN conversations c ON c.id = m.conversation_id
-           WHERE ${messageScope.sql} AND m.direction = 'inbound'
-         )
-         SELECT COALESCE(
-           ROUND(AVG(EXTRACT(EPOCH FROM (response.occurred_at - inbound.occurred_at)) / 60)::numeric, 2),
-           0
-         ) AS minutes
-         FROM inbound
-         JOIN LATERAL (
-           SELECT m2.occurred_at
-           FROM messages m2
-           WHERE m2.conversation_id = inbound.conversation_id
-             AND m2.direction = 'outbound'
-             AND m2.occurred_at >= inbound.occurred_at
-           ORDER BY m2.occurred_at ASC, m2.id ASC
-           LIMIT 1
-         ) response ON TRUE`,
-        messageScope.params
-      ),
-      this.pool.query(
-        `SELECT t.name AS tag_name, t.color,
-                COUNT(DISTINCT c.id)::int AS count
-         FROM tags t
-         LEFT JOIN conversations c
-           ON c.company_id = t.company_id
-          AND c.channel = 'whatsapp'
-          AND c.archived_at IS NULL
-          AND (
-            t.is_default
-            OR EXISTS (
-              SELECT 1 FROM tag_chats tc
-              WHERE tc.company_id = c.company_id
-                AND tc.tag_id = t.id
-                AND (tc.conversation_id = c.id OR tc.chat_id = c.external_conversation_id)
-            )
+         WHERE ${messageScope.sql} AND m.direction = 'inbound'
+       )
+       SELECT COALESCE(
+         ROUND(AVG(EXTRACT(EPOCH FROM (response.occurred_at - inbound.occurred_at)) / 60)::numeric, 2),
+         0
+       ) AS minutes
+       FROM inbound
+       JOIN LATERAL (
+         SELECT m2.occurred_at
+         FROM messages m2
+         WHERE m2.conversation_id = inbound.conversation_id
+           AND m2.company_id = $1
+           AND m2.direction = 'outbound'
+           AND m2.occurred_at >= inbound.occurred_at
+         ORDER BY m2.occurred_at ASC, m2.id ASC
+         LIMIT 1
+       ) response ON TRUE`,
+      messageScope.params
+    );
+    const tagResult = await db.query(
+      `SELECT t.name AS tag_name, t.color,
+              COUNT(DISTINCT c.id)::int AS count
+       FROM tags t
+       LEFT JOIN conversations c
+         ON c.company_id = t.company_id
+        AND c.channel = 'whatsapp'
+        AND c.archived_at IS NULL
+        AND (
+          t.is_default
+          OR EXISTS (
+            SELECT 1 FROM tag_chats tc
+            WHERE tc.company_id = c.company_id
+              AND tc.tag_id = t.id
+              AND (tc.conversation_id = c.id OR (tc.conversation_id IS NULL AND tc.chat_id = c.external_conversation_id))
           )
-          AND EXISTS (
-            SELECT 1 FROM messages m
-            WHERE m.conversation_id = c.id
-              AND m.company_id = $1
-              AND m.occurred_at >= ($2::date::timestamp AT TIME ZONE $4)
-              AND m.occurred_at < (($3::date + 1)::timestamp AT TIME ZONE $4)
-          )
-         WHERE t.company_id = $1
-         GROUP BY t.id
-         ORDER BY t.is_default DESC, LOWER(t.name) ASC`,
-        [companyId, filters.startDate, filters.endDate, filters.timezone]
-      ),
-      this.pool.query(
-        `SELECT TO_CHAR(m.occurred_at AT TIME ZONE $4, 'YYYY-MM-DD') AS date,
-                COUNT(*)::int AS count
-         FROM messages m
-         JOIN conversations c ON c.id = m.conversation_id
-         WHERE ${messageScope.sql}
-         GROUP BY 1
-         ORDER BY 1 ASC`,
-        messageScope.params
-      ),
-      this.pool.query(
-        `SELECT c.external_conversation_id AS chat_id,
-                COALESCE(c.title, ct.display_name, ct.name, ct.phone, c.external_conversation_id) AS name,
-                COUNT(m.id)::int AS message_count
-         FROM messages m
-         JOIN conversations c ON c.id = m.conversation_id
-         LEFT JOIN contacts ct ON ct.id = c.contact_id
-         WHERE ${messageScope.sql}
-         GROUP BY c.id, ct.id
-         ORDER BY message_count DESC, c.last_message_at DESC NULLS LAST
-         LIMIT 10`,
-        messageScope.params
-      ),
-      this.pool.query(
-        `SELECT COALESCE(m.message_type, 'text') AS type, COUNT(*)::int AS count
-         FROM messages m
-         JOIN conversations c ON c.id = m.conversation_id
-         WHERE ${messageScope.sql}
-         GROUP BY COALESCE(m.message_type, 'text')
-         ORDER BY count DESC, type ASC`,
-        messageScope.params
-      ),
-    ]);
+        )
+        AND EXISTS (
+          SELECT 1 FROM messages m
+          WHERE m.conversation_id = c.id
+            AND m.company_id = $1
+            AND m.occurred_at >= ($2::date::timestamp AT TIME ZONE $4)
+            AND m.occurred_at < (($3::date + 1)::timestamp AT TIME ZONE $4)
+        )
+       WHERE t.company_id = $1
+       GROUP BY t.id
+       ORDER BY t.is_default DESC, LOWER(t.name) ASC`,
+      [companyId, filters.startDate, filters.endDate, filters.timezone]
+    );
+    const dayResult = await db.query(
+      `SELECT TO_CHAR(m.occurred_at AT TIME ZONE $4, 'YYYY-MM-DD') AS date,
+              COUNT(*)::int AS count
+       FROM messages m
+       JOIN conversations c ON c.id = m.conversation_id
+       WHERE ${messageScope.sql}
+       GROUP BY 1
+       ORDER BY 1 ASC`,
+      messageScope.params
+    );
+    const topChatResult = await db.query(
+      `SELECT c.external_conversation_id AS chat_id,
+              COALESCE(c.title, ct.display_name, ct.name, ct.phone, c.external_conversation_id) AS name,
+              COUNT(m.id)::int AS message_count
+       FROM messages m
+       JOIN conversations c ON c.id = m.conversation_id
+       LEFT JOIN contacts ct ON ct.id = c.contact_id AND ct.company_id = c.company_id
+       WHERE ${messageScope.sql}
+       GROUP BY c.id, ct.id
+       ORDER BY message_count DESC, c.last_message_at DESC NULLS LAST
+       LIMIT 10`,
+      messageScope.params
+    );
+    const typeResult = await db.query(
+      `SELECT COALESCE(m.message_type, 'text') AS type, COUNT(*)::int AS count
+       FROM messages m
+       JOIN conversations c ON c.id = m.conversation_id
+       WHERE ${messageScope.sql}
+       GROUP BY COALESCE(m.message_type, 'text')
+       ORDER BY count DESC, type ASC`,
+      messageScope.params
+    );
 
     return {
       totalChats: Number(chatResult.rows[0]?.count || 0),
@@ -159,18 +162,22 @@ export class ReportRepositoryPg implements ReportRepositoryPort {
     };
   }
 
-  async getOperationalReport(companyId: number, filters: ReportFilters): Promise<OperationalReportPage> {
+  getOperationalReport(companyId: number, filters: ReportFilters): Promise<OperationalReportPage> {
+    return this.withSnapshot(companyId, (db) => this.readOperationalReport(db, companyId, filters));
+  }
+
+  private async readOperationalReport(db: Queryable, companyId: number, filters: ReportFilters): Promise<OperationalReportPage> {
     const scope = this.buildOrderScope(companyId, filters, 'o');
-    const countResult = await this.pool.query(
+    const countResult = await db.query(
       `SELECT COUNT(*)::int AS count
        FROM customer_orders o
-       LEFT JOIN conversations c ON c.id = o.conversation_id
+       LEFT JOIN conversations c ON c.id = o.conversation_id AND c.company_id = o.company_id
        WHERE ${scope.sql}`,
       scope.params
     );
 
     const params = [...scope.params, filters.limit, filters.offset];
-    const rowsResult = await this.pool.query(
+    const rowsResult = await db.query(
       `SELECT o.id, o.occurred_at, o.title, o.service_type, COALESCE(o.order_type, 'service') AS order_type,
               o.status, o.notes,
               COALESCE(ct.display_name, ct.name, ct.profile_name, ct.phone, c.title, c.external_conversation_id, 'Sin contacto') AS customer_name,
@@ -187,14 +194,14 @@ export class ReportRepositoryPg implements ReportRepositoryPort {
                 WHERE a.company_id = o.company_id AND a.order_id = o.id
               ) AS action_count
        FROM customer_orders o
-       LEFT JOIN contacts ct ON ct.id = o.contact_id
-       LEFT JOIN conversations c ON c.id = o.conversation_id
-       LEFT JOIN usuarios u ON u.id = o.created_by
+       LEFT JOIN contacts ct ON ct.id = o.contact_id AND ct.company_id = o.company_id
+       LEFT JOIN conversations c ON c.id = o.conversation_id AND c.company_id = o.company_id
+       LEFT JOIN usuarios u ON u.id = o.created_by AND u.company_id = o.company_id
        LEFT JOIN LATERAL (
          SELECT string_agg(CONCAT(oi.quantity, ' x ', oi.product_name), '; ' ORDER BY oi.id) AS products,
                 string_agg(DISTINCT COALESCE(oi.item_type_snapshot, 'physical_product'), ', ' ORDER BY COALESCE(oi.item_type_snapshot, 'physical_product')) AS item_types,
                 SUM(oi.quantity) AS total_quantity,
-                SUM(CASE WHEN oi.status = 'confirmed' THEN oi.quantity ELSE 0 END) AS reserved_quantity
+                SUM(CASE WHEN oi.status IN ('confirmed', 'reserved') THEN oi.quantity ELSE 0 END) AS reserved_quantity
          FROM order_items oi
          WHERE oi.company_id = o.company_id AND oi.order_id = o.id
        ) items ON true
@@ -212,9 +219,13 @@ export class ReportRepositoryPg implements ReportRepositoryPort {
     };
   }
 
-  async getHeatmapPoints(companyId: number, filters: ReportFilters): Promise<HeatmapPoint[]> {
+  getHeatmapPoints(companyId: number, filters: ReportFilters): Promise<HeatmapPoint[]> {
+    return this.withSnapshot(companyId, (db) => this.readHeatmapPoints(db, companyId, filters));
+  }
+
+  private async readHeatmapPoints(db: Queryable, companyId: number, filters: ReportFilters): Promise<HeatmapPoint[]> {
     const scope = this.buildMessageScope(companyId, filters, 'm', 'c');
-    const result = await this.pool.query(
+    const result = await db.query(
       `SELECT EXTRACT(DOW FROM m.occurred_at AT TIME ZONE $4)::int AS day,
               EXTRACT(HOUR FROM m.occurred_at AT TIME ZONE $4)::int AS hour,
               COUNT(*)::int AS count
@@ -234,24 +245,28 @@ export class ReportRepositoryPg implements ReportRepositoryPort {
     }));
   }
 
-  async getChatHistory(companyId: number, chatId: string, limit: number): Promise<ChatHistoryExport | null> {
+  getChatHistory(companyId: number, chatId: string, limit: number): Promise<ChatHistoryExport | null> {
+    return this.withSnapshot(companyId, (db) => this.readChatHistory(db, companyId, chatId, limit));
+  }
+
+  private async readChatHistory(db: Queryable, companyId: number, chatId: string, limit: number): Promise<ChatHistoryExport | null> {
     const values = this.buildChatLookupValues(chatId);
-    const conversationResult = await this.pool.query(
+    const conversationResult = await db.query(
       `SELECT c.id, c.external_conversation_id,
               COALESCE(c.title, ct.display_name, ct.name, ct.phone, c.external_conversation_id) AS name
        FROM conversations c
-       LEFT JOIN contacts ct ON ct.id = c.contact_id
+       LEFT JOIN contacts ct ON ct.id = c.contact_id AND ct.company_id = c.company_id
        WHERE c.company_id = $1
          AND c.channel = 'whatsapp'
          AND c.external_conversation_id = ANY($2::varchar[])
-       ORDER BY c.last_message_at DESC NULLS LAST, c.id DESC
+       ORDER BY (c.external_conversation_id = ($2::varchar[])[1]) DESC, c.last_message_at DESC NULLS LAST, c.id DESC
        LIMIT 1`,
       [companyId, values]
     );
     const conversation = conversationResult.rows[0];
     if (!conversation) return null;
 
-    const messageResult = await this.pool.query(
+    const messageResult = await db.query(
       `SELECT m.id, m.provider_message_id, m.occurred_at, m.direction,
               m.external_contact_id, m.body, m.message_type,
               EXISTS (SELECT 1 FROM message_attachments a WHERE a.message_id = m.id) AS has_media
@@ -333,7 +348,7 @@ export class ReportRepositoryPg implements ReportRepositoryPort {
           AND scoped_tag_chat.tag_id = $${params.length}
           AND (
             scoped_tag_chat.conversation_id = ${orderAlias}.conversation_id
-            OR scoped_tag_chat.chat_id = c.external_conversation_id
+            OR (scoped_tag_chat.conversation_id IS NULL AND scoped_tag_chat.chat_id = c.external_conversation_id)
           )
       )`);
     }
@@ -349,15 +364,16 @@ export class ReportRepositoryPg implements ReportRepositoryPort {
         AND scoped_tag_chat.tag_id = $${params.length}
         AND (
           scoped_tag_chat.conversation_id = ${conversationAlias}.id
-          OR scoped_tag_chat.chat_id = ${conversationAlias}.external_conversation_id
+          OR (scoped_tag_chat.conversation_id IS NULL AND scoped_tag_chat.chat_id = ${conversationAlias}.external_conversation_id)
         )
     )`);
   }
 
   private buildChatLookupValues(value: string): string[] {
     const raw = String(value || '').trim();
-    const normalized = raw.replace('@c.us', '').replace('@s.whatsapp.net', '').replace(/[^\d]/g, '');
-    return Array.from(new Set([raw, normalized, `${normalized}@c.us`, `${normalized}@s.whatsapp.net`].filter(Boolean)));
+    const phone = /^\+?([\d ()-]+)(?:@c\.us|@s\.whatsapp\.net)?$/.exec(raw);
+    const normalized = phone?.[1].replace(/\D/g, '');
+    return normalized ? [...new Set([raw, normalized, `${normalized}@c.us`, `${normalized}@s.whatsapp.net`])] : [raw];
   }
 
   private mapOperationalRow(row: Row): OperationalReportRow {

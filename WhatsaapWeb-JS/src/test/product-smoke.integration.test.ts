@@ -404,8 +404,10 @@ test('real API isolates two companies through auth, signed ingress, inbox, socke
       [tenantId, conversationId],
     );
     const contact = conversation.contact_id;
-    await db.query('UPDATE customer_orders SET contact_id = $1, conversation_id = $2 WHERE company_id = $3 AND id = $4',
-      [contact, conversationId, tenantId, order]);
+    await db.query(
+      "UPDATE customer_orders SET contact_id = $1, conversation_id = $2, title = '=QA()', notes = 'Nota <QA>' WHERE company_id = $3 AND id = $4",
+      [contact, conversationId, tenantId, order],
+    );
     const { rows: [product] } = await db.query(
       "INSERT INTO products (company_id, name) VALUES ($1, 'Producto historial QA') RETURNING id", [tenantId],
     );
@@ -450,4 +452,47 @@ test('real API isolates two companies through auth, signed ingress, inbox, socke
   await api(`${historyRoot}/chats/${chatId}`, 404, other.accessToken);
   await api(`${historyRoot}/chats/reference-${chatId}`, 404, owner.accessToken);
 
+  const reports = '/api/reports';
+  const calendarDay = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
+  const period = `startDate=${calendarDay(-1)}&endDate=${calendarDay(1)}&timezone=UTC`;
+  await api(`${reports}/metrics?${period}`, 403, employeeToken);
+  await api(`${reports}/metrics?startDate=2026-02-31`, 400, owner.accessToken);
+  const tagId = history.tags.find((tag: { name: string }) => tag.name === 'Seguimiento QA').id;
+  const metrics = await api(`${reports}/metrics?${period}&tagId=${tagId}`, 200, owner.accessToken);
+  assert.equal(metrics.totalChats, 1);
+  assert.ok(metrics.totalMessages >= 2);
+  assert.equal(metrics.topChats[0].chatId, chatId);
+  const otherMetrics = await api(`${reports}/metrics?${period}`, 200, other.accessToken);
+  assert.equal(otherMetrics.totalMessages, 0);
+  assert.deepEqual(otherMetrics.topChats, []);
+  const statsResult = await api(`${reports}/stats?${period}`, 200, owner.accessToken);
+  assert.equal(statsResult.averageDaily, Math.round(statsResult.totalMessages / 3));
+  const heatmapResult = await api(`${reports}/heatmap?${period}&tagId=${tagId}`, 200, owner.accessToken);
+  assert.ok(heatmapResult.totalMessages >= 2);
+  assert.equal(heatmapResult.days.length, 7);
+  const reportResult = await api(`${reports}/operations?${period}&tagId=${tagId}&status=confirmed`, 200, owner.accessToken);
+  assert.equal(reportResult.total, 1);
+  assert.equal(reportResult.rows[0].orderId, order);
+  assert.equal(reportResult.rows[0].totalQuantity, 2);
+  const pageAfterLast = await api(`${reports}/operations?${period}&tagId=${tagId}&limit=1&offset=1`, 200, owner.accessToken);
+  assert.equal(pageAfterLast.total, 1);
+  assert.deepEqual(pageAfterLast.rows, []);
+  const otherReport = await api(`${reports}/operations?${period}&tagId=${tagId}`, 200, other.accessToken);
+  assert.equal(otherReport.total, 0);
+  const download = async (format: string) => {
+    const response = await fetch(`${base}${reports}/operations/export?${period}&tagId=${tagId}&format=${format}`, {
+      headers: { Authorization: `Bearer ${owner.accessToken}` },
+    });
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get('content-disposition') || '', new RegExp(`\\.${format}"$`));
+    return response.text();
+  };
+  const csv = await download('csv');
+  assert.ok(csv.includes(`"'=QA()"`));
+  const xls = await download('xls');
+  assert.ok(xls.includes('<Data ss:Type="String">=QA()</Data>'));
+  assert.ok(xls.includes('Nota &lt;QA&gt;'));
+  const reportChat = await api(`${reports}/chat/${encodeURIComponent(chatId + '@s.whatsapp.net')}/history`, 200, owner.accessToken);
+  assert.ok(reportChat.messages.some((message: { id: string; hasMedia: boolean }) => message.id === mediaMessageId && message.hasMedia));
+  await api(`${reports}/chat/${chatId}/history`, 404, other.accessToken);
 });

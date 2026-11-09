@@ -129,7 +129,7 @@ jobs:
           CREATE DATABASE whatsap_automat_smoke OWNER whatsap_smoke;
           SQL
           npm run db:migrate
-      - name: Probar sesión, webhook firmado, bandeja, Socket.IO, takeover, aprobaciones, pagos e historial
+      - name: Probar sesión, webhook firmado, bandeja, Socket.IO, takeover, aprobaciones, pagos, historial y reportes
         run: |
           node dist/index.js > "$RUNNER_TEMP/product-smoke.log" 2>&1 &
           app_pid=$!
