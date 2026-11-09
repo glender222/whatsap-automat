@@ -177,8 +177,8 @@ export async function updateProduct(productId: number, input: Partial<ProductInp
   return response.data.data;
 }
 
-export async function adjustStock(productId: number, delta: number, notes?: string): Promise<{ product: Product }> {
-  const response = await api.post<{ success: boolean; data: { product: Product } }>(
+export async function adjustStock(productId: number, delta: number, notes?: string): Promise<Product> {
+  const response = await api.post<{ success: boolean; data: Product }>(
     `/commercial-items/${productId}/availability-movements`,
     { delta, notes }
   );

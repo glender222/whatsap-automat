@@ -286,6 +286,7 @@ const InventoryPage: React.FC = () => {
   const [products, setProducts] = React.useState<Product[]>([]);
   const [loading, setLoading] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
+  const imageInput = React.useRef<HTMLInputElement>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [editingId, setEditingId] = React.useState<number | null>(null);
   const [viewMode, setViewMode] = React.useState<ViewMode>('cards');
@@ -435,8 +436,8 @@ const InventoryPage: React.FC = () => {
   const handleAdjust = async (product: Product, delta: number) => {
     setError(null);
     try {
-      const result = await adjustStock(product.id, delta, delta > 0 ? 'Ingreso manual de disponibilidad' : 'Salida manual de disponibilidad');
-      setProducts((current) => current.map((item) => item.id === product.id ? result.product : item));
+      const updated = await adjustStock(product.id, delta, delta > 0 ? 'Ingreso manual de disponibilidad' : 'Salida manual de disponibilidad');
+      setProducts((current) => current.map((item) => item.id === product.id ? updated : item));
     } catch (err: any) {
       setError(err?.response?.data?.message || err?.message || 'No se pudo ajustar la disponibilidad');
     }
@@ -783,7 +784,8 @@ const InventoryPage: React.FC = () => {
             <Field label="Nombre del producto / Servicio *">
               <input className="admin-control" placeholder="Ej. Sesion de consultoria, Producto X" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} />
             </Field>
-            <Field label="Galeria de producto">
+            <div>
+              <p className="mb-1 text-xs font-semibold text-[#5B6F66]">Galeria de producto</p>
               <div className="space-y-3 rounded-xl border border-[#D9E5DF] bg-white p-3">
                 <div className="grid gap-3 sm:grid-cols-[112px_1fr]">
                   <div className="flex aspect-square items-center justify-center overflow-hidden rounded-xl border border-[#D9E5DF] bg-[#EEF4F1] text-[#5B6F66]">
@@ -795,21 +797,27 @@ const InventoryPage: React.FC = () => {
                   </div>
                   <div className="space-y-2">
                     <div className="flex flex-col gap-2 sm:flex-row">
-                      <label className={`admin-button-secondary cursor-pointer ${uploadingImage || form.images.length >= 8 ? 'opacity-60' : ''}`}>
-                        <ImageIcon className="h-4 w-4" />
+                      <button
+                        type="button"
+                        className="admin-button-secondary disabled:opacity-60"
+                        disabled={uploadingImage || form.images.length >= 8}
+                        onClick={() => imageInput.current?.click()}
+                      >
+                        <ImageIcon className="h-4 w-4" aria-hidden="true" />
                         {uploadingImage ? 'Subiendo...' : 'Subir imagen'}
-                        <input
-                          type="file"
-                          accept="image/jpeg,image/png,image/webp,image/gif"
-                          className="hidden"
-                          disabled={uploadingImage || form.images.length >= 8}
-                          onChange={(event) => {
-                            const file = event.target.files?.[0] || null;
-                            handleImageUpload(file);
-                            event.currentTarget.value = '';
-                          }}
-                        />
-                      </label>
+                      </button>
+                      <input
+                        ref={imageInput}
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp,image/gif"
+                        className="hidden"
+                        disabled={uploadingImage || form.images.length >= 8}
+                        onChange={(event) => {
+                          const file = event.target.files?.[0] || null;
+                          handleImageUpload(file);
+                          event.currentTarget.value = '';
+                        }}
+                      />
                       {form.images.length > 0 && (
                         <span className="inline-flex h-10 items-center rounded-lg bg-[#EEF4F1] px-3 text-xs font-semibold text-[#5B6F66]">
                           {form.images.length}/8 imagenes
@@ -865,7 +873,7 @@ const InventoryPage: React.FC = () => {
                   </div>
                 )}
               </div>
-            </Field>
+            </div>
             <div className="grid grid-cols-2 gap-4">
               <Field label="Tipo de precio">
                 <SelectWrap>
@@ -958,7 +966,7 @@ const InventoryPage: React.FC = () => {
             </div>
           )}>
             <div className="grid grid-cols-2 gap-4">
-              <Field label="Estado">
+              {editingId && <Field label="Estado">
                 <SelectWrap>
                   <select className="admin-select" value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value as Product['status'] })}>
                     <option value="active">Activo</option>
@@ -967,7 +975,7 @@ const InventoryPage: React.FC = () => {
                     <option value="archived">Archivado</option>
                   </select>
                 </SelectWrap>
-              </Field>
+              </Field>}
               <Field label="Control de stock">
                 <SelectWrap>
                   <select className="admin-select" value={form.availabilityType} onChange={(event) => setForm({ ...form, availabilityType: event.target.value as AvailabilityType })}>
@@ -1005,7 +1013,7 @@ const InventoryPage: React.FC = () => {
               <button type="button" disabled={saving} onClick={() => saveProduct('draft')} className="flex-1 rounded-lg border border-[#D9E5DF] px-4 py-2 text-sm font-semibold text-[#10231C] transition hover:bg-[#EEF4F1] disabled:opacity-60">
                 Guardar borrador
               </button>
-              <button type="button" disabled={saving} onClick={() => saveProduct('active')} className="flex-1 rounded-lg bg-[#128C7E] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-[#0E766A] disabled:opacity-60">
+              <button type="button" disabled={saving} onClick={() => saveProduct(editingId ? undefined : 'active')} className="flex-1 rounded-lg bg-[#128C7E] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-[#0E766A] disabled:opacity-60">
                 {saving ? 'Guardando...' : editingId ? 'Guardar cambios' : 'Publicar oferta'}
               </button>
             </div>
