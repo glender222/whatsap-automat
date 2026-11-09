@@ -66,6 +66,12 @@ npm --prefix Frontend_py_whatsaapweb run build
 npm --prefix Frontend_py_whatsaapweb test
 ```
 
+## Consultar y enviar adjuntos
+
+El historial de `GET /api/v1/conversations/{id}/messages` incluye los identificadores de cada mensaje y sus adjuntos. Usa ambos identificadores con `GET /api/v1/conversations/{id}/messages/{messageId}/attachments/{attachmentId}` y un JWT de la empresa.
+
+Para enviar un archivo desde una sesión con control de la conversación y una ventana activa de WhatsApp Cloud, usa `POST /api/v1/conversations/{id}/messages/attachments`. Envía `file` y `expectedConversationVersion` en un formulario multipart y asigna un encabezado `Idempotency-Key` al intento. Si pierdes la respuesta, consulta el historial con `?clientRequestId=<clave>` y conserva la misma clave y datos si necesitas repetir la solicitud.
+
 ## Referencias
 
 - Cuando el portal incluye el kit de desarrollo, el ZIP contiene paquetes de npm instalables para el SDK de TypeScript y la CLI, una rueda del SDK de Python y sumas SHA-256.

@@ -189,6 +189,7 @@ curl --fail --silent --show-error http://localhost:3000/ready</code></pre>
           <div><dt>Autenticación</dt><dd>Envía un JWT válido con <code>Authorization: Bearer …</code> en rutas privadas.</dd></div>
           <div><dt>Reintentos</dt><dd>Los SDK reintentan lecturas y operaciones con clave de idempotencia. Reutiliza el mismo <code>Idempotency-Key</code> para repetir una operación compatible.</dd></div>
           <div><dt>Conflictos</dt><dd>Si una mutación con <code>expectedVersion</code> devuelve <code>409</code>, recarga el recurso antes de decidir si procede otro intento.</dd></div>
+          <div><dt>Adjuntos</dt><dd>Consulta los IDs de mensaje y archivo en el historial para descargarlos con tu sesión. El envío multipart requiere una clave de idempotencia y la versión vigente de la conversación.</dd></div>
         </dl>
         <div class="link-group">
           <a href="https://github.com/glender222/whatsap-automat/tree/integration/v0.4-consolidated/docs/api">Referencia y compatibilidad <svg aria-hidden="true"><use href="#i-out"/></svg></a>

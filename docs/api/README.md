@@ -72,6 +72,8 @@ Consulte los archivos de especificación formal:
 | `GET` | `/api/v1/conversations/{id}` | Detalle de conversación | `Authorization` |
 | `GET` | `/api/v1/conversations/{id}/messages` | Mensajes de conversación | `Authorization` |
 | `POST` | `/api/v1/conversations/{id}/messages` | Envío de texto por WhatsApp Cloud | `Authorization`, `Idempotency-Key` |
+| `POST` | `/api/v1/conversations/{id}/messages/attachments` | Envío de un adjunto por WhatsApp Cloud | `Authorization`, `Idempotency-Key` |
+| `GET` | `/api/v1/conversations/{id}/messages/{messageId}/attachments/{attachmentId}` | Descarga protegida del archivo | `Authorization` |
 | `POST` | `/api/v1/conversations/{id}/takeover` | Handoff y toma de control (CAS) | `Authorization` |
 | `POST` | `/api/v1/conversations/{id}/pause-ai` | Pausa de IA conversacional (CAS) | `Authorization` |
 | `POST` | `/api/v1/conversations/{id}/resume-ai` | Reanudar IA conversacional (CAS) | `Authorization` |
@@ -98,13 +100,15 @@ El contrato incluye operaciones previstas. En la API v1 de conversaciones se pue
 
 Agent Studio conserva cada borrador como una revisión numerada e inmutable. Para leer o validar una revisión anterior, indica `?version=N`. La validación comprueba la estructura sin ejecutar el grafo y devuelve `publicationEvidence: false`. El simulador de regresión de `/api/v1/ai/eval/simulate` devuelve resultados sintéticos. La publicación requiere ejecutar una evaluación de servidor con un conjunto de pruebas autorizado, asociar su evidencia al tenant, la revisión y su hash, y usar esa revisión exacta en el runtime.
 
-### Envío de texto por WhatsApp Cloud
+### Envío por WhatsApp Cloud
 
 Primero toma el control con `POST /api/v1/conversations/{id}/takeover`. Usa el `stateVersion` devuelto como `expectedConversationVersion` del envío. El servidor exige la sesión que tomó el control y una ventana de atención vigente en una sola cuenta verificada de WhatsApp Cloud. La cuenta requiere una credencial cifrada del tenant.
 
-Envía `message.kind = "text"`, el texto y una clave `Idempotency-Key` propia de ese intento. Conserva la clave, texto y versión si necesitas repetir el mismo intento. El servidor devuelve `409` si la clave se reutiliza con datos distintos. Después de un intento nuevo, consulta la conversación para obtener la versión vigente.
+Para enviar texto, envía `message.kind = "text"`, el texto y una clave `Idempotency-Key` propia de ese intento. Para un adjunto, envía un formulario multipart con `file`, `expectedConversationVersion`, un pie opcional en `message` y, si corresponde, `forceDocument`. Conserva la clave, la versión y todos los datos originales al repetir un intento. El servidor devuelve `409` si reutilizas la clave con datos distintos.
 
-Una respuesta `202` devuelve el estado registrado del intento. `provider_accepted` indica que Meta devolvió un identificador. `delivered` y `read` requieren un webhook firmado. `unknown_delivery` requiere revisión del estado en el proveedor y bloquea nuevas claves en la conversación. La API aún carece de conciliación automática para intentos sin identificador del proveedor. La protección de esta ruta v1 aplica al envío de texto. Los clientes que usan `/api/chats` siguen su flujo legado.
+Una respuesta `202` devuelve el estado registrado del intento. `provider_accepted` indica que Meta devolvió un identificador. `delivered` y `read` requieren un webhook firmado. Si pierdes la respuesta, consulta el historial con `?clientRequestId=<clave>`. Un webhook firmado que conserve la referencia del intento puede conciliar `unknown_delivery`, incluso si faltó el acuse inicial. Mientras la entrega siga incierta, el servidor bloquea nuevas claves en esa conversación. Después de un intento nuevo, consulta la conversación para obtener la versión vigente. Estas garantías corresponden a las rutas v1.
+
+Para descargar un adjunto, usa el ID del mensaje y el ID del archivo devueltos en `attachments` por el historial. La descarga exige la misma autorización y admite rangos de bytes.
 
 ### Herramientas de agente
 
