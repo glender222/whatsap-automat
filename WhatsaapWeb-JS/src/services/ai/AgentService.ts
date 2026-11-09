@@ -7,7 +7,6 @@ import {
   AgentDecisionEngine,
   AgentHandoffService,
   AgentPauseService,
-  AgentPaymentLinkService,
   AgentRepositoryPg,
   AgentRuntimeLogRepositoryPg,
   AgentToolLogger,
@@ -30,6 +29,7 @@ import {
   HandoffTicketSummary,
   IaPauseStatus,
   PaymentGatewayRepositoryPg,
+  PaymentGatewayInput,
   AiSessionEventService,
   AiSessionRepositoryPg,
   getAiProviderFactory,
@@ -76,24 +76,20 @@ export class AgentService {
   private readonly handoffService: AgentHandoffService;
   private readonly pauseService: AgentPauseService;
   private readonly voucherService: AgentVoucherService;
-  private readonly paymentLinkService: AgentPaymentLinkService;
   private readonly decisionEngine: AgentDecisionEngine;
-  private readonly gatewayRepo: PaymentGatewayRepositoryPg;
   private readonly aiSessionRepo: AiSessionRepositoryPg;
   private readonly aiSessionEventService: AiSessionEventService;
   private readonly aiChatSessionService: AiChatSessionService;
 
-  constructor() {
+  constructor(private readonly gatewayRepo = new PaymentGatewayRepositoryPg(pool)) {
     this.agentRepo = new AgentRepositoryPg(pool);
     this.logRepo = new AgentRuntimeLogRepositoryPg(pool);
-    this.gatewayRepo = new PaymentGatewayRepositoryPg(pool);
     this.aiSessionRepo = new AiSessionRepositoryPg(pool);
     this.aiSessionEventService = new AiSessionEventService(this.aiSessionRepo);
     this.aiChatSessionService = new AiChatSessionService(this.aiSessionRepo, this.aiSessionEventService);
     this.handoffService = new AgentHandoffService(new (require('../../modules/ai').HandoffTicketRepositoryPg)(pool));
     this.pauseService = new AgentPauseService(new (require('../../modules/ai').IaPauseOverrideRepositoryPg)(pool));
     this.voucherService = new AgentVoucherService(new PaymentRepositoryPg(pool));
-    this.paymentLinkService = new AgentPaymentLinkService(this.gatewayRepo);
     this.decisionEngine = new AgentDecisionEngine();
     this.handoffRepo = null;
   }
@@ -738,15 +734,15 @@ export class AgentService {
     return this.gatewayRepo.list(companyId);
   }
 
-  async createGateway(companyId: number, input: any) {
+  async createGateway(companyId: number, input: PaymentGatewayInput) {
     return this.gatewayRepo.create(companyId, input);
   }
 
-  async updateGateway(companyId: number, gatewayId: number, input: any) {
+  async updateGateway(companyId: number, gatewayId: number, input: Partial<PaymentGatewayInput>) {
     return this.gatewayRepo.update(companyId, gatewayId, input);
   }
 
-  async archiveGateway(companyId: number, gatewayId: number): Promise<void> {
+  async archiveGateway(companyId: number, gatewayId: number): Promise<boolean> {
     return this.gatewayRepo.archive(companyId, gatewayId);
   }
 

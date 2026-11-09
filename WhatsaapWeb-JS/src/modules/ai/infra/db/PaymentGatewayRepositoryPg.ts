@@ -1,150 +1,206 @@
-import { Queryable } from '../../../../shared/UnitOfWorkPort';
-import type {
-  PaymentGateway,
-  PaymentGatewayInput,
-  PaymentGatewayProvider,
-} from '../../domain/paymentGateway.types';
+import { Pool } from 'pg';
+import { TenantScopedUoW } from '../../../../db/TenantScopedUoW';
+import { InvalidMasterKeyError, SecretVault } from '../../../../services/security/SecretVault';
+import type { Queryable } from '../../../../shared/UnitOfWorkPort';
+import type { PaymentGateway, PaymentGatewayInput } from '../../domain/paymentGateway.types';
 
-type Row = Record<string, any>;
+type Row = {
+  id: string;
+  company_id: number;
+  provider: PaymentGateway['provider'];
+  display_name: string;
+  credentials_json: Record<string, unknown>;
+  webhook_secret: string | null;
+  status: PaymentGateway['status'];
+  is_default: boolean;
+  metadata_json: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
 
-function json(value: unknown): string {
-  return JSON.stringify(value || {});
-}
+const VAULT_PREFIX = 'payment-gateway-v1:';
 
 function mapGateway(row: Row): PaymentGateway {
+  const instructions = row.metadata_json?.manualInstructions;
   return {
     id: Number(row.id),
-    companyId: Number(row.company_id),
-    provider: row.provider as PaymentGatewayProvider,
+    companyId: row.company_id,
+    provider: row.provider,
     displayName: row.display_name,
-    credentials: row.credentials_json || {},
-    webhookSecret: row.webhook_secret || null,
+    credentials: {},
+    webhookSecret: null,
+    credentialsStored: typeof row.credentials_json?.vault === 'string' &&
+      row.credentials_json.vault.startsWith(VAULT_PREFIX),
+    webhookSecretStored: Boolean(row.webhook_secret?.startsWith(VAULT_PREFIX)),
+    checkoutAvailability: 'unavailable',
     status: row.status,
-    isDefault: Boolean(row.is_default),
-    metadata: row.metadata_json || {},
+    isDefault: row.is_default,
+    metadata: row.provider === 'manual' && typeof instructions === 'string'
+      ? { manualInstructions: instructions } : {},
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
 }
 
+function encrypt(companyId: number, gatewayId: string, field: string, value: unknown): string {
+  const masterKey = process.env.MASTER_ENCRYPTION_KEY?.trim();
+  try {
+    if (!masterKey) throw new InvalidMasterKeyError();
+    // Context stays inside the authenticated ciphertext for any future consumer to verify.
+    const envelope = new SecretVault({ masterKey }).encrypt(JSON.stringify({ companyId, gatewayId, field, value }));
+    return VAULT_PREFIX + JSON.stringify(envelope);
+  } catch (error) {
+    if (!(error instanceof InvalidMasterKeyError)) throw error;
+    throw Object.assign(new Error('El almacén de secretos de pagos no está disponible.'), {
+      code: 'GATEWAY_SECRET_STORAGE_UNAVAILABLE',
+      statusCode: 503,
+    });
+  }
+}
+
 export class PaymentGatewayRepositoryPg {
-  constructor(private readonly pool: Queryable) {}
+  private readonly uow: TenantScopedUoW;
+
+  constructor(pool: Pool) {
+    this.uow = new TenantScopedUoW(pool);
+  }
 
   async list(companyId: number): Promise<PaymentGateway[]> {
-    const result = await this.pool.query(
-      `SELECT * FROM payment_gateways
-       WHERE company_id = $1 AND status <> 'archived'
-       ORDER BY is_default DESC, updated_at DESC, id DESC`,
-      [companyId]
-    );
-    return result.rows.map(mapGateway);
+    return this.uow.run(companyId, async (db) => {
+      const result = await db.query(
+        `SELECT * FROM payment_gateways
+         WHERE company_id = $1 AND status <> 'archived'
+         ORDER BY is_default DESC, updated_at DESC, id DESC`,
+        [companyId],
+      );
+      return result.rows.map(mapGateway);
+    });
   }
 
   async get(companyId: number, gatewayId: number): Promise<PaymentGateway | null> {
-    const result = await this.pool.query(
-      `SELECT * FROM payment_gateways WHERE company_id = $1 AND id = $2 LIMIT 1`,
-      [companyId, gatewayId]
-    );
-    return result.rows[0] ? mapGateway(result.rows[0]) : null;
+    return this.uow.run(companyId, async (db) => {
+      const row = await this.find(db, companyId, gatewayId);
+      return row ? mapGateway(row) : null;
+    });
   }
 
   async getDefault(companyId: number): Promise<PaymentGateway | null> {
-    const result = await this.pool.query(
-      `SELECT * FROM payment_gateways
-       WHERE company_id = $1 AND status = 'active'
-       ORDER BY is_default DESC, id ASC LIMIT 1`,
-      [companyId]
-    );
-    return result.rows[0] ? mapGateway(result.rows[0]) : null;
+    return this.uow.run(companyId, async (db) => {
+      const result = await db.query(
+        `SELECT * FROM payment_gateways
+         WHERE company_id = $1 AND status = 'active'
+         ORDER BY is_default DESC, id ASC LIMIT 1`,
+        [companyId],
+      );
+      return result.rows[0] ? mapGateway(result.rows[0]) : null;
+    });
   }
 
   async create(companyId: number, input: PaymentGatewayInput): Promise<PaymentGateway> {
-    const client = await (this.pool as any).connect();
-    try {
-      await client.query('BEGIN');
-      if (input.isDefault) {
-        await client.query(
-          `UPDATE payment_gateways SET is_default = false, updated_at = NOW()
-           WHERE company_id = $1 AND is_default = true`,
-          [companyId]
-        );
-      }
-      const result = await client.query(
-        `INSERT INTO payment_gateways (
-           company_id, provider, display_name, credentials_json, webhook_secret,
-           status, is_default, metadata_json
-         )
-         VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8::jsonb)
+    return this.mutate(companyId, async (db) => {
+      if (input.isDefault) await this.clearDefault(db, companyId);
+      const result = await db.query(
+        `INSERT INTO payment_gateways (company_id, provider, display_name, status, is_default, metadata_json)
+         VALUES ($1, $2, $3, $4, $5, $6::jsonb)
          RETURNING *`,
         [
-          companyId,
-          input.provider,
-          input.displayName,
-          json(input.credentials || {}),
-          input.webhookSecret ?? null,
-          input.status || 'active',
-          Boolean(input.isDefault),
-          json(input.metadata || {}),
-        ]
+          companyId, input.provider, input.displayName, input.status ?? 'active',
+          input.isDefault ?? false, JSON.stringify(input.metadata ?? {}),
+        ],
       );
-      await client.query('COMMIT');
-      return mapGateway(result.rows[0]);
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
+      const row: Row = result.rows[0];
+      const secrets = this.secrets(companyId, row.id, input);
+      if (secrets.credentials !== null || secrets.webhook !== null) {
+        const stored = await db.query(
+          `UPDATE payment_gateways SET credentials_json = COALESCE($3::jsonb, credentials_json),
+             webhook_secret = $4 WHERE company_id = $1 AND id = $2 RETURNING *`,
+          [companyId, row.id, secrets.credentials, secrets.webhook],
+        );
+        return mapGateway(stored.rows[0]);
+      }
+      return mapGateway(row);
+    });
   }
 
   async update(companyId: number, gatewayId: number, input: Partial<PaymentGatewayInput>): Promise<PaymentGateway | null> {
-    const client = await (this.pool as any).connect();
-    try {
-      await client.query('BEGIN');
-      if (input.isDefault) {
-        await client.query(
-          `UPDATE payment_gateways SET is_default = false, updated_at = NOW()
-           WHERE company_id = $1 AND id <> $2 AND is_default = true`,
-          [companyId, gatewayId]
-        );
+    return this.mutate(companyId, async (db) => {
+      const current = await this.find(db, companyId, gatewayId);
+      if (!current) return null;
+      if (input.provider !== undefined && input.provider !== current.provider) {
+        throw Object.assign(new Error('Crea otra pasarela para cambiar el proveedor.'), {
+          code: 'GATEWAY_PROVIDER_IMMUTABLE',
+          statusCode: 409,
+        });
       }
-      const result = await client.query(
+      const secrets = this.secrets(companyId, current.id, input);
+      if (input.isDefault) await this.clearDefault(db, companyId, gatewayId);
+      const result = await db.query(
         `UPDATE payment_gateways
          SET display_name = COALESCE($3, display_name),
              credentials_json = COALESCE($4::jsonb, credentials_json),
-             webhook_secret = COALESCE($5, webhook_secret),
-             status = COALESCE($6, status),
-             is_default = COALESCE($7, is_default),
-             metadata_json = COALESCE($8::jsonb, metadata_json),
+             webhook_secret = CASE WHEN $5::boolean THEN $6 ELSE webhook_secret END,
+             status = COALESCE($7, status),
+             is_default = COALESCE($8, is_default),
+             metadata_json = COALESCE($9::jsonb, metadata_json),
              updated_at = NOW()
          WHERE company_id = $1 AND id = $2
          RETURNING *`,
         [
-          companyId,
-          gatewayId,
-          input.displayName ?? null,
-          input.credentials ? json(input.credentials) : null,
-          input.webhookSecret ?? null,
-          input.status ?? null,
-          input.isDefault ?? null,
-          input.metadata ? json(input.metadata) : null,
-        ]
+          companyId, gatewayId, input.displayName ?? null, secrets.credentials,
+          input.webhookSecret === null || secrets.webhook !== null, secrets.webhook, input.status ?? null,
+          input.isDefault ?? null, input.metadata === undefined ? null : JSON.stringify(input.metadata),
+        ],
       );
-      await client.query('COMMIT');
-      return result.rows[0] ? mapGateway(result.rows[0]) : null;
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
+      return mapGateway(result.rows[0]);
+    });
   }
 
-  async archive(companyId: number, gatewayId: number): Promise<void> {
-    await this.pool.query(
-      `UPDATE payment_gateways SET status = 'archived', is_default = false, updated_at = NOW()
-       WHERE company_id = $1 AND id = $2`,
-      [companyId, gatewayId]
+  async archive(companyId: number, gatewayId: number): Promise<boolean> {
+    return this.mutate(companyId, async (db) => {
+      const result = await db.query(
+        `UPDATE payment_gateways
+         SET status = 'archived', is_default = false, credentials_json = '{}',
+             webhook_secret = NULL, updated_at = NOW()
+         WHERE company_id = $1 AND id = $2 AND status <> 'archived'`,
+        [companyId, gatewayId],
+      );
+      return result.rowCount === 1;
+    });
+  }
+
+  private async find(db: Queryable, companyId: number, gatewayId: number): Promise<Row | null> {
+    const result = await db.query(
+      `SELECT * FROM payment_gateways WHERE company_id = $1 AND id = $2 AND status <> 'archived'`,
+      [companyId, gatewayId],
     );
+    return result.rows[0] ?? null;
+  }
+
+  private async mutate<T>(companyId: number, write: (db: Queryable) => Promise<T>): Promise<T> {
+    return this.uow.run(companyId, async (db) => {
+      // Serialize changes to the company's singleton default without locking other tenant catalogs.
+      await db.query('SELECT pg_advisory_xact_lock(1843925584, $1::int)', [companyId]);
+      return write(db);
+    });
+  }
+
+  private async clearDefault(db: Queryable, companyId: number, exceptId?: number): Promise<void> {
+    await db.query(
+      `UPDATE payment_gateways SET is_default = false, updated_at = NOW()
+       WHERE company_id = $1 AND is_default AND ($2::bigint IS NULL OR id <> $2)`,
+      [companyId, exceptId ?? null],
+    );
+  }
+
+  private secrets(companyId: number, gatewayId: string, input: Partial<PaymentGatewayInput>) {
+    const credentials = input.credentials === null
+      ? '{}'
+      : input.credentials && Object.keys(input.credentials).length > 0
+        ? JSON.stringify({ vault: encrypt(companyId, gatewayId, 'credentials', input.credentials) })
+        : null;
+    const webhook = input.webhookSecret
+      ? encrypt(companyId, gatewayId, 'webhookSecret', input.webhookSecret)
+      : null;
+    return { credentials, webhook };
   }
 }

@@ -2,7 +2,8 @@ import fs from 'fs';
 import path from 'path';
 import { NextFunction, Request, Response, Router } from 'express';
 import config from '../config/index';
-import { JwtRequest, resolveWhatsappCompanyId } from '../middleware/jwtAuth';
+import { JwtRequest, resolveWhatsappCompanyId, toPositiveInt } from '../middleware/jwtAuth';
+import type { PaymentGatewayInput, PaymentGatewayProvider } from '../modules/ai/domain/paymentGateway.types';
 import AgentService from '../services/ai/AgentService';
 
 const multer = require('multer') as any;
@@ -32,9 +33,73 @@ const VALID_MODES = ['normal', 'mixed', 'automator'];
 const VALID_HANDOFF_OUTCOMES = ['sale_confirmed', 'no_sale', 'follow_up_required', 'support_resolved', 'duplicate', 'cancelled'];
 const VALID_DOMAIN_KEYS = ['gestion_web', 'inventory_stock', 'commercial_catalog', 'orders', 'support', 'payments'];
 
-export default function createAgentRoutes(): Router {
+const GATEWAY_PROVIDERS: readonly PaymentGatewayProvider[] = ['mercadopago', 'stripe', 'paypal', 'manual', 'other'];
+
+function invalidGatewayInput(): never {
+  throw Object.assign(new Error('Datos de pasarela inválidos.'), {
+    code: 'INVALID_PAYMENT_GATEWAY_INPUT',
+    statusCode: 400,
+  });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function parseGatewayInput(value: unknown): Partial<PaymentGatewayInput> {
+  if (!isRecord(value)) return invalidGatewayInput();
+  const { provider, displayName, credentials, webhookSecret, status, isDefault, metadata } = value;
+  const input: Partial<PaymentGatewayInput> = {};
+  if (provider !== undefined) {
+    const knownProvider = GATEWAY_PROVIDERS.find((candidate) => candidate === provider);
+    if (!knownProvider) return invalidGatewayInput();
+    input.provider = knownProvider;
+  }
+  if (displayName !== undefined) {
+    if (typeof displayName !== 'string' || !displayName.trim() || displayName.trim().length > 100) {
+      return invalidGatewayInput();
+    }
+    input.displayName = displayName.trim();
+  }
+  if (credentials !== undefined) {
+    if (credentials !== null && (!isRecord(credentials) || JSON.stringify(credentials).length > 8192)) {
+      return invalidGatewayInput();
+    }
+    input.credentials = credentials;
+  }
+  if (webhookSecret !== undefined) {
+    if (webhookSecret !== null && (typeof webhookSecret !== 'string' || webhookSecret.length > 1024)) {
+      return invalidGatewayInput();
+    }
+    input.webhookSecret = webhookSecret?.trim() ?? null;
+  }
+  if (status !== undefined) {
+    if (status !== 'active' && status !== 'inactive') return invalidGatewayInput();
+    input.status = status;
+  }
+  if (isDefault !== undefined) {
+    if (typeof isDefault !== 'boolean') return invalidGatewayInput();
+    input.isDefault = isDefault;
+  }
+  if (metadata !== undefined) {
+    if (!isRecord(metadata)) return invalidGatewayInput();
+    const instructions = metadata.manualInstructions;
+    if (instructions !== undefined && (typeof instructions !== 'string' || instructions.length > 2000)) {
+      return invalidGatewayInput();
+    }
+    input.metadata = typeof instructions === 'string' ? { manualInstructions: instructions.trim() } : {};
+  }
+  return input;
+}
+
+function gatewayId(value: unknown): number {
+  const id = toPositiveInt(value);
+  if (!id || !Number.isSafeInteger(id)) return invalidGatewayInput();
+  return id;
+}
+
+export default function createAgentRoutes(service = new AgentService()): Router {
   const router = Router();
-  const service = new AgentService();
   const knowledgeUploadDir = path.join(config.whatsapp.uploadDir, 'agent-knowledge');
   fs.mkdirSync(knowledgeUploadDir, { recursive: true });
   const upload = multer({ dest: knowledgeUploadDir, limits: { fileSize: config.multer.maxFileSize } });
@@ -222,7 +287,11 @@ export default function createAgentRoutes(): Router {
   router.post('/payment-gateways', async (req: JwtRequest, res: Response, next: NextFunction) => {
     if (!requireAdmin(req, res)) return;
     try {
-      const data = await service.createGateway(resolveWhatsappCompanyId(req), req.body || {});
+      const input = parseGatewayInput(req.body);
+      if (!input.provider || !input.displayName) return invalidGatewayInput();
+      const data = await service.createGateway(resolveWhatsappCompanyId(req), {
+        ...input, provider: input.provider, displayName: input.displayName,
+      });
       res.status(201).json({ success: true, data });
     } catch (error) { next(error); }
   });
@@ -230,7 +299,9 @@ export default function createAgentRoutes(): Router {
   router.patch('/payment-gateways/:id', async (req: JwtRequest, res: Response, next: NextFunction) => {
     if (!requireAdmin(req, res)) return;
     try {
-      const data = await service.updateGateway(resolveWhatsappCompanyId(req), toInt(req.params.id), req.body || {});
+      const data = await service.updateGateway(
+        resolveWhatsappCompanyId(req), gatewayId(req.params.id), parseGatewayInput(req.body),
+      );
       if (!data) return res.status(404).json({ success: false, message: 'Pasarela no encontrada' });
       return res.json({ success: true, data });
     } catch (error) { return next(error); }
@@ -239,7 +310,8 @@ export default function createAgentRoutes(): Router {
   router.delete('/payment-gateways/:id', async (req: JwtRequest, res: Response, next: NextFunction) => {
     if (!requireAdmin(req, res)) return;
     try {
-      await service.archiveGateway(resolveWhatsappCompanyId(req), toInt(req.params.id));
+      const archived = await service.archiveGateway(resolveWhatsappCompanyId(req), gatewayId(req.params.id));
+      if (!archived) return res.status(404).json({ success: false, message: 'Pasarela no encontrada' });
       res.json({ success: true, message: 'Pasarela archivada' });
     } catch (error) { next(error); }
   });

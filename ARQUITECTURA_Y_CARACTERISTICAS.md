@@ -224,9 +224,9 @@ erDiagram
    - `order_items`: Detalle de productos por orden con precios congelados al momento de venta.
    - `operational_actions`: Registro de auditoría de modificaciones operativas.
 5. **Pagos, Pasarelas y Comprobantes**:
-   - `payment_gateways`: Proveedores integrados (MercadoPago, Stripe, PayPal, Transferencia manual).
-   - `payment_vouchers`: Comprobantes cargados, estado de validación, URLs de link de pago.
-   - `payment_webhook_events`: Notificaciones IPN/Webhooks de pasarelas de pago.
+   - `payment_gateways`: Configuración de pasarelas por empresa. Las credenciales nuevas se cifran y se pueden reemplazar o borrar desde la API administrativa.
+   - `payment_vouchers`: Comprobantes cargados y estado de validación manual. El esquema reserva campos para referencias de pasarela.
+   - `payment_webhook_events`: Tabla reservada para eventos de pasarelas. La conciliación automática está deshabilitada.
 6. **Handoff y Soporte**:
    - `handoff_tickets`: Cola de atención para agentes humanos (motivo, operador asignado, estado).
 7. **Taxonomía**:
@@ -268,10 +268,11 @@ erDiagram
 | `/api/orders` | GET / POST | `requireJwt` | Listado y formalización de órdenes de compra |
 | `/api/orders/:id/status` | PATCH | `requireJwt` | Cambio de estado de la orden (pendiente, pagado, etc.) |
 | **`/api/payments`** | | | |
-| `/api/payments/gateways` | GET / POST | `requireJwt` | Configuración de pasarelas (MercadoPago / Stripe) |
+| `/api/agents/payment-gateways` | GET / POST | JWT de administrador | Consulta y alta de configuraciones por empresa |
+| `/api/agents/payment-gateways/:id` | PATCH / DELETE | JWT de administrador | Edición y archivo de configuraciones por empresa |
 | `/api/payments/vouchers` | GET / POST | `requireJwt` | Carga y revisión de comprobantes de pago |
 | `/api/payments/vouchers/:id/verify` | POST | `requireJwt` | Aprobación o rechazo de comprobante |
-| `/api/webhooks/payments/:gateway` | POST | Firma Gateway | Recepción de notificaciones de pago automáticas |
+| `/api/webhooks/payments/{mercadopago,stripe,paypal}` | POST | Pública, respuesta 501 | Conciliación automática deshabilitada |
 | **`/api/dashboard` & `/api/reports`**| | | |
 | `/api/dashboard/stats` | GET | `requireJwt` | Contadores KPI (mensajes, ventas, handoffs, IA) |
 | `/api/dashboard/handoff` | GET | `requireJwt` | Lista de tickets de derivación humana pendientes |
@@ -282,6 +283,11 @@ erDiagram
 | `/api/whatsapp/status` | GET | `optionalJwt` | Estado de la conexión (Cloud API o Baileys) |
 | `/api/whatsapp/qr` | GET | `optionalJwt` | Obtención de código QR para sesión Baileys |
 | `/api/whatsapp/templates` | GET / POST | `optionalJwt` | Sincronización de plantillas aprobadas por Meta |
+
+
+La API administrativa devuelve indicadores de almacenamiento de secretos y el estado `checkoutAvailability: unavailable`. Las escrituras de secretos requieren `MASTER_ENCRYPTION_KEY`. En una edición, un objeto vacío de credenciales o un secreto vacío conserva el valor previo. Usa `null` para borrarlo. Los valores históricos en texto claro se ocultan y se pueden reemplazar por credenciales rotadas.
+
+Para habilitar Mercado Pago se requiere una intención de cobro creada por el servidor que vincule la empresa, la pasarela, el titular de la cuenta, el pedido, el monto y la moneda. La conciliación debe verificar la firma de la notificación y consultar el recurso con el token de la cuenta correspondiente. La transición y la deduplicación deben aplicarse en una transacción. [Notificaciones de Checkout Pro](https://www.mercadopago.com.pe/developers/es/docs/checkout-pro-preferences/payment-notifications)
 
 ---
 

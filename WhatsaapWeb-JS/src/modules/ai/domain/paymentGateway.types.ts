@@ -6,7 +6,10 @@ export type PaymentGateway = {
   provider: PaymentGatewayProvider;
   displayName: string;
   credentials: Record<string, unknown>;
-  webhookSecret: string | null;
+  webhookSecret: null;
+  credentialsStored: boolean;
+  webhookSecretStored: boolean;
+  checkoutAvailability: 'unavailable';
   status: 'active' | 'inactive' | 'archived';
   isDefault: boolean;
   metadata: Record<string, unknown>;
@@ -17,9 +20,9 @@ export type PaymentGateway = {
 export type PaymentGatewayInput = {
   provider: PaymentGatewayProvider;
   displayName: string;
-  credentials?: Record<string, unknown>;
+  credentials?: Record<string, unknown> | null;
   webhookSecret?: string | null;
-  status?: PaymentGateway['status'];
+  status?: Exclude<PaymentGateway['status'], 'archived'>;
   isDefault?: boolean;
   metadata?: Record<string, unknown>;
 };

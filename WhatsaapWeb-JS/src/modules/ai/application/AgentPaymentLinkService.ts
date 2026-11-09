@@ -26,26 +26,9 @@ export class AgentPaymentLinkService {
       error.statusCode = 400;
       throw error;
     }
-    return this.delegateToProvider(gateway, input.request);
-  }
-
-  private async delegateToProvider(gateway: PaymentGateway, request: PaymentLinkInput): Promise<PaymentLinkResult> {
-    switch (gateway.provider) {
-      case 'manual':
-        return {
-          url: String((gateway.metadata as any)?.manualInstructions || 'Coordina el pago manualmente con el cliente.'),
-          gatewayPaymentId: null,
-          expiresAt: null,
-        };
-      case 'mercadopago':
-      case 'stripe':
-      case 'paypal':
-      case 'other':
-      default: {
-        const error = new Error(`Pasarela ${gateway.provider} no implementada aun`) as Error & { statusCode?: number };
-        error.statusCode = 501;
-        throw error;
-      }
-    }
+    throw Object.assign(new Error('La generación de enlaces de pago no está disponible.'), {
+      code: 'PAYMENT_CHECKOUT_UNAVAILABLE',
+      statusCode: 501,
+    });
   }
 }
