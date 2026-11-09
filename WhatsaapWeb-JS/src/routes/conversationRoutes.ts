@@ -1,5 +1,6 @@
 import { NextFunction, Response, Router } from 'express';
 import pool from '../config/database';
+import { TenantScopedUoW, tenantScopedUoW } from '../db/TenantScopedUoW';
 import { JwtRequest, resolveWhatsappCompanyId, toPositiveInt } from '../middleware/jwtAuth';
 import {
   createProblemDetails,
@@ -50,7 +51,8 @@ function json(value: unknown): string {
 }
 
 export default function createConversationRoutes(
-  casService: ConversationCasService = conversationCasService
+  casService: ConversationCasService = conversationCasService,
+  unitOfWork: Pick<TenantScopedUoW, 'run'> = tenantScopedUoW,
 ): Router {
   const router = Router();
 
@@ -60,23 +62,23 @@ export default function createConversationRoutes(
       const conversationId = parsePositiveInt(req.params.id);
       if (!conversationId) return res.status(400).json({ success: false, message: 'Conversacion invalida' });
 
-      const conversationResult = await pool.query(
-        `SELECT id, external_conversation_id, title, status, commercial_stage, commercial_substatus,
-                commercial_state_updated_at, service_window_expires_at
-         FROM conversations
-         WHERE company_id = $1 AND id = $2
-         LIMIT 1`,
-        [companyId, conversationId]
-      );
-      const conversation = conversationResult.rows[0];
-      if (!conversation) return res.status(404).json({ success: false, message: 'Conversacion no encontrada' });
-
-      const chatId = conversation.external_conversation_id || null;
-      const normalizedChatId = chatId ? String(chatId).replace('@c.us', '').replace('@s.whatsapp.net', '').replace(/[^\d]/g, '') : null;
       const limit = Math.max(20, Math.min(Number(req.query.limit || 150), 300));
+      const timeline = await unitOfWork.run(companyId, async (db) => {
+        const conversationResult = await db.query(
+          `SELECT id, external_conversation_id, title, status, commercial_stage, commercial_substatus,
+                  commercial_state_updated_at, service_window_expires_at
+           FROM conversations
+           WHERE company_id = $1 AND id = $2
+           LIMIT 1`,
+          [companyId, conversationId]
+        );
+        const conversation = conversationResult.rows[0];
+        if (!conversation) return null;
 
-      const [messages, actions, orders, handoffs, logs, payments] = await Promise.all([
-        pool.query(
+        const chatId = conversation.external_conversation_id || null;
+        const normalizedChatId = chatId ? String(chatId).replace('@c.us', '').replace('@s.whatsapp.net', '').replace(/[^\d]/g, '') : null;
+
+        const messages = await db.query(
           `SELECT id, provider_message_id, direction, body, message_type, status, occurred_at,
                   EXISTS (SELECT 1 FROM message_attachments ma WHERE ma.message_id = messages.id) AS has_attachments
            FROM messages
@@ -84,16 +86,16 @@ export default function createConversationRoutes(
            ORDER BY occurred_at DESC NULLS LAST, id DESC
            LIMIT $3`,
           [companyId, conversationId, limit]
-        ),
-        pool.query(
+        );
+        const actions = await db.query(
           `SELECT id, order_id, action_type, status, description, actor_user_id, metadata_json, occurred_at
            FROM operational_actions
            WHERE company_id = $1 AND conversation_id = $2
            ORDER BY occurred_at DESC, id DESC
            LIMIT $3`,
           [companyId, conversationId, limit]
-        ),
-        pool.query(
+        );
+        const orders = await db.query(
           `SELECT o.id, o.title, o.status, o.order_type, o.agent_id, o.created_by, o.occurred_at,
                   COALESCE(items.items_json, '[]'::jsonb) AS items_json
            FROM customer_orders o
@@ -113,8 +115,8 @@ export default function createConversationRoutes(
            ORDER BY o.occurred_at DESC, o.id DESC
            LIMIT $3`,
           [companyId, conversationId, limit]
-        ),
-        pool.query(
+        );
+        const handoffs = await db.query(
           `SELECT id, agent_id, order_id, reason, priority, status, taken_by, closed_by, outcome, notes,
                   metadata_json, created_at, updated_at
            FROM handoff_tickets
@@ -122,8 +124,8 @@ export default function createConversationRoutes(
            ORDER BY created_at DESC, id DESC
            LIMIT $3`,
           [companyId, conversationId, limit]
-        ),
-        pool.query(
+        );
+        const logs = await db.query(
           `SELECT id, agent_id, stage, level, status, summary, action, tool_name,
                   tool_result_status, related_order_id, related_handoff_id, created_at
            FROM agent_runtime_logs
@@ -132,8 +134,8 @@ export default function createConversationRoutes(
            ORDER BY created_at DESC, id DESC
            LIMIT $4`,
           [companyId, normalizedChatId, [chatId, normalizedChatId].filter(Boolean), limit]
-        ),
-        pool.query(
+        );
+        const payments = await db.query(
           `SELECT id, order_id, status, amount, currency, file_url, gateway_payment_id,
                   payment_link_url, uploaded_by, validated_by, uploaded_at, validated_at, created_at
            FROM payment_vouchers
@@ -141,8 +143,11 @@ export default function createConversationRoutes(
            ORDER BY COALESCE(uploaded_at, created_at) DESC, id DESC
            LIMIT $3`,
           [companyId, conversationId, limit]
-        ),
-      ]);
+        );
+        return { conversation, chatId, messages, actions, orders, handoffs, logs, payments };
+      });
+      if (!timeline) return res.status(404).json({ success: false, message: 'Conversacion no encontrada' });
+      const { conversation, chatId, messages, actions, orders, handoffs, logs, payments } = timeline;
 
       const events = [
         ...messages.rows.map((row) => ({

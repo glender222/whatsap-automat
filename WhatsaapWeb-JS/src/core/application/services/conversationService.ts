@@ -6,7 +6,7 @@ import { AttachmentRepositoryPort } from '../ports/attachmentRepository.port';
 import { StatusRepositoryPort } from '../ports/statusRepository.port';
 import { AuditLogRepositoryPort } from '../ports/auditLogRepository.port';
 import { MessageChannelPort } from '../ports/messageChannel.port';
-import { UnitOfWorkPort } from '../../../shared/UnitOfWorkPort';
+import type { TenantScopedUoW } from '../../../db/TenantScopedUoW';
 import { ContactRepository } from '../../infrastructure/db/repositories/contactRepository';
 import { ConversationRepository } from '../../infrastructure/db/repositories/conversationRepository';
 import { MessageRepository } from '../../infrastructure/db/repositories/messageRepository';
@@ -48,9 +48,7 @@ export interface LegacyEventEmitter {
  * Servicio de aplicación que orquesta repositorios y canal WhatsApp
  * para persistir conversaciones, contactos, mensajes y estados.
  *
- * PR5: UnitOfWork se inyecta de forma opt-in para garantizar atomicidad
- * en operaciones multi-write (ingestInbound). Si no se provee, el flujo
- * actual sigue funcionando con el pool directo (backward compatible).
+ * El Core PostgreSQL inyecta el contexto de tenant para guardar mensajes y adjuntos juntos.
  */
 export class ConversationService {
   constructor(
@@ -62,34 +60,20 @@ export class ConversationService {
     private readonly auditLogRepository: AuditLogRepositoryPort,
     private readonly channelPort: MessageChannelPort,
     private readonly legacyEmitter?: LegacyEventEmitter,
-    private readonly unitOfWork?: UnitOfWorkPort,
+    private readonly unitOfWork?: Pick<TenantScopedUoW, 'run'>,
   ) {}
 
   async ingestInbound(dto: InboundMessageDTO): Promise<IngestResult> {
     const companyId = dto.companyId;
-    const channel = dto.channel;
-
-    // Idempotencia: detectar duplicado ANTES de cualquier efecto secundario
-    if (dto.providerMessageId) {
-      const existing = await this.messageRepository.findByProviderId(companyId, channel, dto.providerMessageId);
-      if (existing) {
-        // Recuperar contacto y conversación para devolver un resultado consistente
-        const contact = await this.contactRepository.findByExternal(companyId, channel, dto.externalContactId);
-        const conversation = await this.conversationRepository.findByExternal(companyId, channel, dto.externalConversationId);
-        return {
-          message: existing,
-          contact: contact ?? { id: 0, companyId, channel, externalContactId: dto.externalContactId, name: dto.contactName, phone: dto.contactPhone, rawProfileJson: null, createdAt: new Date(), updatedAt: new Date() },
-          conversation: conversation ?? { id: 0, companyId, channel, externalConversationId: dto.externalConversationId, contactId: null, type: null, title: null, lastMessageAt: null, unreadCount: 0, createdAt: new Date(), updatedAt: new Date() },
-          isDuplicate: true,
-          legacyPayload: undefined,
-        };
-      }
-    }
-
     let result: IngestResult;
 
     if (this.unitOfWork) {
-      result = await this.unitOfWork.transaction(async ({ client }) => {
+      result = await this.unitOfWork.run(companyId, async (client) => {
+        if (dto.providerMessageId) {
+          await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, [
+            JSON.stringify(['webjs-inbound', companyId, dto.channel, dto.providerMessageId]),
+          ]);
+        }
         const contactRepository = new ContactRepository(client);
         const conversationRepository = new ConversationRepository(client);
         const messageRepository = new MessageRepository(client);
@@ -101,6 +85,7 @@ export class ConversationService {
     } else {
       result = await this.runInboundWrites(dto, this.contactRepository, this.conversationRepository, this.messageRepository, this.attachmentRepository, this.statusRepository, this.auditLogRepository);
     }
+    if (result.isDuplicate) return { ...result, legacyPayload: undefined };
 
     // 8. Payload legacy compatible con frontend actual
     const legacyPayload = {
@@ -149,6 +134,20 @@ export class ConversationService {
   ): Promise<Omit<IngestResult, 'legacyPayload'>> {
     const companyId = dto.companyId;
     const channel = dto.channel;
+
+    if (dto.providerMessageId) {
+      const existing = await messageRepository.findByProviderId(companyId, channel, dto.providerMessageId);
+      if (existing) {
+        const contact = await contactRepository.findByExternal(companyId, channel, dto.externalContactId);
+        const conversation = await conversationRepository.findByExternal(companyId, channel, dto.externalConversationId);
+        return {
+          message: existing,
+          contact: contact ?? { id: 0, companyId, channel, externalContactId: dto.externalContactId, name: dto.contactName, phone: dto.contactPhone, rawProfileJson: null, createdAt: new Date(), updatedAt: new Date() },
+          conversation: conversation ?? { id: 0, companyId, channel, externalConversationId: dto.externalConversationId, contactId: null, type: null, title: null, lastMessageAt: null, unreadCount: 0, createdAt: new Date(), updatedAt: new Date() },
+          isDuplicate: true,
+        };
+      }
+    }
 
     // 1. Contacto
     const contact = await contactRepository.findOrCreate({

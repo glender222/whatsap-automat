@@ -1,5 +1,5 @@
 import pool from '../../../config/database';
-import { UnitOfWorkPort } from '../../../shared/UnitOfWorkPort';
+import { TenantScopedUoW, tenantScopedUoW } from '../../../db/TenantScopedUoW';
 import { CompanyRepository } from '../db/repositories/companyRepository';
 import { ContactRepository } from '../db/repositories/contactRepository';
 import { ConversationRepository } from '../db/repositories/conversationRepository';
@@ -28,7 +28,7 @@ export function createConversationCore(
   legacyService: any,
   io: any,
   defaultCompanyId = 1,
-  unitOfWork?: UnitOfWorkPort,
+  unitOfWork: Pick<TenantScopedUoW, 'run'> = tenantScopedUoW,
 ): ConversationCore {
   const companyRepository = new CompanyRepository(pool);
   const contactRepository = new ContactRepository(pool);
