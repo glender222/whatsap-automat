@@ -470,8 +470,8 @@ test('real API isolates two companies through auth, signed ingress, inbox, socke
     );
     const second = await db.query(
       `INSERT INTO message_attachments (message_id, provider, provider_media_id, filename, mime_type, size_bytes, internal_path, storage_status)
-       VALUES ($1, 'meta-cloud', $1::text, 'second-fixture.png', 'image/png', $2, $3, 'downloaded') RETURNING id`,
-      [documentId, secondaryBytes.length, secondaryPath],
+       VALUES ($1, 'meta-cloud', $4, 'second-fixture.png', 'image/png', $2, $3, 'downloaded') RETURNING id`,
+      [documentId, secondaryBytes.length, secondaryPath, String(documentId)],
     );
     return [first.rows[0].id, second.rows[0].id];
   });
