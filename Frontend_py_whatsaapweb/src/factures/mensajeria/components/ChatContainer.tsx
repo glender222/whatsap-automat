@@ -23,6 +23,8 @@ import { agentStateAtom, setChatActivityAtom } from '../../../jotai/slices/agent
 interface ChatContainerProps {
   selectedChat: string | null;
   loadingMessages: boolean;
+  message: string;
+  setMessage: React.Dispatch<React.SetStateAction<string>>;
   messages: WhatsAppMessage[];
   onImageClick: (msg: WhatsAppMessage) => void;
   onSendMessage: (messageText: string) => Promise<void> | void;
@@ -34,6 +36,8 @@ interface ChatContainerProps {
 const ChatContainer: React.FC<ChatContainerProps> = ({
   selectedChat,
   loadingMessages,
+  message,
+  setMessage,
   messages,
   onImageClick,
   onSendMessage,
@@ -41,7 +45,6 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
   onMessageSent,
   onMessageError,
 }) => {
-  const [message, setMessage] = useState('');
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const [suggesting, setSuggesting] = useState(false);
   const [agentSuggestion, setAgentSuggestion] = useState<{
@@ -171,7 +174,7 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
         await onSendMessage(text);
         customerHistory.reload();
       } catch (error) {
-        setMessage(text);
+        setMessage((current) => current || text);
         throw error;
       }
     }
@@ -200,7 +203,7 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
   };
 
   const handleSuggestResponse = async () => {
-    if (!selectedChat || suggesting) return;
+    if (!selectedChat || !defaultAgent || suggesting) return;
 
     const lastCustomerMessage = [...messages].reverse().find((item) => !item.fromMe && item.body?.trim());
     if (!lastCustomerMessage) {
@@ -253,7 +256,7 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
   };
 
   const handleRegenerateSuggestion = async () => {
-    if (!selectedChat || suggesting) return;
+    if (!selectedChat || !defaultAgent || suggesting) return;
     setAgentSuggestion(null);
     await handleSuggestResponse();
   };
@@ -379,7 +382,7 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
                 <button
                   type="button"
                   onClick={handleSuggestResponse}
-                  disabled={suggesting || isIaPaused}
+                  disabled={suggesting || isIaPaused || !defaultAgent}
                   className="inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 disabled:opacity-60 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300"
                 >
                   <Sparkles className="h-4 w-4" />

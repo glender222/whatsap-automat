@@ -1,39 +1,40 @@
-import { useUserRoleJotai } from '../jotai/middleware/useUserRoleJotai';
-import React from "react";
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
-import GestionWeb from "../factures/GestionWeb";
-import LandingPage from "../factures/landing/pages/LandingPage";
+import { lazy, useEffect } from "react";
+import { useSetAtom } from "jotai";
+import { getUserRole, userRoleAtom } from "../jotai/middleware/userRoleAtom";
 import SocketService from "../utils/socket";
+import type { ReactNode } from "react";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import LandingPage from "../factures/landing/pages/LandingPage";
 
 // Auth pages
 import LoginPage from "../factures/auth/pages/LoginPage";
 import RegisterPage from "../factures/auth/pages/RegisterPage";
 import ForgotPasswordPage from "../factures/auth/pages/ForgotPasswordPage";
 
-// Hijas
-import Inicio from "../factures/mensajeria/Inicio";
-import Reportes from "../factures/estadisticos/Reportes";
-import Seguimiento from "../factures/estaciones/pages/administradorestaciones";
-import SettingsPage from "../factures/setting/pages/SettingsPage";
-import GeneralSettingsPage from "../factures/setting/pages/GeneralSettingsPage";
-import PermissionsPage from "../factures/permisos/pages/PermissionsPage";
 import DashboardLayout from "../factures/dashboard/components/DashboardLayout";
-import DashboardPage from "../factures/dashboard/pages/DashboardPage";
-import PaymentsPage from "../factures/dashboard/pages/PaymentsPage";
-import HandoffPage from "../factures/dashboard/pages/HandoffPage";
-import AiDomainsPage from "../factures/agentes/pages/AiDomainsPage";
-import AgentsPage from "../factures/agentes/pages/AgentsPage";
-import AgentTestSessionPage from "../factures/agentes/pages/AgentTestSessionPage";
-import CatalogsPage from "../factures/inventario/pages/CatalogsPage";
-import InventoryPage from "../factures/inventario/pages/InventoryPage";
 import { useAgentState } from "../factures/dashboard/hooks/useAgentState";
-import { CampaignWizard, SegmentsManager, EmailChannelConfig } from "../components/campaigns";
-import AuditEventsPage from "../pages/Admin/AuditEventsPage";
-import SystemHealthPage from "../pages/Admin/SystemHealthPage";
-
 import { authService } from "../factures/auth/services/authService";
 
-function PrivateRoute({ children, adminOnly = false }: { children: React.ReactNode; adminOnly?: boolean }) {
+const Inicio = lazy(() => import("../factures/mensajeria/Inicio"));
+const Reportes = lazy(() => import("../factures/estadisticos/Reportes"));
+const Seguimiento = lazy(() => import("../factures/estaciones/pages/administradorestaciones"));
+const GeneralSettingsPage = lazy(() => import("../factures/setting/pages/GeneralSettingsPage"));
+const PermissionsPage = lazy(() => import("../factures/permisos/pages/PermissionsPage"));
+const DashboardPage = lazy(() => import("../factures/dashboard/pages/DashboardPage"));
+const PaymentsPage = lazy(() => import("../factures/dashboard/pages/PaymentsPage"));
+const HandoffPage = lazy(() => import("../factures/dashboard/pages/HandoffPage"));
+const AiDomainsPage = lazy(() => import("../factures/agentes/pages/AiDomainsPage"));
+const AgentsPage = lazy(() => import("../factures/agentes/pages/AgentsPage"));
+const AgentTestSessionPage = lazy(() => import("../factures/agentes/pages/AgentTestSessionPage"));
+const CatalogsPage = lazy(() => import("../factures/inventario/pages/CatalogsPage"));
+const InventoryPage = lazy(() => import("../factures/inventario/pages/InventoryPage"));
+const CampaignsPage = lazy(() => import("../components/campaigns/CampaignsPage"));
+const CampaignWizard = lazy(() => import("../components/campaigns/CampaignWizard"));
+const SegmentsManager = lazy(() => import("../components/campaigns/SegmentsManager"));
+const AuditEventsPage = lazy(() => import("../pages/Admin/AuditEventsPage"));
+const SystemHealthPage = lazy(() => import("../pages/Admin/SystemHealthPage"));
+
+function PrivateRoute({ children, adminOnly = false }: { children: ReactNode; adminOnly?: boolean }) {
   const isAuth = authService.isAuthenticated();
   const token = localStorage.getItem('accessToken');
   if (!isAuth || !token) return <Navigate to="/auth/login" replace />;
@@ -45,49 +46,26 @@ function PrivateRoute({ children, adminOnly = false }: { children: React.ReactNo
 }
 
 function AppRoutesInner() {
-  const {  syncUserRole } = useUserRoleJotai();
+  const setUserRole = useSetAtom(userRoleAtom);
   useAgentState();
-  React.useEffect(() => { syncUserRole(); }, []);
-  const location = useLocation();
-  const state = location.state as { background?: any } | undefined;
-  const background = state && state.background;
 
-  // 🔌 Inicializar Socket.IO una sola vez cuando el usuario está autenticado
-  React.useEffect(() => {
-    const token = localStorage.getItem('accessToken');
-    
-    if (token) {
-      console.log('🔌 Inicializando Socket.IO en nivel superior de la app...');
-      const socketService = SocketService.getInstance();
-      socketService.connect();
+  useEffect(() => {
+    setUserRole(getUserRole());
+    if (localStorage.getItem('accessToken')) {
+      SocketService.getInstance().connect();
     }
-
-    return () => {
-      // NO desconectar al desmontar, ya que la sesión continúa
-    };
-  }, []); // Se ejecuta solo una vez al montar
+  }, [setUserRole]);
 
   return (
-    <>
-      <Routes location={background || location}>
-        <Route path="/" element={<LandingPage />} />
+    <Routes>
+      <Route path="/" element={<LandingPage />} />
+      <Route path="/auth/login" element={<LoginPage />} />
+      <Route path="/auth/register" element={<RegisterPage />} />
+      <Route path="/auth/forgot-password" element={<ForgotPasswordPage />} />
 
-        {/* Auth routes */}
-        <Route path="/auth/login" element={<LoginPage />} />
-        <Route path="/auth/register" element={<RegisterPage />} />
-        <Route path="/auth/forgot-password" element={<ForgotPasswordPage />} />
-
-        {/* Admin Panel - Ruta independiente */}
-        <Route
-          path="/dashboard/*"
-          element={
-            <PrivateRoute>
-              <DashboardLayout />
-            </PrivateRoute>
-          }
-        >
+      <Route element={<PrivateRoute><DashboardLayout /></PrivateRoute>}>
+        <Route path="/dashboard">
           <Route index element={<DashboardPage />} />
-          <Route path="" element={<DashboardPage />} />
           <Route path="pagos" element={<PaymentsPage />} />
           <Route path="handoff" element={<HandoffPage />} />
           <Route path="ia/dominios" element={<PrivateRoute adminOnly><AiDomainsPage /></PrivateRoute>} />
@@ -97,44 +75,33 @@ function AppRoutesInner() {
           <Route path="agentes" element={<Navigate to="/dashboard/ia/agentes" replace />} />
           <Route path="inventario" element={<InventoryPage />} />
           <Route path="catalogos" element={<CatalogsPage />} />
-          <Route path="campanas" element={<CampaignWizard />} />
+          <Route path="campanas" element={<CampaignsPage />} />
           <Route path="campanas/nueva" element={<CampaignWizard />} />
           <Route path="segmentos" element={<SegmentsManager />} />
-          <Route path="canales/email" element={<EmailChannelConfig />} />
+          <Route path="canales/email" element={
+            <section className="mx-auto max-w-3xl space-y-2 p-6">
+              <h1 className="text-2xl font-semibold">Canal de correo electrónico</h1>
+              <p className="text-sm text-gray-600 dark:text-gray-300">La configuración de correo todavía no está disponible desde este espacio de trabajo.</p>
+            </section>
+          } />
           <Route path="admin/auditoria" element={<PrivateRoute adminOnly><AuditEventsPage /></PrivateRoute>} />
           <Route path="admin/salud" element={<PrivateRoute adminOnly><SystemHealthPage /></PrivateRoute>} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Route>
 
-        {/* Rutas protegidas */}
-        <Route
-          path="/gestion-web/*"
-          element={
-            <PrivateRoute>
-              <GestionWeb />
-            </PrivateRoute>
-          }
-        >
+        <Route path="/gestion-web">
           <Route index element={<Navigate to="/gestion-web/inicio" replace />} />
           <Route path="inicio" element={<Inicio />} />
-          <Route path="reportes" element={<div className="max-w-7xl mx-auto h-full"><Reportes /></div>} />
-          
-        <Route
-          path="administrar-estaciones"
-          element={<Seguimiento />}
-        />
+          <Route path="agentes" element={<Navigate to="/dashboard/ia/agentes" replace />} />
+          <Route path="reportes" element={<div className="mx-auto h-full max-w-7xl"><Reportes /></div>} />
+          <Route path="administrar-estaciones" element={<Seguimiento />} />
           <Route path="permisos" element={<PrivateRoute adminOnly><PermissionsPage /></PrivateRoute>} />
+          <Route path="settings" element={<Navigate to="/gestion-web/settings/general" replace />} />
+          <Route path="settings/general" element={<GeneralSettingsPage />} />
           <Route path="*" element={<Navigate to="/gestion-web/inicio" replace />} />
         </Route>
-      </Routes>
-
-      {background && (
-        <Routes>
-          <Route path="/gestion-web/settings" element={<SettingsPage />} />
-          <Route path="/gestion-web/settings/general" element={<GeneralSettingsPage />} />
-        </Routes>
-      )}
-    </>
+      </Route>
+    </Routes>
   );
 }
 

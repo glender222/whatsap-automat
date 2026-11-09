@@ -1,406 +1,204 @@
-import React, { useState } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
+import { Plus, RefreshCw, Trash2, Users } from 'lucide-react';
 import {
-  Users,
-  Plus,
-  Trash2,
-  RefreshCw,
-  Filter,
-  CheckCircle2,
-  Sparkles,
-} from 'lucide-react';
+  calculateSegment,
+  campaignError,
+  channelLabel,
+  channelLabels,
+  createSegment,
+  listSegments,
+  type SegmentDraft,
+  type SegmentSummary,
+} from './campaignApi';
 
-export interface SegmentRule {
-  field: string;
-  operator: string;
-  value: string;
-}
-
-export interface SegmentItem {
-  id: string;
-  name: string;
-  description?: string;
-  targetChannel: string;
-  dynamic: boolean;
-  calculatedCount: number;
-  lastCalculatedAt?: string;
-  criteria: {
-    combinator: 'AND' | 'OR';
-    rules: SegmentRule[];
-  };
-}
-
-export interface SegmentsManagerProps {
-  initialSegments?: SegmentItem[];
-  onCreateSegment?: (segment: Omit<SegmentItem, 'id' | 'calculatedCount'>) => Promise<void> | void;
-  onCalculateCount?: (segmentId: string) => Promise<number> | number;
-}
-
-export const SegmentsManager: React.FC<SegmentsManagerProps> = ({
-  initialSegments = [
-    {
-      id: 'seg_1',
-      name: 'Clientes VIP Activos',
-      description: 'Contactos con etiqueta vip activos en los ultimos 30 dias',
-      targetChannel: 'any',
-      dynamic: true,
-      calculatedCount: 240,
-      lastCalculatedAt: '2026-11-04T12:00:00Z',
-      criteria: {
-        combinator: 'AND',
-        rules: [
-          { field: 'tag', operator: 'equals', value: 'vip' },
-          { field: 'last_seen_days', operator: 'lt', value: '30' },
-        ],
-      },
-    },
-    {
-      id: 'seg_2',
-      name: 'Leads de Correo Electrónico',
-      description: 'Contactos con consentimiento de correo registrado',
-      targetChannel: 'email',
-      dynamic: true,
-      calculatedCount: 1250,
-      lastCalculatedAt: '2026-11-04T10:00:00Z',
-      criteria: {
-        combinator: 'AND',
-        rules: [{ field: 'metadata.channel', operator: 'equals', value: 'email' }],
-      },
-    },
-  ],
-  onCreateSegment,
-  onCalculateCount,
-}) => {
-  const [segments, setSegments] = useState<SegmentItem[]>(initialSegments);
-  const [isCreating, setIsCreating] = useState(false);
-  const [calculatingId, setCalculatingId] = useState<string | null>(null);
-
-  // New segment form state
-  const [newSegmentName, setNewSegmentName] = useState('');
-  const [newSegmentDesc, setNewSegmentDesc] = useState('');
-  const [targetChannel, setTargetChannel] = useState('any');
-  const [combinator, setCombinator] = useState<'AND' | 'OR'>('AND');
-  const [rules, setRules] = useState<SegmentRule[]>([
-    { field: 'tag', operator: 'equals', value: 'vip' },
-  ]);
-
-  const addRule = () => {
-    setRules([...rules, { field: 'tag', operator: 'equals', value: '' }]);
-  };
-
-  const removeRule = (index: number) => {
-    setRules(rules.filter((_, i) => i !== index));
-  };
-
-  const updateRule = (index: number, key: keyof SegmentRule, val: string) => {
-    const updated = [...rules];
-    updated[index] = { ...updated[index], [key]: val };
-    setRules(updated);
-  };
-
-  const handleCreate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newSegmentName.trim()) return;
-
-    const newSegment: SegmentItem = {
-      id: `seg_${Date.now()}`,
-      name: newSegmentName,
-      description: newSegmentDesc,
-      targetChannel,
-      dynamic: true,
-      calculatedCount: Math.floor(Math.random() * 500) + 50,
-      lastCalculatedAt: new Date().toISOString(),
-      criteria: {
-        combinator,
-        rules,
-      },
-    };
-
-    if (onCreateSegment) {
-      await onCreateSegment(newSegment);
-    }
-
-    setSegments([newSegment, ...segments]);
-    setIsCreating(false);
-    setNewSegmentName('');
-    setNewSegmentDesc('');
-    setRules([{ field: 'tag', operator: 'equals', value: 'vip' }]);
-  };
-
-  const handleRecalculate = async (segmentId: string) => {
-    setCalculatingId(segmentId);
-    try {
-      let count = 0;
-      if (onCalculateCount) {
-        count = await onCalculateCount(segmentId);
-      } else {
-        await new Promise((r) => setTimeout(r, 400));
-        count = Math.floor(Math.random() * 800) + 100;
-      }
-      setSegments((prev) =>
-        prev.map((s) =>
-          s.id === segmentId
-            ? { ...s, calculatedCount: count, lastCalculatedAt: new Date().toISOString() }
-            : s
-        )
-      );
-    } finally {
-      setCalculatingId(null);
-    }
-  };
-
-  return (
-    <div className="max-w-6xl mx-auto p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-            <Users className="w-6 h-6 text-emerald-600" />
-            Segmentación Dinámica de Audiencias
-          </h2>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            Crea grupos dinámicos basados en etiquetas, actividad reciente y atributos de consentimiento.
-          </p>
-        </div>
-
-        {!isCreating && (
-          <button
-            onClick={() => setIsCreating(true)}
-            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-sm rounded-lg flex items-center gap-1.5 shadow"
-          >
-            <Plus className="w-4 h-4" />
-            Crear Segmento
-          </button>
-        )}
-      </div>
-
-      {isCreating && (
-        <div className="bg-white dark:bg-gray-900 border border-emerald-300 dark:border-emerald-800 rounded-xl p-6 shadow-md space-y-6">
-          <div className="flex items-center justify-between border-b pb-4 dark:border-gray-800">
-            <h3 className="font-bold text-lg text-gray-900 dark:text-white flex items-center gap-2">
-              <Sparkles className="w-5 h-5 text-emerald-600" />
-              Nuevo Segmento Dinámico
-            </h3>
-            <button
-              onClick={() => setIsCreating(false)}
-              className="text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400"
-            >
-              Cancelar
-            </button>
-          </div>
-
-          <form onSubmit={handleCreate} className="space-y-4">
-            <div className="grid grid-cols-3 gap-4">
-              <div className="col-span-2">
-                <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-                  Nombre del Segmento *
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="ej. Clientes Alta Frecuencia Bogotá"
-                  value={newSegmentName}
-                  onChange={(e) => setNewSegmentName(e.target.value)}
-                  className="w-full px-3 py-2 text-sm border rounded-lg dark:bg-gray-800 dark:border-gray-700 dark:text-white"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-                  Canal Objetivo
-                </label>
-                <select
-                  value={targetChannel}
-                  onChange={(e) => setTargetChannel(e.target.value)}
-                  className="w-full px-3 py-2 text-sm border rounded-lg dark:bg-gray-800 dark:border-gray-700 dark:text-white"
-                >
-                  <option value="any">Cualquier Canal</option>
-                  <option value="whatsapp-cloud">WhatsApp</option>
-                  <option value="email">Email</option>
-                  <option value="telegram">Telegram</option>
-                </select>
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-                Descripción
-              </label>
-              <input
-                type="text"
-                placeholder="Propósito del segmento..."
-                value={newSegmentDesc}
-                onChange={(e) => setNewSegmentDesc(e.target.value)}
-                className="w-full px-3 py-2 text-sm border rounded-lg dark:bg-gray-800 dark:border-gray-700 dark:text-white"
-              />
-            </div>
-
-            {/* Visual Rule Builder */}
-            <div className="p-4 bg-gray-50 dark:bg-gray-800/40 border rounded-lg space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Filter className="w-4 h-4 text-emerald-600" />
-                  <span className="text-xs font-bold text-gray-700 dark:text-gray-300 uppercase">
-                    Condiciones del Filtro
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-1 bg-white dark:bg-gray-800 border rounded-lg p-0.5 text-xs">
-                  <button
-                    type="button"
-                    onClick={() => setCombinator('AND')}
-                    className={`px-2 py-1 rounded font-bold ${
-                      combinator === 'AND'
-                        ? 'bg-emerald-600 text-white'
-                        : 'text-gray-600 dark:text-gray-400'
-                    }`}
-                  >
-                    Y (AND)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setCombinator('OR')}
-                    className={`px-2 py-1 rounded font-bold ${
-                      combinator === 'OR'
-                        ? 'bg-emerald-600 text-white'
-                        : 'text-gray-600 dark:text-gray-400'
-                    }`}
-                  >
-                    O (OR)
-                  </button>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                {rules.map((rule, idx) => (
-                  <div key={idx} className="flex items-center gap-2">
-                    <select
-                      value={rule.field}
-                      onChange={(e) => updateRule(idx, 'field', e.target.value)}
-                      className="px-2.5 py-1.5 text-xs border rounded dark:bg-gray-800 dark:border-gray-700 dark:text-white"
-                    >
-                      <option value="tag">Etiqueta (Tag)</option>
-                      <option value="last_seen_days">Días Inactivo</option>
-                      <option value="metadata.industry">Industria</option>
-                      <option value="metadata.role">Rol del Contacto</option>
-                      <option value="metadata.city">Ciudad</option>
-                    </select>
-
-                    <select
-                      value={rule.operator}
-                      onChange={(e) => updateRule(idx, 'operator', e.target.value)}
-                      className="px-2.5 py-1.5 text-xs border rounded dark:bg-gray-800 dark:border-gray-700 dark:text-white"
-                    >
-                      <option value="equals">es igual a</option>
-                      <option value="not_equals">no es igual a</option>
-                      <option value="includes_any">incluye cualquiera</option>
-                      <option value="excludes">excluye</option>
-                      <option value="lt">menor a (&lt;)</option>
-                      <option value="gt">mayor a (&gt;)</option>
-                    </select>
-
-                    <input
-                      type="text"
-                      placeholder="Valor..."
-                      value={rule.value}
-                      onChange={(e) => updateRule(idx, 'value', e.target.value)}
-                      className="flex-1 px-3 py-1.5 text-xs border rounded dark:bg-gray-800 dark:border-gray-700 dark:text-white"
-                    />
-
-                    {rules.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => removeRule(idx)}
-                        className="text-gray-400 hover:text-red-500 p-1"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
-
-              <button
-                type="button"
-                onClick={addRule}
-                className="text-xs text-emerald-600 hover:text-emerald-700 font-semibold flex items-center gap-1 mt-2"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                Agregar Condición
-              </button>
-            </div>
-
-            <div className="flex justify-end gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setIsCreating(false)}
-                className="px-4 py-2 border rounded-lg text-sm text-gray-600 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-800"
-              >
-                Cancelar
-              </button>
-              <button
-                type="submit"
-                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-bold shadow"
-              >
-                Guardar Segmento
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {/* Segments Table */}
-      <div className="bg-white dark:bg-gray-900 border rounded-xl overflow-hidden shadow">
-        <table className="w-full text-left text-sm">
-          <thead className="bg-gray-50 dark:bg-gray-800/60 text-xs font-semibold text-gray-500 dark:text-gray-400 border-b">
-            <tr>
-              <th className="px-6 py-3">Nombre del Segmento</th>
-              <th className="px-6 py-3">Canal</th>
-              <th className="px-6 py-3">Tipo</th>
-              <th className="px-6 py-3 text-center">Audiencia Calculada</th>
-              <th className="px-6 py-3 text-right">Acciones</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y dark:divide-gray-800">
-            {segments.map((seg) => (
-              <tr key={seg.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/40">
-                <td className="px-6 py-4">
-                  <div className="font-semibold text-gray-900 dark:text-white">{seg.name}</div>
-                  {seg.description && (
-                    <div className="text-xs text-gray-500 mt-0.5">{seg.description}</div>
-                  )}
-                </td>
-                <td className="px-6 py-4">
-                  <span className="px-2 py-0.5 bg-gray-100 dark:bg-gray-800 rounded text-xs font-mono">
-                    {seg.targetChannel}
-                  </span>
-                </td>
-                <td className="px-6 py-4">
-                  <span className="inline-flex items-center gap-1 text-xs text-emerald-600 font-medium">
-                    <CheckCircle2 className="w-3.5 h-3.5" /> Dinámico
-                  </span>
-                </td>
-                <td className="px-6 py-4 text-center font-bold text-gray-900 dark:text-white">
-                  {seg.calculatedCount}
-                  <span className="text-xs font-normal text-gray-400 block">contactos</span>
-                </td>
-                <td className="px-6 py-4 text-right">
-                  <button
-                    onClick={() => handleRecalculate(seg.id)}
-                    disabled={calculatingId === seg.id}
-                    className="p-1.5 text-gray-500 hover:text-emerald-600 dark:hover:text-emerald-400 rounded hover:bg-gray-100 dark:hover:bg-gray-800"
-                    title="Recalcular tamaño de audiencia"
-                  >
-                    <RefreshCw
-                      className={`w-4 h-4 ${calculatingId === seg.id ? 'animate-spin text-emerald-600' : ''}`}
-                    />
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
+const fields = {
+  tag: 'Etiqueta',
+  last_seen_days: 'Días desde la última actividad',
+  'metadata.industry': 'Industria',
+  'metadata.role': 'Rol del contacto',
+  'metadata.city': 'Ciudad',
 };
 
-export default SegmentsManager;
+const operators = {
+  equals: 'es igual a',
+  not_equals: 'no es igual a',
+  includes_any: 'incluye alguna',
+  excludes: 'excluye',
+  lt: 'menor que',
+  gt: 'mayor que',
+};
+
+type RuleField = keyof typeof fields;
+type RuleOperator = keyof typeof operators;
+type RuleInput = { id: string; field: RuleField; operator: RuleOperator; value: string };
+
+const operatorsByField: Record<RuleField, RuleOperator[]> = {
+  tag: ['equals', 'not_equals', 'includes_any', 'excludes'],
+  last_seen_days: ['equals', 'lt', 'gt'],
+  'metadata.industry': ['equals', 'not_equals'],
+  'metadata.role': ['equals', 'not_equals'],
+  'metadata.city': ['equals', 'not_equals'],
+};
+
+const inputClass = 'w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100';
+
+function ruleValue(rule: RuleInput) {
+  const value = rule.value.trim();
+  if (rule.field === 'last_seen_days') return Number(value);
+  if (rule.operator === 'includes_any' || rule.operator === 'excludes') {
+    return value.split(',').map((tag) => tag.trim()).filter(Boolean);
+  }
+  return value;
+}
+
+export default function SegmentsManager() {
+  const [segments, setSegments] = useState<SegmentSummary[]>();
+  const [attempt, setAttempt] = useState(0);
+  const [loadError, setLoadError] = useState('');
+  const [actionError, setActionError] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [rules, setRules] = useState<RuleInput[]>([]);
+
+  useEffect(() => {
+    const request = new AbortController();
+    listSegments(request.signal)
+      .then((items) => { if (!request.signal.aborted) setSegments(items); })
+      .catch((cause) => {
+        if (!request.signal.aborted) setLoadError(campaignError(cause, 'No se pudo cargar el listado de segmentos.'));
+      });
+    return () => request.abort();
+  }, [attempt]);
+
+  async function handleCreate(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const values = new FormData(event.currentTarget);
+    const name = String(values.get('name') ?? '').trim();
+    const description = String(values.get('description') ?? '').trim();
+    const criteria = rules.map((rule) => ({ field: rule.field, operator: rule.operator, value: ruleValue(rule) }));
+    if (!name || rules.some((rule) => !rule.value.trim()) || criteria.some(({ value }) => value === '' || (Array.isArray(value) && value.length === 0))) {
+      setActionError('Completa el nombre y los valores de todas las reglas.');
+      return;
+    }
+
+    setBusy('create');
+    setActionError('');
+    try {
+      const segment = await createSegment({
+        name,
+        description: description || undefined,
+        targetChannel: values.get('targetChannel') as SegmentDraft['targetChannel'],
+        criteria: { combinator: values.get('combinator') as 'AND' | 'OR', rules: criteria },
+      });
+      setSegments((items) => [segment, ...(items ?? [])]);
+      setCreating(false);
+      setRules([]);
+    } catch (cause) {
+      setActionError(campaignError(cause, 'No se pudo crear el segmento. Revisa la conexión y vuelve a intentar.'));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleRecalculate(segmentId: string) {
+    setBusy(segmentId);
+    setActionError('');
+    try {
+      const count = await calculateSegment(segmentId);
+      setSegments((items) => items?.map((item) => item.id === segmentId
+        ? { ...item, calculatedCount: count, lastCalculatedAt: new Date().toISOString() }
+        : item));
+    } catch (cause) {
+      setActionError(campaignError(cause, 'No se pudo calcular el segmento. Vuelve a intentar.'));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function updateRule(id: string, update: Partial<RuleInput>) {
+    setRules((items) => items.map((item) => item.id === id ? { ...item, ...update } : item));
+  }
+
+  return (
+    <section className="mx-auto max-w-5xl space-y-5 p-4 sm:p-6" aria-labelledby="segments-title">
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 id="segments-title" className="text-2xl font-semibold">Segmentos</h1>
+          <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">Organiza audiencias con reglas y consulta su tamaño.</p>
+        </div>
+        <button type="button" aria-expanded={creating} disabled={busy !== null || !segments} onClick={() => { setCreating(!creating); setActionError(''); }} className="inline-flex items-center gap-2 rounded-md bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-60">
+          <Plus size={16} /> {creating ? 'Cerrar formulario' : 'Nuevo segmento'}
+        </button>
+      </header>
+      {actionError && <p role="alert" className="rounded-md border border-red-200 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:text-red-300">{actionError}</p>}
+      {creating && (
+        <form onSubmit={handleCreate} className="space-y-4 rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-900 sm:p-6">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="block space-y-1 text-sm font-medium"><span>Nombre del segmento</span><input className={inputClass} name="name" required maxLength={255} /></label>
+            <label className="block space-y-1 text-sm font-medium"><span>Canal</span>
+              <select className={inputClass} name="targetChannel" defaultValue="any">
+                <option value="any">Cualquier canal</option>
+                {Object.entries(channelLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+            </label>
+          </div>
+          <label className="block space-y-1 text-sm font-medium"><span>Descripción (opcional)</span><input className={inputClass} name="description" /></label>
+          <fieldset className="space-y-3 border-t border-gray-200 pt-3 dark:border-gray-700">
+            <legend className="text-sm font-semibold">Reglas de audiencia</legend>
+            <label className="block max-w-xs space-y-1 text-sm"><span>Combinar reglas</span>
+              <select className={inputClass} name="combinator" defaultValue="AND">
+                <option value="AND">Deben coincidir todas</option>
+                <option value="OR">Debe coincidir alguna</option>
+              </select>
+            </label>
+            {rules.length === 0 && <p className="text-sm text-gray-600 dark:text-gray-300">Sin reglas, el segmento incluye todos los contactos que devuelve el servidor.</p>}
+            {rules.map((rule, index) => (
+              <div key={rule.id} className="grid grid-cols-[1fr_auto] items-center gap-2 sm:grid-cols-[1fr_1fr_1fr_auto]">
+                <select aria-label={`Campo de la regla ${index + 1}`} className={`${inputClass} col-span-2 sm:col-span-1`} value={rule.field} onChange={(event) => updateRule(rule.id, { field: event.target.value as RuleField, operator: 'equals', value: '' })}>
+                  {Object.entries(fields).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                </select>
+                <select aria-label={`Operador de la regla ${index + 1}`} className={`${inputClass} col-span-2 sm:col-span-1`} value={rule.operator} onChange={(event) => updateRule(rule.id, { operator: event.target.value as RuleOperator })}>
+                  {operatorsByField[rule.field].map((operator) => <option key={operator} value={operator}>{operators[operator]}</option>)}
+                </select>
+                <input aria-label={`Valor de la regla ${index + 1}`} className={inputClass} required type={rule.field === 'last_seen_days' ? 'number' : 'text'} min={0} value={rule.value} onChange={(event) => updateRule(rule.id, { value: event.target.value })} />
+                <button aria-label={`Quitar regla ${index + 1}`} type="button" className="rounded-md p-2 text-red-700 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950" onClick={() => setRules((items) => items.filter(({ id }) => id !== rule.id))}><Trash2 size={17} /></button>
+              </div>
+            ))}
+            <button type="button" className="text-sm font-medium text-emerald-700 underline dark:text-emerald-300" onClick={() => setRules((items) => [...items, { id: crypto.randomUUID(), field: 'tag', operator: 'equals', value: '' }])}>Agregar regla</button>
+          </fieldset>
+          <button type="submit" disabled={busy !== null} className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-60">{busy === 'create' ? 'Creando…' : 'Crear segmento'}</button>
+        </form>
+      )}
+      {loadError ? (
+        <div role="alert" className="rounded-md border border-red-200 p-4 text-sm text-red-700 dark:border-red-800 dark:text-red-300">
+          <p>{loadError}</p>
+          <button type="button" className="mt-2 underline" onClick={() => { setLoadError(''); setAttempt((value) => value + 1); }}>Volver a intentar</button>
+        </div>
+      ) : segments === undefined ? (
+        <p role="status" className="text-sm text-gray-600 dark:text-gray-300">Cargando segmentos…</p>
+      ) : segments.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-gray-300 p-6 text-sm text-gray-600 dark:border-gray-600 dark:text-gray-300">
+          <Users className="mb-3 text-emerald-700 dark:text-emerald-300" size={22} />
+          Todavía no hay segmentos en este espacio.
+        </div>
+      ) : (
+        <ul className="divide-y divide-gray-200 rounded-xl border border-gray-200 bg-white dark:divide-gray-700 dark:border-gray-700 dark:bg-gray-900">
+          {segments.map((segment) => (
+            <li key={segment.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+              <div className="min-w-0">
+                <h2 className="break-words font-medium">{segment.name}</h2>
+                {segment.description && <p className="break-words text-sm text-gray-600 dark:text-gray-300">{segment.description}</p>}
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  {segment.targetChannel === 'any' ? 'Cualquier canal' : channelLabel(segment.targetChannel)} · {segment.lastCalculatedAt ? `${segment.calculatedCount} contactos` : 'Sin recuento'}
+                </p>
+              </div>
+              <button type="button" disabled={busy !== null} onClick={() => void handleRecalculate(segment.id)} className="inline-flex items-center gap-2 rounded-md border border-gray-300 px-3 py-2 text-sm font-medium hover:bg-gray-50 disabled:opacity-60 dark:border-gray-600 dark:hover:bg-gray-800">
+                <RefreshCw size={15} className={busy === segment.id ? 'animate-spin' : ''} /> {busy === segment.id ? 'Calculando…' : 'Calcular contactos'}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}

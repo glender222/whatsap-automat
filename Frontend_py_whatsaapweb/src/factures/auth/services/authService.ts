@@ -37,19 +37,12 @@ export const authService = {
     }
   },
 
-  /**
-   * Refrescar token (POST /auth/refresh)
-   * 
-   * CAMBIO IMPORTANTE: Según arquitectura multi-tenant, el refresh ahora requiere
-   * el Access Token (aunque esté expirado) en el header Authorization.
-   * El interceptor de axios ya lo inyecta automáticamente.
-   */
+  /** Refresca el acceso con el token de renovación. */
   async refreshToken(refreshToken: string): Promise<AuthTokens> {
     try {
       const { data } = await api.post<{ success: boolean; data: AuthTokens }>(
         "/auth/refresh",
         { refreshToken }
-        // El header Authorization se inyecta automáticamente por el interceptor
       );
 
       if (!data.success) throw new Error("No se pudo refrescar el token");

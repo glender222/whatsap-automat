@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { CheckCircle2, ExternalLink, FileText, Image as ImageIcon, Loader2, XCircle } from 'lucide-react';
 import {
   type PaymentMethod,
@@ -237,9 +238,9 @@ export default function PaymentsPage() {
                         {row.chatId && (
                           <div className="flex items-center gap-1 text-xs text-[#5B6F66]">
                             {row.chatId}
-                            <a href={`/gestion-web/inicio?chat=${encodeURIComponent(row.chatId)}`} className="text-[#128C7E]" title="Abrir chat">
-                              <ExternalLink className="h-3 w-3" />
-                            </a>
+                            <Link to={`/gestion-web/inicio?chat=${encodeURIComponent(row.chatId)}`} className="text-[#128C7E]" aria-label="Abrir conversación">
+                              <ExternalLink className="h-3 w-3" aria-hidden="true" />
+                            </Link>
                           </div>
                         )}
                       </td>

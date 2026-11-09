@@ -1,458 +1,251 @@
-
-import React, { useState, useEffect } from 'react';
-import { Search, Bell } from 'lucide-react';
+import { Ellipsis, MessageSquareText, RefreshCw, Search, Tags, X } from 'lucide-react';
+import { useRef, useState } from 'react';
 import { useAtomValue } from 'jotai';
 import AvatarCircle from '../extras/AvatarCircle';
 import TagManager from '../TagManager';
-// ChatSkeletonList ya no se usa - ahora mostramos un loader pequeño
 import { userRoleAtom } from '../../../../jotai/middleware/userRoleAtom';
 import type { WhatsAppChat } from '../../../../shared/types/wsp';
-import * as tagsService from '../../services/tagsService';
+import type { Tag } from '../../types/tagTypes';
+import { ALL_CHATS_TAG_ID, assignChatToTag } from '../../services/tagsService';
 
 interface ChatSidebarProps {
   chats: WhatsAppChat[];
   selectedChat: string | null;
   setSelectedChat: (id: string) => void;
   formatNumeroAfiliado: (id: string) => string;
-  onShowContactInfo?: (chatId: string) => void;
-  onOpenMainMenu?: () => void;
-  categories?: Array<{ name: string; color: string; icon: React.ReactNode }>;
-  selectedCategory?: string;
-  setSelectedCategory?: (v: string) => void;
-  categoryDropdown?: boolean;
-  setCategoryDropdown?: (v: boolean) => void;
-  onCreateTag?: (data: { name: string; color: string }) => Promise<void>;
-  onUpdateTag?: (id: string, data: { name: string; color: string }) => Promise<void>;
-  onDeleteTag?: (id: string) => Promise<void>;
-  tags?: Array<{ id: string; name: string; color?: string | null }>;
-  isLoadingChats?: boolean;
+  onShowContactInfo: (chatId: string) => void;
+  selectedTagId: string;
+  setSelectedTagId: (id: string) => void;
+  onCreateTag: (data: { name: string; color: string }) => Promise<void>;
+  onUpdateTag: (id: string, data: { name: string; color: string }) => Promise<void>;
+  onDeleteTag: (id: string) => Promise<void>;
+  tags: Tag[];
+  loading: boolean;
+  error: string | null;
+  onReload: () => void;
 }
 
-function tagSwatchClass(color?: string | null): string {
-  if (!color) return 'bg-gray-500';
-  if (color.startsWith('bg-')) return color;
-  if (color.startsWith('text-')) return color.replace(/^text-/, 'bg-');
-  return '';
+const iconButton = 'grid h-11 w-11 shrink-0 place-items-center rounded-lg text-secondary hover:bg-canvas focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-600 disabled:opacity-50';
+const field = 'min-h-11 w-full rounded-lg border border-subtle bg-canvas px-3 text-sm text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-600';
+const dateFormat = new Intl.DateTimeFormat('es-PE', { day: 'numeric', month: 'short' });
+const timeFormat = new Intl.DateTimeFormat('es-PE', { hour: '2-digit', minute: '2-digit' });
+
+function formatTime(timestamp: number): string {
+  if (!timestamp) return '';
+  const format = Date.now() - timestamp < 86_400_000 ? timeFormat : dateFormat;
+  return format.format(timestamp);
 }
 
-function tagSwatchStyle(color?: string | null): React.CSSProperties | undefined {
-  return color && color.startsWith('#') ? { backgroundColor: color } : undefined;
-}
-
-const ChatSidebar: React.FC<ChatSidebarProps> = ({
-  chats,
-  selectedChat,
-  setSelectedChat,
-  formatNumeroAfiliado,
-  onShowContactInfo,
-  onOpenMainMenu,
-  categories = [],
-  selectedCategory = 'Seleccione',
-  setSelectedCategory = () => { },
-  categoryDropdown = false,
-  setCategoryDropdown = () => { },
-  onCreateTag,
-  onUpdateTag,
-  onDeleteTag,
-  tags = [],
-  isLoadingChats = false,
-}) => {
-  const [searchText, setSearchText] = useState('');
+export default function ChatSidebar({
+  chats, selectedChat, setSelectedChat, formatNumeroAfiliado, onShowContactInfo,
+  selectedTagId, setSelectedTagId, onCreateTag, onUpdateTag, onDeleteTag, tags, loading, error, onReload,
+}: ChatSidebarProps) {
+  const [search, setSearch] = useState('');
+  const [unreadOnly, setUnreadOnly] = useState(false);
   const [tagManagerOpen, setTagManagerOpen] = useState(false);
-  const [tagLoading, setTagLoading] = useState(false);
-  const userRole = useAtomValue(userRoleAtom);
+  const [actionChat, setActionChat] = useState<WhatsAppChat | null>(null);
+  const [tagToAssign, setTagToAssign] = useState('');
+  const [assigning, setAssigning] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [notice, setNotice] = useState('');
+  const actionsDialog = useRef<HTMLDialogElement>(null);
+  const isAdmin = useAtomValue(userRoleAtom) === 'ADMIN';
 
-  // Estado para menú contextual (clic derecho)
-  const [contextMenu, setContextMenu] = useState<{
-    open: boolean;
-    x: number;
-    y: number;
-    chatId: string | null;
-  }>({ open: false, x: 0, y: 0, chatId: null });
+  const query = search.trim().toLocaleLowerCase('es-PE');
+  const unreadCount = chats.filter((chat) => chat.unreadCount > 0).length;
+  const filteredChats = chats.filter((chat) => (
+    (!unreadOnly || chat.unreadCount > 0) &&
+    (chat.name.toLocaleLowerCase('es-PE').includes(query) || formatNumeroAfiliado(chat.id).includes(query))
+  ));
+  const assignableTags = tags.filter((tag) => tag.id !== ALL_CHATS_TAG_ID && !tag.is_default);
 
-  // Estado para controlar si se muestra el submenu de etiquetas
-  const [showTagSubmenu, setShowTagSubmenu] = useState(false);
+  function openActions(chat: WhatsAppChat) {
+    setActionChat(chat);
+    setTagToAssign('');
+    setActionError(null);
+    actionsDialog.current?.showModal();
+  }
 
-  // Cerrar menús al hacer click fuera o presionar Escape
-  useEffect(() => {
-    function onDocClick() {
-      if (contextMenu.open) {
-        setContextMenu({ open: false, x: 0, y: 0, chatId: null });
-        setShowTagSubmenu(false);
-      }
-      if (categoryDropdown) setCategoryDropdown(false);
-    }
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        if (showTagSubmenu) {
-          setShowTagSubmenu(false);
-        } else {
-          setContextMenu({ open: false, x: 0, y: 0, chatId: null });
-        }
-        setCategoryDropdown(false);
-      }
-    }
-    window.addEventListener('click', onDocClick);
-    window.addEventListener('scroll', onDocClick, true);
-    window.addEventListener('keydown', onKey);
-    return () => {
-      window.removeEventListener('click', onDocClick);
-      window.removeEventListener('scroll', onDocClick, true);
-      window.removeEventListener('keydown', onKey);
-    };
-  }, [contextMenu.open, categoryDropdown, setCategoryDropdown, showTagSubmenu]);
-
-  const onChatContextMenu = (e: React.MouseEvent, chatId: string) => {
-    e.preventDefault();
-    // posicionamos el menú en el punto del click
-    setContextMenu({ open: true, x: e.clientX, y: e.clientY, chatId });
-  };
-
-  const handlePinContact = (chatId: string | null) => {
-    // TODO: implementar pin/fijar en backend o local state
-    console.log('Fijar contacto', chatId);
-    setContextMenu({ open: false, x: 0, y: 0, chatId: null });
-  };
-
-  // Asignar chat a una etiqueta
-  const handleAssignToTag = async (chatId: string | null, tagId: string) => {
-    if (!chatId) return;
-
+  async function assignTag() {
+    if (!actionChat || !tagToAssign || assigning) return;
+    setAssigning(true);
+    setActionError(null);
     try {
-      await tagsService.assignChatToTag(tagId, chatId);
-      console.log(`✅ Chat ${chatId} asignado a etiqueta ${tagId}`);
-      setContextMenu({ open: false, x: 0, y: 0, chatId: null });
-      setShowTagSubmenu(false);
-
-      // Opcional: mostrar notificación de éxito
-      // toast.success('Chat asignado a la etiqueta exitosamente');
-    } catch (error) {
-      console.error('Error asignando chat a etiqueta:', error);
-      // Opcional: mostrar notificación de error
-      // toast.error('No se pudo asignar el chat a la etiqueta');
-    }
-  };
-
-  const handleAddTag = async (data: { name: string; color: string }) => {
-    if (!onCreateTag) return;
-
-    setTagLoading(true);
-    try {
-      await onCreateTag(data);
-    } catch (err) {
-      console.error('Error creando tag:', err);
+      await assignChatToTag(tagToAssign, actionChat.id);
+      setNotice('Etiqueta asignada a la conversación.');
+      actionsDialog.current?.close();
+      onReload();
+    } catch (reason) {
+      setActionError(reason instanceof Error ? reason.message : 'No se pudo asignar la etiqueta.');
     } finally {
-      setTagLoading(false);
+      setAssigning(false);
     }
-  };
-
-  const handleUpdateTag = async (id: string, data: { name: string; color: string }) => {
-    if (!onUpdateTag) return;
-
-    setTagLoading(true);
-    try {
-      await onUpdateTag(id, data);
-    } catch (err) {
-      console.error('Error actualizando tag:', err);
-    } finally {
-      setTagLoading(false);
-    }
-  };
-
-  const handleDeleteTag = async (id: string) => {
-    if (!onDeleteTag) return;
-
-    setTagLoading(true);
-    try {
-      await onDeleteTag(id);
-    } catch (err) {
-      console.error('Error eliminando tag:', err);
-    } finally {
-      setTagLoading(false);
-    }
-  };
-
-  // Función para formatear timestamp
-  const formatTimestamp = (timestamp?: number) => {
-    if (!timestamp) return '';
-    const date = new Date(timestamp);
-    const now = new Date();
-    const diffInHours = (now.getTime() - date.getTime()) / (1000 * 60 * 60);
-
-    if (diffInHours < 24) {
-      return date.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
-    } else if (diffInHours < 168) { // menos de una semana
-      return date.toLocaleDateString('es-ES', { weekday: 'short' });
-    } else {
-      return date.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' });
-    }
-  };
-
-  // Filtra los chats por nombre o número (NO los reordena)
-  const filteredChats = chats.filter(chat => {
-    const name = (chat.name || '').toLowerCase();
-    const number = formatNumeroAfiliado(chat.id);
-    const search = searchText.toLowerCase();
-    return (
-      name.includes(search) ||
-      number.includes(search)
-    );
-  });
-
-  // Los chats ya vienen ordenados desde useSocketSimple, solo los filtramos
+  }
 
   return (
-    <div className="w-full md:w-80 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col h-full">
-      <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
-        <div className="flex items-center justify-between mb-4">
-          {/* Botón hamburguesa visible solo en móvil */}
-          {onOpenMainMenu && (
-            <button
-              onClick={onOpenMainMenu}
-              className="md:hidden p-2 -ml-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-gray-900 dark:text-gray-100"
-              aria-label="Abrir menú principal"
-            >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-              </svg>
-            </button>
-          )}
-          <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100">Chats</h1>
-          <div className="flex items-center ml-auto">
-            <div className="relative">
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setCategoryDropdown(!categoryDropdown);
-                }}
-                className={`px-3 py-1.5 text-sm rounded border flex items-center font-medium transition-colors ${
-                  // Marcar como activa solo si la categoría seleccionada corresponde a una categoría real
-                  categories.find(c => c.name === selectedCategory)
-                    ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-200 dark:border-blue-700 text-blue-700 dark:text-blue-300'
-                    : 'bg-gray-50 dark:bg-gray-700 border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600'
-                  }`}
-              >
-                {selectedCategory}
-                {/* ChevronDown icon */}
-                <svg width="16" height="16" fill="none" stroke="currentColor" className="ml-2"><path d="M6 9l3 3 3-3" strokeWidth="1.5" /></svg>
+    <section aria-label="Conversaciones" className="flex h-full min-w-0 flex-col border-r border-subtle bg-surface">
+      <div className="shrink-0 space-y-3 border-b border-subtle p-4">
+        <div className="flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <h2 className="truncate font-semibold text-primary">Conversaciones</h2>
+            <p className="text-xs text-secondary">WhatsApp</p>
+          </div>
+          <div className="flex">
+            {isAdmin && (
+              <button type="button" aria-label="Gestionar etiquetas" title="Gestionar etiquetas" className={iconButton} onClick={() => setTagManagerOpen(true)}>
+                <Tags size={17} aria-hidden="true" />
               </button>
-              {categoryDropdown && (
-                <div
-                  className="absolute right-0 mt-2 w-44 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-lg rounded-lg z-20"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <ul className="py-2">
-                    {categories.map((cat: { name: string; color: string; icon: React.ReactNode }) => {
-                      return (
-                        <li key={cat.name}>
-                          <button
-                            className="w-full text-left px-4 py-2 flex items-center hover:bg-gray-100 dark:hover:bg-gray-700 text-sm text-gray-900 dark:text-gray-100"
-                            onClick={() => {
-                              setSelectedCategory(cat.name);
-                              setCategoryDropdown(false);
-                            }}
-                          >
-                            {cat.icon}
-                            <span className={`${cat.color}`}>{cat.name}</span>
-                          </button>
-                        </li>
-                      );
-                    })}
-                    {userRole === 'ADMIN' && (
-                      <li className="border-t border-gray-100 dark:border-gray-700">
-                        <button
-                          className="w-full px-3 py-2.5 flex items-center justify-center hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors gap-2"
-                          onClick={() => {
-                            setTagManagerOpen(true);
-                            setCategoryDropdown(false);
-                          }}
-                          title="Gestionar categorías"
-                        >
-                          <svg width="18" height="18" fill="none" stroke="currentColor" className="text-blue-500 dark:text-blue-400" strokeWidth="2">
-                            <path d="M9 4v10M4 9h10" strokeLinecap="round" />
-                          </svg>
-                          <span className="text-xs font-medium text-gray-600 dark:text-gray-300">Gestionar</span>
-                        </button>
-                      </li>
-                    )}
-                  </ul>
-                </div>
-              )}
-            </div>
+            )}
+            <button type="button" aria-label="Actualizar conversaciones" title="Actualizar conversaciones" className={iconButton} onClick={onReload} disabled={loading}>
+              <RefreshCw size={17} aria-hidden="true" className={loading ? 'animate-spin motion-reduce:animate-none' : ''} />
+            </button>
           </div>
         </div>
-        <div className="relative mb-4">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500" size={20} />
+
+        <div className="relative">
+          <Search aria-hidden="true" size={17} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-secondary" />
           <input
-            type="text"
-            placeholder="Buscar por nombre o número"
-            className="w-full pl-10 pr-4 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
-            value={searchText}
-            onChange={e => setSearchText(e.target.value)}
+            type="search"
+            aria-label="Buscar conversaciones por nombre o número"
+            placeholder="Buscar conversación"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            className={`${field} pl-10 placeholder:text-secondary`}
           />
         </div>
+
+        <label className="block text-xs font-medium text-secondary">
+          Etiqueta
+          <select className={`${field} mt-1`} value={selectedTagId} onChange={(event) => setSelectedTagId(event.target.value)} disabled={tags.length === 0}>
+            {tags.length === 0 && <option value="">{loading ? 'Cargando etiquetas…' : 'Sin etiquetas disponibles'}</option>}
+            {tags.map((tag) => <option key={tag.id} value={tag.id}>{tag.name === 'Todo' ? 'Todas las conversaciones' : tag.name}</option>)}
+          </select>
+        </label>
+
+        <div className="flex gap-2">
+          {([
+            { label: 'Todas', active: !unreadOnly, action: () => setUnreadOnly(false) },
+            { label: `Sin leer (${unreadCount})`, active: unreadOnly, action: () => setUnreadOnly(true) },
+          ]).map(({ label, active, action }) => (
+            <button
+              type="button"
+              key={label === 'Todas' ? 'all' : 'unread'}
+              aria-pressed={active}
+              onClick={action}
+              className={`min-h-10 rounded-lg border px-3 text-xs font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-600 ${
+                active
+                  ? 'border-emerald-300 bg-emerald-50 text-emerald-900 dark:border-emerald-700 dark:bg-emerald-950 dark:text-emerald-100'
+                  : 'border-subtle bg-surface text-secondary hover:bg-canvas'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
-      <div className="flex-1 overflow-y-auto min-h-0">
-        {/* Loader pequeño mientras esperamos los primeros chats */}
-        {isLoadingChats && chats.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-12 text-gray-400 dark:text-gray-500">
-            <div className="w-8 h-8 border-3 border-gray-200 dark:border-gray-600 border-t-blue-500 rounded-full animate-spin mb-3"></div>
-            <span className="text-sm">Cargando chats...</span>
+
+      <div className="min-h-0 flex-1 overflow-y-auto" aria-busy={loading}>
+        {error && (
+          <div role="alert" className="border-b border-subtle p-4 text-sm text-red-700 dark:text-red-300">
+            <p>{error}</p>
+            <button type="button" onClick={onReload} className="mt-2 min-h-10 rounded-md px-2 font-semibold underline">
+              Reintentar
+            </button>
+          </div>
+        )}
+        {loading && chats.length === 0 && <p role="status" className="p-6 text-center text-sm text-secondary">Cargando conversaciones…</p>}
+        {!loading && !error && filteredChats.length === 0 && (
+          <div className="px-5 py-10 text-center">
+            <MessageSquareText aria-hidden="true" size={26} className="mx-auto mb-3 text-secondary" />
+            <p className="text-sm font-semibold">No hay conversaciones para mostrar</p>
+            <p className="mt-1 text-sm text-secondary">
+              {query || unreadOnly ? 'Prueba con otra búsqueda o cambia el filtro.' : 'Las conversaciones asignadas aparecerán aquí.'}
+            </p>
           </div>
         )}
 
-        {/* Mensaje de vacío solo cuando no está cargando y no hay chats */}
-        {!isLoadingChats && filteredChats.length === 0 ? (
-          <div className="p-4 text-center text-gray-500 dark:text-gray-400">
-            <div className="mb-4">
-              <div className="w-16 h-16 bg-gray-100 dark:bg-gray-700 rounded-full mx-auto flex items-center justify-center">
-                <span className="text-2xl text-gray-400 dark:text-gray-500">💬</span>
-              </div>
-            </div>
-            <p className="text-sm">No hay chats disponibles</p>
-            <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
-              Los chats aparecerán aquí cuando estén disponibles
-            </p>
-          </div>
-        ) : filteredChats.length > 0 ? (
-          <>
-            <ul>
-              {filteredChats.map(chat => {
-                const showNotification = chat.unreadCount !== undefined && chat.unreadCount > 0 && chat.id !== selectedChat;
-                return (
-                  <li
-                    key={chat.id}
-                    className={`animate-slideIn px-4 py-3 border-b border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer flex items-center justify-between ${chat.id === selectedChat ? 'bg-blue-50 dark:bg-blue-900/30' : ''}`}
-                    onClick={() => setSelectedChat(chat.id)}
-                    onContextMenu={(e) => onChatContextMenu(e, chat.id)}
-                  >
-                    <div className="flex items-center gap-3 flex-1 min-w-0">
-                      {/* Avatar */}
-                      <AvatarCircle src={chat.profilePhotoUrl} alt={chat.name} size={38} />
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between">
-                          <div className="font-semibold text-gray-800 dark:text-gray-200 truncate">{chat.name || formatNumeroAfiliado(chat.id)}</div>
-                          <div className="text-xs text-gray-400 dark:text-gray-500 ml-2 flex-shrink-0">
-                            {formatTimestamp(chat.lastMessageTimestamp)}
-                          </div>
-                        </div>
-                        <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                          {chat.lastMessagePreview || formatNumeroAfiliado(chat.id)}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center ml-2">
-                      {showNotification && (
-                        <div className="flex items-center gap-1">
-                          <span className="bg-green-500 text-white text-xs rounded-full px-2 py-1 min-w-[20px] text-center">
-                            {chat.unreadCount}
-                          </span>
-                          <Bell size={16} className="text-green-500" />
-                        </div>
-                      )}
-                    </div>
-                  </li>
-                );
-              })}
-              {/* Context menu rendered at top-level of sidebar */}
-              {contextMenu.open && (
-                <div
-                  className="absolute z-50 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 overflow-hidden"
-                  style={{ top: contextMenu.y, left: contextMenu.x, minWidth: 200 }}
-                  onClick={(e) => e.stopPropagation()} // evitar que el click exterior cierre antes de manejar la opción
+        <ul>
+          {filteredChats.map((chat) => {
+            const title = chat.name || formatNumeroAfiliado(chat.id);
+            const isSelected = chat.id === selectedChat;
+            return (
+              <li key={chat.id} className={`flex items-center gap-1 border-b border-subtle pr-2 ${isSelected ? 'bg-emerald-50 dark:bg-emerald-950' : 'hover:bg-canvas'}`}>
+                <button
+                  type="button"
+                  aria-current={isSelected ? 'true' : undefined}
+                  onClick={() => setSelectedChat(chat.id)}
+                  onContextMenu={(event) => { event.preventDefault(); openActions(chat); }}
+                  className="flex min-h-16 min-w-0 flex-1 items-center gap-3 px-3 py-2 text-left focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-emerald-600"
                 >
-                  {/* Submenu: Añadir a etiqueta */}
-                  {showTagSubmenu ? (
-                    <>
-                      <div className="px-4 py-2 border-b border-gray-200 dark:border-gray-700 text-sm text-gray-600 dark:text-gray-300 flex items-center justify-between">
-                        <button
-                          onClick={() => setShowTagSubmenu(false)}
-                          className="text-blue-500 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300"
-                        >
-                          ← Atrás
-                        </button>
-                        <span>Seleccionar etiqueta</span>
-                      </div>
-                      <div className="max-h-64 overflow-y-auto">
-                        {tags.length === 0 ? (
-                          <div className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">
-                            No hay etiquetas disponibles
-                          </div>
-                        ) : (
-                          tags.map((tag) => (
-                            <button
-                              key={tag.id}
-                              className="flex items-center gap-3 px-4 py-3 w-full text-left hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-900 dark:text-gray-100"
-                              onClick={() => handleAssignToTag(contextMenu.chatId, tag.id)}
-                            >
-                              <div
-                                className={`w-3 h-3 rounded-full ${tagSwatchClass(tag.color)}`}
-                                style={tagSwatchStyle(tag.color)}
-                              />
-                              <span className="text-sm">{tag.name}</span>
-                            </button>
-                          ))
-                        )}
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      {/* Menu principal */}
-                      <div className="px-4 py-2 border-b border-gray-200 dark:border-gray-700 text-sm text-gray-600 dark:text-gray-300">Añadir a</div>
-                      {/* Solo mostrar opción de añadir a etiqueta para ADMIN */}
-                      {userRole === 'ADMIN' && (
-                        <button
-                          className="flex items-center gap-3 px-4 py-3 w-full text-left hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-900 dark:text-gray-100"
-                          onClick={() => setShowTagSubmenu(true)}
-                        >
-                          <span className="text-sm">Añadir a</span>
-                        </button>
-                      )}
-                      <button
-                        className="flex items-center gap-3 px-4 py-3 w-full text-left hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-900 dark:text-gray-100"
-                        onClick={() => handlePinContact(contextMenu.chatId)}
-                      >
-                        <span className="text-sm">Fijar contacto</span>
-                      </button>
-                      <button
-                        className="flex items-center gap-3 px-4 py-3 w-full text-left hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-900 dark:text-gray-100"
-                        onClick={() => {
-                          if (onShowContactInfo && contextMenu.chatId) {
-                            onShowContactInfo(contextMenu.chatId);
-                          }
-                          setContextMenu({ open: false, x: 0, y: 0, chatId: null });
-                        }}
-                      >
-                        <span className="text-sm">Información de contacto</span>
-                      </button>
-                    </>
+                  <AvatarCircle src={chat.profilePhotoUrl} alt="" size={36} />
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-center justify-between gap-2">
+                      <span className="truncate text-sm font-semibold text-primary">{title}</span>
+                      <span className="shrink-0 text-xs text-secondary">{formatTime(chat.lastMessageTimestamp)}</span>
+                    </span>
+                    <span className="block truncate text-xs text-secondary">{chat.lastMessagePreview || formatNumeroAfiliado(chat.id)}</span>
+                  </span>
+                  {chat.unreadCount > 0 && (
+                    <span className="shrink-0 rounded-full bg-emerald-700 px-1.5 py-0.5 text-xs font-semibold text-white" aria-label={`${chat.unreadCount} sin leer`}>
+                      {chat.unreadCount}
+                    </span>
                   )}
-                </div>
-              )}
-            </ul>
-            {/* Indicador sutil de sincronización cuando hay chats y se cargan más */}
-            {isLoadingChats && (
-              <div className="flex items-center justify-center py-3 text-xs text-gray-400 dark:text-gray-500 gap-2">
-                <div className="w-3 h-3 border-2 border-gray-300 dark:border-gray-600 border-t-blue-500 rounded-full animate-spin"></div>
-                <span>Sincronizando chats...</span>
-              </div>
-            )}
-          </>
-        ) : null}
+                </button>
+                <button type="button" aria-label={`Opciones de ${title}`} aria-haspopup="dialog" className={iconButton} onClick={() => openActions(chat)}>
+                  <Ellipsis size={17} aria-hidden="true" />
+                </button>
+              </li>
+            );
+          })}
+        </ul>
       </div>
 
-      {/* Tag Manager para crear, editar y eliminar etiquetas */}
+      <p className="sr-only" role="status">{notice}</p>
+      <dialog
+        ref={actionsDialog}
+        aria-labelledby="conversation-actions-title"
+        className="w-[calc(100%-2rem)] max-w-sm rounded-xl border border-subtle bg-surface p-5 text-primary shadow-xl backdrop:bg-slate-950/50"
+      >
+        <div className="flex items-center justify-between gap-3">
+          <h2 id="conversation-actions-title" className="min-w-0 truncate font-semibold">{actionChat?.name || 'Opciones de conversación'}</h2>
+          <button type="button" aria-label="Cerrar opciones" className={iconButton} onClick={() => actionsDialog.current?.close()}>
+            <X size={18} aria-hidden="true" />
+          </button>
+        </div>
+        <button
+          type="button"
+          className="mt-2 min-h-11 rounded-lg px-3 text-sm font-semibold text-emerald-800 hover:bg-canvas dark:text-emerald-200"
+          onClick={() => {
+            if (!actionChat) return;
+            actionsDialog.current?.close();
+            onShowContactInfo(actionChat.id);
+          }}
+        >
+          Información de contacto
+        </button>
+        {isAdmin && assignableTags.length > 0 && (
+          <form className="mt-4 flex flex-col gap-2 border-t border-subtle pt-4" onSubmit={(event) => { event.preventDefault(); void assignTag(); }}>
+            <label className="block text-sm font-medium">
+              Asignar etiqueta
+              <select required className={`${field} mt-1`} value={tagToAssign} onChange={(event) => setTagToAssign(event.target.value)}>
+                <option value="">Selecciona una etiqueta</option>
+                {assignableTags.map((tag) => <option key={tag.id} value={tag.id}>{tag.name}</option>)}
+              </select>
+            </label>
+            {actionError && <p role="alert" className="text-sm text-red-700 dark:text-red-300">{actionError}</p>}
+            <button type="submit" disabled={!tagToAssign || assigning} className="btn-primary self-start">{assigning ? 'Asignando…' : 'Asignar'}</button>
+          </form>
+        )}
+      </dialog>
+
       <TagManager
         open={tagManagerOpen}
         onClose={() => setTagManagerOpen(false)}
         tags={tags}
-        onCreateTag={handleAddTag}
-        onUpdateTag={handleUpdateTag}
-        onDeleteTag={handleDeleteTag}
-        loading={tagLoading}
+        onCreateTag={onCreateTag}
+        onUpdateTag={onUpdateTag}
+        onDeleteTag={onDeleteTag}
       />
-    </div>
+    </section>
   );
-};
-
-export default ChatSidebar;
+}

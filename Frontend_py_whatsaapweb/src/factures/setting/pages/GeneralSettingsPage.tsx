@@ -6,11 +6,8 @@ import { CompanyService, type CompanyOverview } from '../services/companyService
 import WhatsAppConnectionSection from '../components/WhatsAppConnectionSection';
 import ThemeSection from '../components/ThemeSection';
 import AutoDownloadSection from '../components/AutoDownloadSection';
-import { ArrowLeft } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
 
 const GeneralSettingsPage: React.FC = () => {
-  const navigate = useNavigate();
   const { userRole } = useUserRoleJotai();
   
   // Hook de conexión WhatsApp
@@ -40,23 +37,7 @@ const GeneralSettingsPage: React.FC = () => {
   }, []);
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-      {/* Header */}
-      <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-4 md:px-6 py-4">
-        <div className="max-w-6xl mx-auto flex items-center gap-3">
-          <button
-            onClick={() => navigate(-1)}
-            className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-            aria-label="Volver"
-          >
-            <ArrowLeft className="w-5 h-5 text-gray-600 dark:text-gray-400" />
-          </button>
-          <h1 className="text-lg md:text-2xl font-semibold text-gray-900 dark:text-gray-100">
-            Configuración General
-          </h1>
-        </div>
-      </div>
-
+    <div className="min-h-full bg-gray-50 dark:bg-gray-900">
       {/* Contenido principal */}
       <div className="max-w-6xl mx-auto px-4 md:px-6 py-8">
         <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-6 md:p-8">

@@ -50,104 +50,33 @@ export default function SystemHealthPage() {
   const [expandedCheck, setExpandedCheck] = useState<string | null>(null);
   const [showJsonModal, setShowJsonModal] = useState<boolean>(false);
 
-  const runDiagnostics = useCallback(async () => {
+  const [attempt, setAttempt] = useState(0);
+
+  const runDiagnostics = useCallback(async (signal: AbortSignal) => {
     setLoading(true);
     setError(null);
     try {
-      const response = await api.get('/v1/admin/health/diagnostics');
+      const response = await api.get('/v1/admin/health/diagnostics', { signal });
+      if (signal.aborted) return;
       if (response.data && Array.isArray(response.data.checks)) {
         setReport(response.data);
       } else {
         throw new Error('Formato de diagnóstico inválido');
       }
-    } catch (err: any) {
-      // Graceful fallback to verified diagnostic fixtures (SRE Doctor Standard)
-      const mockReport: DiagnosticReport = {
-        overallStatus: 'PASS',
-        total: 7,
-        passed: 7,
-        warnings: 0,
-        failed: 0,
-        timestamp: new Date().toISOString(),
-        checks: [
-          {
-            code: 'DB-PG-001',
-            name: 'PostgreSQL Connection Pool & RLS Isolation',
-            category: 'database',
-            status: 'PASS',
-            latencyMs: 3,
-            details: { activeConnections: 4, idleConnections: 6, rlsPoliciesVerified: true },
-            remediationGuide: 'Verificar la variable DATABASE_URL y la capacidad de conexiones en postgresql.conf.'
-          },
-          {
-            code: 'DB-MIG-001',
-            name: 'Database Migration Integrity (Schema 031)',
-            category: 'database',
-            status: 'PASS',
-            latencyMs: 2,
-            details: { latestMigration: '031_create_audit_events_and_secrets.sql', appliedCount: 31 },
-            remediationGuide: 'Ejecutar npm run db:migrate para aplicar migraciones pendientes.'
-          },
-          {
-            code: 'SEC-ENC-001',
-            name: 'Master Key Envelope Encryption (KEK Readiness)',
-            category: 'security',
-            status: 'PASS',
-            latencyMs: 1,
-            details: { algorithm: 'aes-256-gcm', kekLengthBytes: 32, cipherFunctional: true },
-            remediationGuide: 'Establecer la variable de entorno MASTER_ENCRYPTION_KEY con 32 bytes aleatorios.'
-          },
-          {
-            code: 'SEC-JWT-001',
-            name: 'JWT Secret Strength & Token Lifecycle',
-            category: 'security',
-            status: 'PASS',
-            latencyMs: 1,
-            details: { secretLength: 64, entropySufficient: true },
-            remediationGuide: 'Configurar JWT_SECRET con una clave criptográfica de longitud >= 32 caracteres.'
-          },
-          {
-            code: 'SANDBOX-001',
-            name: 'Extension Host Child Process Isolation',
-            category: 'sandbox',
-            status: 'PASS',
-            latencyMs: 14,
-            details: { outOfProcessIsolation: true, envStrippingVerified: true, memoryLimitMb: 128 },
-            remediationGuide: 'Verificar los permisos de ejecución de node:child_process y memoria de la máquina.'
-          },
-          {
-            code: 'NODE-001',
-            name: 'Node.js Runtime & Heap Memory Bounds',
-            category: 'runtime',
-            status: 'PASS',
-            latencyMs: 1,
-            details: { nodeVersion: 'v22.23.4', heapUsedMb: 76, heapTotalMb: 124 },
-            remediationGuide: 'Asegurar ejecución sobre Node >= 20.0.0 y vigilar los límites de heap.'
-          },
-          {
-            code: 'DISK-001',
-            name: 'Ephemeral Storage & Workspace Write Permission',
-            category: 'system',
-            status: 'PASS',
-            latencyMs: 2,
-            details: { writable: true, storageState: 'OPTIMAL' },
-            remediationGuide: 'Liberar espacio en el disco o volumen montado del contenedor.'
-          }
-        ]
-      };
-
-      setReport(mockReport);
-      if (err.response?.status !== 404) {
-        setError('Endpoint backend en preparación; mostrando informe de diagnóstico local.');
-      }
+    } catch {
+      if (signal.aborted) return;
+      setReport(null);
+      setError('No se pudo ejecutar el diagnóstico del sistema.');
     } finally {
-      setLoading(false);
+      if (!signal.aborted) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    runDiagnostics();
-  }, [runDiagnostics]);
+    const request = new AbortController();
+    void runDiagnostics(request.signal);
+    return () => request.abort();
+  }, [runDiagnostics, attempt]);
 
   const toggleExpand = (code: string) => {
     setExpandedCheck(current => (current === code ? null : code));
@@ -225,7 +154,7 @@ export default function SystemHealthPage() {
         <div className="flex items-center gap-3">
           <button
             onClick={() => setShowJsonModal(true)}
-            disabled={!report}
+            disabled={!report || loading}
             className="inline-flex items-center gap-2 px-3.5 py-2 border border-[#D9E5DF] bg-white hover:bg-[#EEF4F1] text-[#10231C] text-sm font-medium rounded-lg shadow-sm transition disabled:opacity-50"
           >
             <FileCode className="w-4 h-4 text-[#5B6F66]" />
@@ -234,7 +163,7 @@ export default function SystemHealthPage() {
 
           <button
             onClick={exportJsonReport}
-            disabled={!report}
+            disabled={!report || loading}
             className="inline-flex items-center gap-2 px-3.5 py-2 border border-[#D9E5DF] bg-white hover:bg-[#EEF4F1] text-[#10231C] text-sm font-medium rounded-lg shadow-sm transition disabled:opacity-50"
           >
             <Download className="w-4 h-4 text-[#5B6F66]" />
@@ -242,7 +171,7 @@ export default function SystemHealthPage() {
           </button>
 
           <button
-            onClick={runDiagnostics}
+            onClick={() => setAttempt((value) => value + 1)}
             disabled={loading}
             className="inline-flex items-center gap-2 px-4 py-2 bg-[#128C7E] hover:bg-[#0E766A] text-white text-sm font-medium rounded-lg shadow-sm transition disabled:opacity-50"
           >
@@ -253,7 +182,7 @@ export default function SystemHealthPage() {
       </div>
 
       {error && (
-        <div className="p-4 rounded-lg bg-amber-50 border border-amber-200 flex items-start gap-3 text-amber-800 text-sm">
+        <div role="alert" className="p-4 rounded-lg bg-amber-50 border border-amber-200 flex items-start gap-3 text-amber-800 text-sm">
           <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
           <span>{error}</span>
         </div>

@@ -1,50 +1,26 @@
-import React from 'react';
+import { ArrowLeft, MessageSquareText } from 'lucide-react';
+import type { Ref } from 'react';
 
-interface MobileHeaderProps {
+interface ConversationHeaderProps {
+  titleRef: Ref<HTMLHeadingElement>;
   selectedChatName: string;
   onBack: () => void;
-  onMenuOpen: () => void;
 }
 
-/**
- * Componente MobileHeader
- * Header para vista móvil con navegación
- * Principio de Responsabilidad Única: Solo maneja el header móvil
- */
-const MobileHeader: React.FC<MobileHeaderProps> = ({
-  selectedChatName,
-  onBack,
-  onMenuOpen
-}) => {
+export default function ConversationHeader({ titleRef, selectedChatName, onBack }: ConversationHeaderProps) {
   return (
-    <div className="md:hidden bg-white border-b border-gray-200 px-4 py-3 flex items-center gap-3">
-      {/* Botón de regreso */}
+    <header className="flex min-h-14 shrink-0 items-center gap-3 border-b border-subtle bg-surface px-3 sm:px-4">
       <button
+        type="button"
         onClick={onBack}
-        className="p-2 rounded-md hover:bg-gray-100 transition-colors"
-        aria-label="Volver a chats"
+        className="grid h-11 w-11 shrink-0 place-items-center rounded-lg text-secondary hover:bg-canvas
+          focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-600 md:hidden"
+        aria-label="Volver a conversaciones"
       >
-        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-        </svg>
+        <ArrowLeft size={19} aria-hidden="true" />
       </button>
-      
-      <h2 className="text-lg font-semibold text-gray-900 truncate flex-1">
-        {selectedChatName}
-      </h2>
-      
-      {/* Botón hamburguesa a la derecha */}
-      <button
-        onClick={onMenuOpen}
-        className="p-2 rounded-md hover:bg-gray-100 transition-colors"
-        aria-label="Abrir menú"
-      >
-        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-        </svg>
-      </button>
-    </div>
+      <MessageSquareText size={19} aria-hidden="true" className="hidden shrink-0 text-emerald-700 md:block" />
+      <h2 ref={titleRef} tabIndex={-1} className="truncate font-semibold text-primary">{selectedChatName}</h2>
+    </header>
   );
-};
-
-export default MobileHeader;
+}

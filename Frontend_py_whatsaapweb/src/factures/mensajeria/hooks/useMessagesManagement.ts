@@ -1,212 +1,132 @@
-import { useCallback, useEffect, useRef } from 'react';
-import { useAtom } from 'jotai';
-import { 
-  messagesAtom, 
-  selectedChatAtom, 
-  loadingMessagesAtom,
-  chatsAtom 
-} from '../../../jotai/slices/messagesAtoms';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useAtom, useSetAtom } from 'jotai';
+import { chatsAtom, loadingMessagesAtom, messagesAtom, selectedChatAtom } from '../../../jotai/slices/messagesAtoms';
+import { createOptimisticMessage, normalizeMessageTimestamp } from '../../../shared/types/wsp';
 import type { WhatsAppMessage } from '../../../shared/types/wsp';
 import { markChatAsRead } from '../services/chatService';
 import { getMessagesByChat, sendMessage } from '../services/messageService';
-import SocketService from '../../../utils/socket';
 
-/**
- * Hook para gestionar mensajes del chat seleccionado
- * Principio de Responsabilidad Única: Solo maneja la lógica de mensajes
- */
 export function useMessagesManagement() {
   const [messages, setMessages] = useAtom(messagesAtom);
   const [selectedChat, setSelectedChat] = useAtom(selectedChatAtom);
   const [loadingMessages, setLoadingMessages] = useAtom(loadingMessagesAtom);
-  const [, setChats] = useAtom(chatsAtom);
-  
-  const selectedChatRef = useRef<string | null>(null);
-  const isLoadingRef = useRef<boolean>(false); // Guard contra cargas simultáneas
+  const setChats = useSetAtom(chatsAtom);
+  const selectedChatRef = useRef(selectedChat);
+  const [messageError, setMessageError] = useState<string | null>(null);
+  const [revision, setRevision] = useState(0);
 
-  // Actualizar ref cuando cambie selectedChat
-  useEffect(() => {
-    selectedChatRef.current = selectedChat;
-  }, [selectedChat]);
+  const handleNewMessage = useCallback((incoming: WhatsAppMessage) => {
+    if (incoming.chatId !== selectedChatRef.current) return;
 
-  // Callback para manejar nuevos mensajes
-  const handleNewMessage = useCallback((newMessage: WhatsAppMessage) => {
-    const currentSelectedChat = selectedChatRef.current;
-    
-    setMessages(prev => {
-      if (newMessage.chatId === currentSelectedChat) {
-        // Evitar duplicados
-        if (prev.some(m => m.id === newMessage.id)) {
-          return prev;
-        }
-        
-        // Si es un mensaje mío, verificar si hay mensaje optimista
-        if (newMessage.fromMe) {
-          const existingOptimisticIndex = prev.findIndex(m => 
-            m.fromMe && 
-            m.body === newMessage.body && 
-            m.id.startsWith('temp-') &&
-            Math.abs(m.timestamp - newMessage.timestamp) < 5000
-          );
-          
-          if (existingOptimisticIndex !== -1) {
-            const newMessages = [...prev];
-            newMessages[existingOptimisticIndex] = newMessage;
-            return newMessages;
-          }
-        }
-        
-        return [...prev, newMessage];
-      }
-      return prev;
+    setMessages((current) => {
+      if (current.some((message) => message.id === incoming.id)) return current;
+      const incomingTime = normalizeMessageTimestamp(incoming.timestamp);
+      const optimistic = incoming.fromMe && current.find((message) => (
+        message.fromMe && message.id.startsWith('temp-') && message.body === incoming.body &&
+        Math.abs(normalizeMessageTimestamp(message.timestamp) - incomingTime) < 5_000
+      ));
+
+      return optimistic
+        ? current.map((message) => message === optimistic ? incoming : message)
+        : [...current, incoming];
     });
   }, [setMessages]);
 
-  // Seleccionar chat y cargar mensajes
-  const selectChat = useCallback(async (chatId: string) => {
-    const socketService = SocketService.getInstance();
-    socketService.joinRoom(chatId);
+  const selectChat = useCallback((chatId: string) => {
+    const nextChat = chatId || null;
+    if (selectedChatRef.current === nextChat) return;
+    selectedChatRef.current = nextChat;
+    setSelectedChat(nextChat);
+    setMessages([]);
+    setMessageError(null);
+    setLoadingMessages(Boolean(nextChat));
 
-    if (selectedChatRef.current === chatId) {
-      return;
+    if (nextChat) {
+      void markChatAsRead(nextChat).then(() => {
+        setChats((current) => current.map((chat) => chat.id === nextChat ? { ...chat, unreadCount: 0 } : chat));
+      }).catch(() => undefined);
     }
-    
-    try {
-      await markChatAsRead(chatId);
-    } catch (error) {
-      console.warn('Error al marcar chat como leído:', error);
-    }
-    
-    // Actualizar localmente el unread count
-    setChats(prev => {
-      const idx = prev.findIndex(c => c.id === chatId);
-      if (idx === -1) return prev;
-      const updated = [...prev];
-      updated[idx] = { ...updated[idx], unreadCount: 0 };
-      return updated;
-    });
-    
-    setSelectedChat(chatId);
-  }, [setChats, setSelectedChat]);
+  }, [setChats, setLoadingMessages, setMessages, setSelectedChat]);
 
-  // Cargar mensajes cuando se selecciona un chat
   useEffect(() => {
-    if (selectedChat) {
-      // Guard: evitar cargas simultáneas
-      if (isLoadingRef.current) {
-        console.log('⏳ Ya hay una carga de mensajes en progreso, omitiendo...');
-        return;
-      }
-      
-      isLoadingRef.current = true;
-      setLoadingMessages(true);
-      
-      getMessagesByChat(selectedChat)
-        .then(data => {
-          setMessages(data);
-          setLoadingMessages(false);
-          isLoadingRef.current = false;
-          console.log(`✅ Mensajes cargados para chat ${selectedChat}:`, data.length);
-        })
-        .catch((error) => {
-          console.error('Error cargando mensajes:', error);
-          setLoadingMessages(false);
-          isLoadingRef.current = false;
+    if (!selectedChat) return;
+    const controller = new AbortController();
+    const isCurrent = () => !controller.signal.aborted && selectedChatRef.current === selectedChat;
+    setLoadingMessages(true);
+    setMessageError(null);
 
-          if ((error as any)?.status === 429) {
-            console.info('Carga de mensajes omitida temporalmente por rate limit; se conservan los mensajes actuales.');
-            return;
-          }
+    getMessagesByChat(selectedChat, 50, controller.signal)
+      .then((history) => {
+        if (!isCurrent()) return;
+        const ids = new Set(history.map((message) => message.id));
+        setMessages((current) => [
+          ...history,
+          ...current.filter((message) => message.chatId === selectedChat && !ids.has(message.id)),
+        ]);
+      })
+      .catch((error: unknown) => {
+        if (isCurrent()) {
+          setMessageError(error instanceof Error ? error.message : 'No se pudieron cargar los mensajes.');
+        }
+      })
+      .finally(() => {
+        if (isCurrent()) setLoadingMessages(false);
+      });
 
-          setMessages([]);
-          
-          if (error.message?.includes('403') || error.message?.includes('Acceso denegado')) {
-            console.warn('⚠️ Sin permisos para acceder a este chat');
-          }
-        });
-    } else {
-      setMessages([]);
-      isLoadingRef.current = false;
+    return () => controller.abort();
+  }, [revision, selectedChat, setLoadingMessages, setMessages]);
+
+  const addOptimisticMessage = useCallback((message: WhatsAppMessage) => {
+    if (message.chatId === selectedChatRef.current) {
+      setMessages((current) => [...current, message]);
     }
-  }, [selectedChat, setMessages, setLoadingMessages]);
+  }, [setMessages]);
 
-  // Enviar mensaje
-  const handleSendMessage = useCallback(async (messageText: string) => {
-    if (!messageText.trim() || !selectedChat) return;
-
-    // Crear mensaje optimista
-    const optimisticMessage: WhatsAppMessage = {
-      id: `temp-${Date.now()}`,
-      body: messageText,
-      fromMe: true,
-      timestamp: Math.floor(Date.now() / 1000),
-      sender: selectedChat,
-      chatId: selectedChat,
-      type: "text"
-    };
-
-    // Agregar mensaje inmediatamente (UI optimista)
-    setMessages(prev => [...prev, optimisticMessage]);
-
-    try {
-      // Enviar al backend
-      const response = await sendMessage(selectedChat, messageText);
-      
-      const realMessageId = response?.messageId || response?.data?.messageId || response?.data?.id;
-      if (response.success && realMessageId) {
-        setMessages(prev => prev.map(msg =>
-          msg.id === optimisticMessage.id
-            ? { ...msg, id: realMessageId }
-            : msg
-        ));
-        
-        // Actualizar chats
-        setChats(prev => {
-          const idx = prev.findIndex(c => c.id === selectedChat);
-          if (idx === -1) return prev;
-          const updated = [...prev];
-          const [chat] = updated.splice(idx, 1);
-          chat.lastMessageTimestamp = Math.floor(Date.now() / 1000);
-          chat.lastMessagePreview = messageText.substring(0, 50);
-          return [chat, ...updated];
-        });
+  const updateOptimisticMessage = useCallback((tempId: string, realId: string) => {
+    setMessages((current) => {
+      if (current.some((message) => message.id === realId)) {
+        return current.filter((message) => message.id !== tempId);
       }
+      return current.map((message) => (
+        message.id === tempId ? { ...message, id: realId, isOptimistic: false } : message
+      ));
+    });
+  }, [setMessages]);
+
+  const markMessageError = useCallback((tempId: string) => {
+    setMessages((current) => current.map((message) => (
+      message.id === tempId ? { ...message, uploadError: 'Error al enviar mensaje' } : message
+    )));
+  }, [setMessages]);
+
+  const handleSendMessage = useCallback(async (messageText: string) => {
+    if (!selectedChat || selectedChatRef.current !== selectedChat || !messageText.trim()) return;
+
+    const optimistic = createOptimisticMessage(selectedChat, messageText);
+    addOptimisticMessage(optimistic);
+    try {
+      const response = await sendMessage(selectedChat, messageText);
+      if (!response.success) throw new Error(response.message || 'No se pudo enviar el mensaje.');
+      const messageId = response.messageId || response.data?.messageId || response.data?.id;
+      if (messageId) updateOptimisticMessage(optimistic.id, messageId);
+
+      setChats((current) => {
+        const chat = current.find((item) => item.id === selectedChat);
+        if (!chat) return current;
+        return [
+          { ...chat, lastMessageTimestamp: Date.now(), lastMessagePreview: messageText.slice(0, 50) },
+          ...current.filter((item) => item.id !== selectedChat),
+        ];
+      });
     } catch (error) {
-      console.error('Error enviando mensaje:', error);
-      // Eliminar mensaje optimista en caso de error
-      setMessages(prev => prev.filter(msg => msg.id !== optimisticMessage.id));
+      setMessages((current) => current.filter((message) => message.id !== optimistic.id));
       throw error;
     }
-  }, [selectedChat, setMessages, setChats]);
-
-  // Actualizar mensaje optimista con el ID real
-  const updateOptimisticMessage = useCallback((tempId: string, realId: string) => {
-    setMessages(prev => prev.map(msg =>
-      msg.id === tempId
-        ? { ...msg, id: realId, isOptimistic: false }
-        : msg
-    ));
-  }, [setMessages]);
-
-  // Marcar mensaje con error
-  const markMessageError = useCallback((tempId: string) => {
-    setMessages(prev => prev.map(msg =>
-      msg.id === tempId
-        ? { ...msg, uploadError: 'Error al enviar mensaje' }
-        : msg
-    ));
-  }, [setMessages]);
+  }, [addOptimisticMessage, selectedChat, setChats, setMessages, updateOptimisticMessage]);
 
   return {
-    messages,
-    selectedChat,
-    loadingMessages,
-    setMessages,
-    setSelectedChat,
-    selectChat,
-    handleNewMessage,
-    handleSendMessage,
-    updateOptimisticMessage,
-    markMessageError
+    messages, selectedChat, loadingMessages, messageError, selectChat, handleNewMessage,
+    reloadMessages: () => setRevision((previous) => previous + 1),
+    handleSendMessage, addOptimisticMessage, updateOptimisticMessage, markMessageError,
   };
 }

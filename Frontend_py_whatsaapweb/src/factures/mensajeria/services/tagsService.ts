@@ -1,10 +1,11 @@
 // src/factures/mensajeria/services/tagsService.ts
 import { api } from '../../../shared/axios/http';
 import type { Tag, TagCreate, TagUpdate } from '../types/tagTypes';
+import type { WhatsAppChat } from '../../../shared/types/wsp';
 
 export const ALL_CHATS_TAG_ID = '__all__';
 
-const allChatsTag: Tag = {
+export const allChatsTag: Tag = {
   id: ALL_CHATS_TAG_ID,
   name: 'Todo',
   color: 'text-green-500',
@@ -62,51 +63,16 @@ export async function deleteTag(id: string) {
   }
 }
 
-/**
- * Obtiene los chats asociados a una etiqueta específica
- * @param tagId ID de la etiqueta
- * @returns Objeto con data (array de chats) y tag (información de la etiqueta)
- */
-export async function getChatsByTag(tagId: string): Promise<{
-  data: any[];
-  tag: { id: string; name: string; is_default: boolean };
-}> {
-  if (tagId === ALL_CHATS_TAG_ID) {
-    const resp = await api.get('/whatsapp/chats');
-    return {
-      data: resp.data?.data || [],
-      tag: { id: ALL_CHATS_TAG_ID, name: 'Todo', is_default: true },
-    };
-  }
-
-  try {
-    const resp = await api.get(`/tags/${encodeURIComponent(tagId)}/chats/full`);
-    const body = resp.data;
-    
-    if (body?.success && body?.data && body?.tag) {
-      return {
-        data: body.data,
-        tag: body.tag
-      };
-    }
-    
-    // Fallback si la estructura es diferente
-    return {
-      data: body?.data || [],
-      tag: body?.tag || { id: tagId, name: '', is_default: false }
-    };
-  } catch (err: any) {
-    if (err?.response?.status === 404) {
-      const resp = await api.get('/whatsapp/chats');
-      return {
-        data: resp.data?.data || [],
-        tag: { id: ALL_CHATS_TAG_ID, name: 'Todo', is_default: true },
-      };
-    }
-    // Importante: re-lanzar el error original (AxiosError) para conservar response.status y permitir lógica de auto-init
-    console.error('tagsService.getChatsByTag error (preservando AxiosError)', err);
-    throw err;
-  }
+export async function getChatsByTag(tagId: string, signal?: AbortSignal) {
+  const path = tagId === ALL_CHATS_TAG_ID
+    ? '/chats'
+    : `/tags/${encodeURIComponent(tagId)}/chats/full`;
+  const response = await api.get<{ data?: WhatsAppChat[]; tag?: Tag }>(path, { signal });
+  if (!Array.isArray(response.data?.data)) throw new Error('El listado de conversaciones no es válido.');
+  return {
+    data: response.data.data,
+    tag: response.data?.tag ?? { id: tagId, name: tagId === ALL_CHATS_TAG_ID ? 'Todo' : '', is_default: tagId === ALL_CHATS_TAG_ID },
+  };
 }
 
 /**

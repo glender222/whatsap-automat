@@ -1,41 +1,88 @@
-import React from 'react';
-import { Outlet } from 'react-router-dom';
+import { Suspense, useRef, useState } from 'react';
+import { Outlet, useNavigate } from 'react-router-dom';
 import DashboardSidebar from './DashboardSidebar';
 import DashboardTopbar from './DashboardTopbar';
+import { authService } from '../../auth/services/authService';
+import { useAuthJotai } from '../../../jotai/middleware/useAuthJotai';
+import { useUserRoleJotai } from '../../../jotai/middleware/useUserRoleJotai';
 
 export default function DashboardLayout() {
-  const [sidebarCollapsed, setSidebarCollapsed] = React.useState(() => localStorage.getItem('adminSidebarCollapsed') === 'true');
+  const navigate = useNavigate();
+  const { clearAuth } = useAuthJotai();
+  const { userRole, clearUserRole } = useUserRoleJotai();
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => (
+    localStorage.getItem('adminSidebarCollapsed') === 'true'
+  ));
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const menuButton = useRef<HTMLButtonElement>(null);
+  const pageTitle = useRef<HTMLHeadingElement>(null);
+  const isAdmin = userRole === 'ADMIN';
 
-  React.useEffect(() => {
-    try { window.name = 'w_dashboard'; } catch (e) { /* ignore */ }
-    return () => {
-      try { if (window.name === 'w_dashboard') window.name = ''; } catch(e) {}
-    };
-  }, []);
+  function toggleSidebar() {
+    const next = !sidebarCollapsed;
+    setSidebarCollapsed(next);
+    localStorage.setItem('adminSidebarCollapsed', String(next));
+  }
 
-  const toggleSidebar = () => {
-    setSidebarCollapsed((current) => {
-      const next = !current;
-      localStorage.setItem('adminSidebarCollapsed', String(next));
-      return next;
-    });
-  };
+  function handleNavigate() {
+    if (!mobileOpen) return;
+    setMobileOpen(false);
+    pageTitle.current?.focus();
+  }
+
+  async function handleLogout() {
+    const refreshToken = localStorage.getItem('refreshToken');
+    try {
+      if (refreshToken) await authService.logout(refreshToken);
+    } catch {
+      // La sesión local se cierra aunque el servidor no esté disponible.
+    } finally {
+      clearAuth();
+      clearUserRole();
+      navigate('/auth/login', { replace: true });
+    }
+  }
 
   return (
-    <div className="flex h-screen bg-gray-50">
-      {/* Sidebar */}
-      <DashboardSidebar collapsed={sidebarCollapsed} onToggleCollapsed={toggleSidebar} />
-      
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Topbar */}
-        <DashboardTopbar />
-        
-        {/* Content Area */}
-        <main className="flex-1 overflow-y-auto">
+    <div
+      className="grid h-[100dvh] grid-cols-[minmax(0,1fr)] grid-rows-[auto_auto_minmax(0,1fr)]
+        overflow-hidden bg-canvas text-primary lg:grid-cols-[auto_minmax(0,1fr)]"
+      onKeyDown={(event) => {
+        if (event.key !== 'Escape' || !mobileOpen) return;
+        setMobileOpen(false);
+        menuButton.current?.focus();
+      }}
+    >
+      <a
+        href="#workspace-content"
+        className="sr-only z-50 rounded-lg bg-surface p-3 focus:not-sr-only focus:fixed focus:left-3 focus:top-3"
+      >
+        Ir al contenido
+      </a>
+      <DashboardTopbar
+        isAdmin={isAdmin}
+        mobileOpen={mobileOpen}
+        onToggleMenu={() => setMobileOpen((open) => !open)}
+        menuButtonRef={menuButton}
+        titleRef={pageTitle}
+      />
+      <DashboardSidebar
+        isAdmin={isAdmin}
+        collapsed={sidebarCollapsed}
+        mobileOpen={mobileOpen}
+        onToggleCollapsed={toggleSidebar}
+        onNavigate={handleNavigate}
+        onLogout={() => void handleLogout()}
+      />
+      <main
+        id="workspace-content"
+        tabIndex={-1}
+        className="col-start-1 row-start-3 min-h-0 min-w-0 overflow-auto lg:col-start-2"
+      >
+        <Suspense fallback={<p role="status" className="p-4 text-sm text-secondary">Cargando vista…</p>}>
           <Outlet />
-        </main>
-      </div>
+        </Suspense>
+      </main>
     </div>
   );
 }

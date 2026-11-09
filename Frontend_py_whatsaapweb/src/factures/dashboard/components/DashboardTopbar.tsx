@@ -1,41 +1,59 @@
-import { User } from 'lucide-react';
+import { Menu, User, X } from 'lucide-react';
+import type { Ref } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useAuthJotai } from '../../../jotai/middleware/useAuthJotai';
-import { useUserRoleJotai } from '../../../jotai/middleware/useUserRoleJotai';
+import { getWorkspacePage } from './workspaceNavigation';
 
-export default function DashboardTopbar() {
-  const location = useLocation();
+interface DashboardTopbarProps {
+  isAdmin: boolean;
+  mobileOpen: boolean;
+  onToggleMenu: () => void;
+  menuButtonRef: Ref<HTMLButtonElement>;
+  titleRef: Ref<HTMLHeadingElement>;
+}
+
+export default function DashboardTopbar({
+  isAdmin,
+  mobileOpen,
+  onToggleMenu,
+  menuButtonRef,
+  titleRef,
+}: DashboardTopbarProps) {
+  const { pathname } = useLocation();
   const { user } = useAuthJotai();
-  const { userRole } = useUserRoleJotai();
-
+  const { section, title } = getWorkspacePage(pathname);
   const userName = user?.nombre || user?.email || 'Usuario';
-  const userRoleDisplay = userRole === 'ADMIN' ? 'Administrador' : 'Empleado';
-  const pageTitle = location.pathname.startsWith('/dashboard/catalogos')
-    ? 'Gestionar catalogos'
-    : location.pathname.startsWith('/dashboard/pagos')
-      ? 'Validar Pagos'
-      : location.pathname.startsWith('/dashboard/handoff')
-        ? 'Cola de Handoff'
-        : location.pathname.startsWith('/dashboard/ia')
-          ? 'Dominios IA'
-          : location.pathname.startsWith('/dashboard/inventario')
-            ? 'Productos del catalogo'
-            : 'Administracion';
+  const userRole = isAdmin ? 'Administrador' : 'Operador';
+  const MenuIcon = mobileOpen ? X : Menu;
 
   return (
-    <header className="bg-white border-b border-gray-200 px-6 py-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">{pageTitle}</h1>
-
-        <div className="flex items-center space-x-3">
-          <div className="text-right">
-            <p className="text-sm font-medium text-gray-900">{userName}</p>
-            <p className="text-xs text-gray-500">{userRoleDisplay}</p>
-          </div>
-          <div className="w-10 h-10 bg-gradient-to-br from-teal-400 to-teal-600 rounded-full flex items-center justify-center">
-            <User className="w-6 h-6 text-white" />
-          </div>
+    <header className="col-start-1 row-start-1 flex min-h-16 items-center gap-3 border-b border-subtle bg-surface px-3 sm:px-6 lg:col-start-2">
+      <button
+        type="button"
+        ref={menuButtonRef}
+        aria-controls="workspace-navigation"
+        aria-expanded={mobileOpen}
+        aria-label={mobileOpen ? 'Cerrar navegación' : 'Abrir navegación'}
+        onClick={onToggleMenu}
+        className="grid h-11 w-11 shrink-0 place-items-center rounded-lg text-secondary hover:bg-canvas
+          focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600 lg:hidden"
+      >
+        <MenuIcon size={20} aria-hidden="true" />
+      </button>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-xs font-medium text-secondary">{section}</p>
+        <h1 ref={titleRef} tabIndex={-1} className="truncate text-lg font-semibold text-primary">
+          {title}
+        </h1>
+      </div>
+      <div className="flex min-w-0 shrink-0 items-center gap-3" aria-label={`${userName}, ${userRole}`}>
+        <div className="hidden max-w-44 text-right sm:block">
+          <p className="truncate text-sm font-medium">{userName}</p>
+          <p className="text-xs text-secondary">{userRole}</p>
         </div>
+        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-emerald-50 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200">
+          <User size={18} aria-hidden="true" />
+        </span>
       </div>
     </header>
   );

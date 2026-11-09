@@ -87,7 +87,9 @@ export default function AuditEventsPage() {
 
   const [selectedEvent, setSelectedEvent] = useState<AuditEvent | null>(null);
 
-  const fetchAuditEvents = useCallback(async () => {
+  const [attempt, setAttempt] = useState(0);
+
+  const fetchAuditEvents = useCallback(async (signal: AbortSignal) => {
     setLoading(true);
     setError(null);
     try {
@@ -102,79 +104,30 @@ export default function AuditEventsPage() {
       if (filters.endDate) params.endDate = filters.endDate;
       if (filters.search) params.search = filters.search;
 
-      const response = await api.get('/v1/admin/audit-events', { params });
+      const response = await api.get('/v1/admin/audit-events', { params, signal });
+      if (signal.aborted) return;
       if (response.data && Array.isArray(response.data.events)) {
         setEvents(response.data.events);
-        setTotal(response.data.total || response.data.events.length);
+        setTotal(response.data.total ?? response.data.events.length);
       } else {
         throw new Error('Formato de respuesta inválido');
       }
-    } catch (err: any) {
-      // Graceful fallback to synthetic audit fixtures if endpoint is not yet mounted
-      const mockEvents: AuditEvent[] = [
-        {
-          id: 'ae1042-883a-49bf-91b2-1082c478a01',
-          tenantId: 1,
-          actorId: 104,
-          action: 'SECRET_ROTATE',
-          resourceType: 'secret',
-          resourceId: 'sec-kek-v2',
-          payload: { algorithm: 'aes-256-gcm', keyVersion: 2, rotatedBy: 'SRE_DOCTOR' },
-          ipAddress: '10.0.4.15',
-          userAgent: 'Whatsap-Automat CLI / automat-doctor',
-          createdAt: new Date(Date.now() - 1000 * 60 * 12).toISOString()
-        },
-        {
-          id: 'ae1042-883a-49bf-91b2-1082c478a02',
-          tenantId: 1,
-          actorId: 12,
-          action: 'AGENT_PUBLISH',
-          resourceType: 'agent_graph',
-          resourceId: 'ag-sales-bot-v4',
-          payload: { revision: 4, publishedStatus: 'ACTIVE', validatedNodesCount: 14 },
-          ipAddress: '192.168.1.45',
-          userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/128.0.0.0',
-          createdAt: new Date(Date.now() - 1000 * 60 * 45).toISOString()
-        },
-        {
-          id: 'ae1042-883a-49bf-91b2-1082c478a03',
-          tenantId: 1,
-          actorId: 88,
-          action: 'CAMPAIGN_DISPATCH',
-          resourceType: 'campaign',
-          resourceId: 'cmp-bf-retail-2026',
-          payload: { channel: 'whatsapp-cloud', rateLimitPerMin: 50, recipientsCount: 1250 },
-          ipAddress: '10.0.2.80',
-          userAgent: 'Temporal-Worker / campaign-dispatcher',
-          createdAt: new Date(Date.now() - 1000 * 60 * 120).toISOString()
-        },
-        {
-          id: 'ae1042-883a-49bf-91b2-1082c478a04',
-          tenantId: 2,
-          actorId: 5,
-          action: 'AUTH_LOGIN',
-          resourceType: 'tenant',
-          resourceId: 'tenant-2',
-          payload: { authMethod: 'JWT_BEARER', permissionsGranted: ['ADMIN', 'OPERATOR'] },
-          ipAddress: '181.65.22.10',
-          userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)',
-          createdAt: new Date(Date.now() - 1000 * 60 * 240).toISOString()
-        }
-      ];
-
-      setEvents(mockEvents);
-      setTotal(mockEvents.length);
-      if (err.response?.status !== 404) {
-        setError('Endpoint backend no disponible; mostrando datos locales de auditoría.');
-      }
+    } catch {
+      if (signal.aborted) return;
+      setEvents([]);
+      setTotal(0);
+      setSelectedEvent(null);
+      setError('No se pudo consultar el historial de auditoría.');
     } finally {
-      setLoading(false);
+      if (!signal.aborted) setLoading(false);
     }
   }, [page, pageSize, filters]);
 
   useEffect(() => {
-    fetchAuditEvents();
-  }, [fetchAuditEvents]);
+    const request = new AbortController();
+    void fetchAuditEvents(request.signal);
+    return () => request.abort();
+  }, [fetchAuditEvents, attempt]);
 
   const copyToClipboard = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
@@ -210,7 +163,7 @@ export default function AuditEventsPage() {
         </div>
 
         <button
-          onClick={fetchAuditEvents}
+          onClick={() => setAttempt((value) => value + 1)}
           disabled={loading}
           className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-[#128C7E] hover:bg-[#0E766A] text-white text-sm font-medium rounded-lg shadow-sm transition disabled:opacity-50"
         >
@@ -220,7 +173,7 @@ export default function AuditEventsPage() {
       </div>
 
       {error && (
-        <div className="p-4 rounded-lg bg-amber-50 border border-amber-200 flex items-start gap-3 text-amber-800 text-sm">
+        <div role="alert" className="p-4 rounded-lg bg-amber-50 border border-amber-200 flex items-start gap-3 text-amber-800 text-sm">
           <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
           <span>{error}</span>
         </div>
@@ -233,7 +186,7 @@ export default function AuditEventsPage() {
             <span className="text-xs font-semibold uppercase tracking-wider text-[#5B6F66]">Eventos Totales</span>
             <FileText className="w-4 h-4 text-[#128C7E]" />
           </div>
-          <p className="text-2xl font-bold text-[#10231C] mt-2">{total}</p>
+          <p className="text-2xl font-bold text-[#10231C] mt-2">{error ? '—' : total}</p>
           <span className="text-xs text-[#5B6F66]">Protegidos por trigger SQL</span>
         </div>
 
@@ -358,7 +311,7 @@ export default function AuditEventsPage() {
               ) : events.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="text-center py-10 text-[#5B6F66]">
-                    No se encontraron registros de auditoría coincidentes con los filtros seleccionados.
+                    {error ? 'Historial no disponible.' : 'No se encontraron registros de auditoría con los filtros seleccionados.'}
                   </td>
                 </tr>
               ) : (

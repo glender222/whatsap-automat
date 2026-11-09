@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { isAxiosError } from 'axios';
 import type { CustomerHistory } from '../types/customerHistoryTypes';
 import { getCustomerHistoryByChat } from '../services/customerHistoryService';
 
@@ -16,30 +17,28 @@ export function useCustomerHistory(chatId: string | null) {
       return;
     }
 
-    let mounted = true;
+    const request = new AbortController();
     setLoading(true);
     setError(null);
 
-    getCustomerHistoryByChat(chatId)
+    getCustomerHistoryByChat(chatId, request.signal)
       .then((data) => {
-        if (mounted) setHistory(data);
+        if (!request.signal.aborted) setHistory(data);
       })
-      .catch((err: any) => {
-        if (!mounted) return;
+      .catch((err: unknown) => {
+        if (request.signal.aborted) return;
         setHistory(null);
-        if (err?.response?.status === 404) {
+        if (isAxiosError(err) && err.response?.status === 404) {
           setError('Todavia no hay historial para este cliente.');
           return;
         }
-        setError(err?.response?.data?.message || err?.message || 'No se pudo cargar el historial.');
+        setError(err instanceof Error ? err.message : 'No se pudo cargar el historial.');
       })
       .finally(() => {
-        if (mounted) setLoading(false);
+        if (!request.signal.aborted) setLoading(false);
       });
 
-    return () => {
-      mounted = false;
-    };
+    return () => request.abort();
   }, [chatId, reloadToken]);
 
   return {

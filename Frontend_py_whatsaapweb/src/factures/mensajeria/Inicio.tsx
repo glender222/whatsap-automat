@@ -1,292 +1,200 @@
-import React, { useState } from 'react';
-import { useSocketSimple } from './hooks/useSocketSimple';
-import { useLocation, useNavigate } from 'react-router-dom';
-import { Home, BarChart3, Server, Bookmark, X, Sparkles } from 'lucide-react';
-import LocalTopbar from './components/bandeja de chats/LocalTopbar';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { SetStateAction } from 'react';
+import { useSetAtom } from 'jotai';
+import { useSearchParams } from 'react-router-dom';
+import { Inbox, X } from 'lucide-react';
 import ChatSidebar from './components/bandeja de chats/ChatSidebar';
 import UserMediaPanel from './components/extras/UserMediaPanel';
-import ImageGalleryModal from '../mensajeria/components/extras/ImageGalleryModal';
-import Sidebar from '../setting/components/Sidebar';
-import type { MenuItem } from '../setting/components/Sidebar';
-import GlobalTransition from '../../shared/components/GlobalTransition';
+import ImageGalleryModal from './components/extras/ImageGalleryModal';
 import ChatContainer from './components/ChatContainer';
-import MobileHeader from './components/MobileHeader';
-
-// Hooks personalizados
+import ConversationHeader from './components/MobileHeader';
+import { chatsAtom } from '../../jotai/slices/messagesAtoms';
+import type { WhatsAppChat, WhatsAppMessage } from '../../shared/types/wsp';
+import { useSocketSimple } from './hooks/useSocketSimple';
 import { useChatsManagement } from './hooks/useChatsManagement';
 import { useMessagesManagement } from './hooks/useMessagesManagement';
 import { useTagsManagement } from './hooks/useTagsManagement';
 import { useContactPanel } from './hooks/useContactPanel';
 import { useGalleryModal } from './hooks/useGalleryModal';
-import { useWhatsAppInitialization } from './hooks/useWhatsAppInitialization';
 
-// Función para formatear el número afiliado
 function formatNumeroAfiliado(chatId: string): string {
-  let numero = chatId.split('@')[0];
-  if (numero.startsWith('51')) {
-    numero = numero.substring(2);
-  }
-  return numero;
+  const number = chatId.split('@')[0];
+  return number.startsWith('51') ? number.slice(2) : number;
 }
 
-// Convierte el valor de color de la etiqueta a una clase tailwind válida
-const colorClassFrom = (color?: string | null) => {
-  if (!color) return '';
-  if (color.startsWith('text-') || color.startsWith('bg-')) return color;
-  if (/^[a-zA-Z].*/.test(color) && !color.includes('#')) return `text-${color}`;
-  return '';
-};
+export default function Inicio() {
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedChat = searchParams.get('chat');
+  const queue = useRef<HTMLDivElement>(null);
+  const conversationTitle = useRef<HTMLHeadingElement>(null);
+  const setChats = useSetAtom(chatsAtom);
 
-/**
- * Componente principal de Inicio - Refactorizado siguiendo principios SOLID
- * - Single Responsibility: Orquesta los diferentes módulos pero no contiene lógica compleja
- * - Open/Closed: Extensible mediante hooks y componentes reutilizables
- * - Liskov Substitution: Los hooks pueden ser reemplazados fácilmente
- * - Interface Segregation: Cada hook tiene una interfaz específica
- * - Dependency Inversion: Depende de abstracciones (hooks) no de implementaciones concretas
- */
-const Inicio: React.FC = () => {
-  // Estados locales de UI
-  const [selectedFilter, setSelectedFilter] = useState('Todo');
-  const [categoryDropdown, setCategoryDropdown] = useState(false);
-  const [mainSidebarOpen, setMainSidebarOpen] = useState(false);
-
-  const location = useLocation();
-  const navigate = useNavigate();
-
-  // Hook: Inicialización de WhatsApp
-  const { whatsappInitializing, initMessage, initializeWhatsApp } = useWhatsAppInitialization();
-  void initializeWhatsApp; // Disponible para uso futuro
-
-  // Hook: Gestión de etiquetas
   const {
-    tags,
-    selectedCategory,
-    setSelectedCategory,
-    handleCreateTag,
-    handleUpdateTag,
-    handleDeleteTag
+    tags, selectedTagId, setSelectedTagId, isLoadingTags, tagsError, reloadTags,
+    handleCreateTag, handleUpdateTag, handleDeleteTag,
   } = useTagsManagement();
-
-  // Hook: Gestión de chats
-  const { chats, reloadChats, isLoadingChats } = useChatsManagement({
-    tags,
-    selectedCategory
-  });
-
-  // Hook: Gestión de mensajes
+  const { chats, reloadChats, isLoadingChats, chatsError } = useChatsManagement(selectedTagId);
   const {
-    messages,
-    selectedChat,
-    loadingMessages,
-    setMessages,
-    selectChat,
-    handleNewMessage,
-    handleSendMessage,
-    updateOptimisticMessage,
-    markMessageError
+    messages, selectedChat, loadingMessages, messageError, reloadMessages, selectChat, handleNewMessage,
+    handleSendMessage, addOptimisticMessage, updateOptimisticMessage, markMessageError,
   } = useMessagesManagement();
-
-  // Hook: Panel de contacto
   const {
-    contactPanelOpen,
-    contactPanelMounted,
-    contactMedia,
-    contactUserInfo,
-    handleShowContactInfo,
-    closeContactPanel
+    contactPanelOpen, contactPanelMounted, contactMedia, contactUserInfo,
+    handleShowContactInfo, closeContactPanel,
   } = useContactPanel();
-
-  // Hook: Modal de galería
   const {
-    galleryOpen,
-    galleryImages,
-    galleryAllMedia,
-    galleryUserInfo,
-    galleryIndex,
-    handleOpenGallery,
-    closeGallery
+    galleryOpen, galleryImages, galleryAllMedia, galleryUserInfo, galleryIndex, handleOpenGallery, closeGallery,
   } = useGalleryModal();
 
-  // Socket.IO - manejo de mensajes en tiempo real
-  useSocketSimple({
-    selectedChat,
-    chats,
-    onNewMessage: handleNewMessage,
-    onChatUpdate: () => { } // setChats se maneja internamente en useChatsManagement
-  });
-
-  // Filtros para el topbar
-  const filters = [
-    { name: 'Pendiente', count: 10 },
-    { name: 'Completo', count: 35 },
-  ];
-
-  // Categorías para el sidebar derivadas de tags
-  const categories = tags.map(tag => {
-    const cls = colorClassFrom(tag.color ?? undefined);
-    const icon = cls
-      ? <Bookmark size={16} className={`mr-1 ${cls}`} />
-      : <Bookmark size={16} className="mr-1" style={tag.color ? { color: tag.color } : undefined} />;
-
-    return { name: tag.name, color: cls || '', icon };
-  });
-
-  // Handler para volver a la lista de chats (mobile)
-  const handleBackToChats = () => {
-    selectChat('');
-  };
-
-  // Menu items para el sidebar principal
-  const menuItems: MenuItem[] = [
-    { id: 'inicio', label: 'Inicio', icon: Home },
-    { id: 'reportes', label: 'Reportes', icon: BarChart3 },
-    { id: 'seguimiento', label: 'Administrar máquinas', icon: Server },
-    { id: 'agentes', label: 'Agentes', icon: Sparkles },
-  ];
-
-  // Handler para abrir galería desde el chat
-  const handleImageClick = (msg: any) => {
-    const chat = chats.find(c => c.id === selectedChat);
-    handleOpenGallery(msg, messages, {
-      name: chat?.name || '',
-      number: formatNumeroAfiliado(selectedChat ?? ''),
-      photoUrl: chat?.photoUrl || undefined
+  const onChatUpdate = useCallback((update: (current: WhatsAppChat[]) => WhatsAppChat[]) => {
+    setChats((current) => {
+      // La pertenencia a la etiqueta la determina la API, no un evento de Socket.IO.
+      const visibleIds = new Set(current.map((chat) => chat.id));
+      return update(current).filter((chat) => visibleIds.has(chat.id));
     });
-  };
+  }, [setChats]);
+
+  useSocketSimple({ selectedChat, chats, onNewMessage: handleNewMessage, onChatUpdate });
+
+  useEffect(() => {
+    selectChat(requestedChat ?? '');
+  }, [requestedChat, selectChat]);
+
+  useEffect(() => {
+    if (selectedChat && window.matchMedia('(max-width: 767px)').matches) {
+      conversationTitle.current?.focus();
+    }
+  }, [selectedChat]);
+
+  const activeChat = chats.find((chat) => chat.id === selectedChat);
+  const selectedName = activeChat?.name || formatNumeroAfiliado(selectedChat ?? '');
+
+  function setDraft(update: SetStateAction<string>) {
+    if (!selectedChat) return;
+    setDrafts((current) => {
+      const oldDraft = current[selectedChat] || '';
+      const nextDraft = typeof update === 'function' ? update(oldDraft) : update;
+      if (nextDraft === oldDraft) return current;
+      return { ...current, [selectedChat]: nextDraft };
+    });
+  }
+
+  function chooseConversation(chatId: string) {
+    selectChat(chatId);
+    if ((requestedChat ?? '') === chatId) return;
+    const next = new URLSearchParams(searchParams);
+    if (chatId) next.set('chat', chatId);
+    else next.delete('chat');
+    setSearchParams(next);
+  }
+
+  function handleBackToChats() {
+    chooseConversation('');
+    requestAnimationFrame(() => queue.current?.querySelector<HTMLInputElement>('input[type="search"]')?.focus());
+  }
+
+  function handleImageClick(message: WhatsAppMessage) {
+    handleOpenGallery(message, messages, {
+      name: activeChat?.name || '',
+      number: formatNumeroAfiliado(selectedChat ?? ''),
+      photoUrl: activeChat?.profilePhotoUrl,
+    });
+  }
+
+  function refreshQueue() {
+    if (tagsError) void reloadTags();
+    reloadChats();
+  }
 
   return (
-    <div className="h-screen flex overflow-hidden relative">
-      {/* Transición global durante inicialización de WhatsApp */}
-      <GlobalTransition show={whatsappInitializing} message={initMessage} zIndex={1200} />
-
-      {/* Overlay para sidebar principal en móvil */}
-      {mainSidebarOpen && (
-        <div
-          className="fixed inset-0 bg-black bg-opacity-50 z-50 md:hidden"
-          onClick={() => setMainSidebarOpen(false)}
-        />
-      )}
-
-      {/* Sidebar principal - Solo visible en móvil cuando está abierto */}
-      <div className={`
-        fixed md:hidden inset-y-0 left-0 z-50 transform transition-transform duration-300 ease-in-out
-        ${mainSidebarOpen ? 'translate-x-0' : '-translate-x-full'}
-      `}>
-        <Sidebar
-          activeMenu="inicio"
-          menuItems={menuItems}
-          onConfig={() => {
-            setMainSidebarOpen(false);
-            navigate('/gestion-web/settings', { state: { background: location } });
-          }}
-          onMenuClick={() => setMainSidebarOpen(false)}
-        />
-      </div>
-
-      {/* ChatSidebar - Lista de chats */}
-      <div className={`
-        w-full md:w-80 md:flex-shrink-0 h-full
-        ${selectedChat ? 'hidden md:block' : 'block'}
-      `}>
+    <div className="relative flex h-full min-h-0 min-w-0 overflow-hidden">
+      <div ref={queue} className={`h-full w-full md:block md:w-80 md:shrink-0 ${selectedChat ? 'hidden' : ''}`}>
         <ChatSidebar
           chats={chats}
           selectedChat={selectedChat}
-          setSelectedChat={selectChat}
+          setSelectedChat={chooseConversation}
           formatNumeroAfiliado={formatNumeroAfiliado}
-          onShowContactInfo={(chatId) => handleShowContactInfo(chatId, chats)}
-          onOpenMainMenu={() => setMainSidebarOpen(true)}
-          categories={categories}
-          selectedCategory={selectedCategory}
-          setSelectedCategory={setSelectedCategory}
-          categoryDropdown={categoryDropdown}
-          setCategoryDropdown={setCategoryDropdown}
+          onShowContactInfo={(chatId) => void handleShowContactInfo(chatId, chats)}
+          selectedTagId={selectedTagId}
+          setSelectedTagId={setSelectedTagId}
           onCreateTag={handleCreateTag}
           onUpdateTag={handleUpdateTag}
           onDeleteTag={handleDeleteTag}
           tags={tags}
-          isLoadingChats={isLoadingChats}
+          loading={isLoadingTags || isLoadingChats}
+          error={tagsError || chatsError}
+          onReload={refreshQueue}
         />
       </div>
 
-      {/* Panel de Mensajes - En mobile solo visible cuando hay chat seleccionado */}
-      <div className={`
-        flex-1 flex flex-col h-full min-w-0
-        ${!selectedChat ? 'hidden md:flex' : 'flex'}
-      `}>
-        {/* Header móvil - Solo cuando hay chat seleccionado */}
-        {selectedChat && (
-          <MobileHeader
-            selectedChatName={chats.find(c => c.id === selectedChat)?.name || 'Chat'}
-            onBack={handleBackToChats}
-            onMenuOpen={() => setMainSidebarOpen(true)}
-          />
+      <section
+        aria-label="Conversación seleccionada"
+        className={`${selectedChat ? 'flex' : 'hidden md:flex'} h-full min-w-0 flex-1 flex-col bg-canvas`}
+      >
+        {selectedChat ? (
+          <>
+            <ConversationHeader titleRef={conversationTitle} selectedChatName={selectedName} onBack={handleBackToChats} />
+            {messageError ? (
+              <div role="alert" className="m-4 rounded-lg border border-subtle bg-surface p-5 text-sm text-red-700 dark:text-red-300">
+                <p>{messageError}</p>
+                <button type="button" className="mt-3 min-h-11 rounded-md px-2 font-semibold underline" onClick={reloadMessages}>
+                  Reintentar
+                </button>
+              </div>
+            ) : (
+              <ChatContainer
+                key={selectedChat}
+                selectedChat={selectedChat}
+                loadingMessages={loadingMessages}
+                messages={messages}
+                message={drafts[selectedChat] || ''}
+                setMessage={setDraft}
+                onImageClick={handleImageClick}
+                onSendMessage={handleSendMessage}
+                onOptimisticMessage={addOptimisticMessage}
+                onMessageSent={updateOptimisticMessage}
+                onMessageError={markMessageError}
+              />
+            )}
+          </>
+        ) : (
+          <div className="m-auto max-w-sm px-6 text-center">
+            <span className="mx-auto mb-4 grid h-14 w-14 place-items-center rounded-2xl border border-subtle bg-surface text-emerald-700 dark:text-emerald-300">
+              <Inbox size={25} aria-hidden="true" />
+            </span>
+            <h2 className="text-lg font-semibold">Selecciona una conversación</h2>
+            <p className="mt-2 text-sm text-secondary">Abre un chat de la lista para consultar el historial y responder al cliente.</p>
+          </div>
         )}
+      </section>
 
-        {/* Topbar local con filtros */}
-        <LocalTopbar
-          filters={filters}
-          selectedFilter={selectedFilter}
-          setSelectedFilter={setSelectedFilter}
-          onReloadChats={reloadChats}
-        />
-
-        {/* Contenedor de chat con mensajes e input */}
-        <ChatContainer
-          selectedChat={selectedChat}
-          loadingMessages={loadingMessages}
-          messages={messages}
-          onImageClick={handleImageClick}
-          onSendMessage={handleSendMessage}
-          onOptimisticMessage={(msg) => setMessages(prev => [...prev, msg])}
-          onMessageSent={updateOptimisticMessage}
-          onMessageError={markMessageError}
-        />
-      </div>
-
-      {/* Panel derecho de información de contacto */}
       {contactPanelMounted && (
         <>
-          {/* Overlay para panel derecho en móvil */}
-          {contactPanelOpen && (
-            <div
-              className="fixed inset-0 bg-black bg-opacity-50 z-40 md:hidden"
-              onClick={closeContactPanel}
-            />
-          )}
-
-          <div
-            className={`w-full md:w-[340px] bg-white h-full shadow-xl flex-shrink-0 flex flex-col transform transition-transform duration-300 ease-in-out fixed right-0 top-0 z-50 ${contactPanelOpen ? 'translate-x-0' : 'translate-x-full'
-              }`}
-            style={{ height: '100vh' }}
+          {contactPanelOpen && <div className="fixed inset-0 z-40 bg-black/50 md:hidden" onClick={closeContactPanel} />}
+          <aside
+            aria-label="Información de contacto"
+            className={`fixed right-0 top-0 z-50 flex h-[100dvh] w-full flex-col bg-surface shadow-xl
+              transition-transform md:max-w-[340px] ${contactPanelOpen ? 'translate-x-0' : 'translate-x-full'}`}
           >
-            <div className="flex items-center justify-end p-2 border-b">
-              <button
-                onClick={closeContactPanel}
-                className="p-2 rounded hover:bg-gray-100 text-gray-600"
-                aria-label="Cerrar panel"
-              >
-                <X size={18} />
+            <div className="flex shrink-0 items-center justify-end border-b border-subtle p-2">
+              <button type="button" onClick={closeContactPanel} className="grid h-11 w-11 place-items-center rounded-lg text-secondary hover:bg-canvas" aria-label="Cerrar información de contacto">
+                <X size={18} aria-hidden="true" />
               </button>
             </div>
-            <div className="flex-1 overflow-auto">
+            <div className="min-h-0 flex-1 overflow-auto">
               <UserMediaPanel
                 userInfo={contactUserInfo}
                 allMedia={contactMedia}
-                onMediaClick={(msg: any) => {
-                  const images = contactMedia.filter(m => m.type === 'image');
-                  const idx = images.findIndex((img: any) => img.id === msg.id);
-                  if (idx !== -1) {
-                    handleOpenGallery(msg, contactMedia, contactUserInfo);
-                  }
+                onMediaClick={(message: WhatsAppMessage) => {
+                  if (message.type === 'image') handleOpenGallery(message, contactMedia, contactUserInfo);
                 }}
               />
             </div>
-          </div>
+          </aside>
         </>
       )}
 
-      {/* Modal de galería de imágenes */}
       <ImageGalleryModal
         open={galleryOpen}
         images={galleryImages}
@@ -297,6 +205,4 @@ const Inicio: React.FC = () => {
       />
     </div>
   );
-};
-
-export default Inicio;
+}

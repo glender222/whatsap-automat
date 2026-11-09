@@ -1,95 +1,88 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
-import type { CampaignFormData } from '../components/campaigns/CampaignWizard';
-import type { SegmentItem } from '../components/campaigns/SegmentsManager';
-import type { EmailConfigData } from '../components/campaigns/EmailChannelConfig';
+import { test } from 'node:test';
+import type { TestContext } from 'node:test';
+import type { InternalAxiosRequestConfig } from 'axios';
+import { api } from '../shared/axios/http';
+import { calculateSegment, createCampaignDraft, createSegment, listCampaigns } from '../components/campaigns/campaignApi';
 
-describe('PR-F6-07: Frontend Campaign UI Components & Contracts Verification', () => {
-  describe('Suite 1: CampaignWizard Form State & Pre-Flight Safeguards', () => {
-    it('validates default campaign form state with 50 msgs/min and 5% circuit breaker', () => {
-      const defaultState: CampaignFormData = {
-        name: 'Black Friday Campaign',
-        channel: 'whatsapp-cloud',
-        connectionId: 'conn_default',
-        purpose: 'marketing',
-        segmentId: 'seg_vip',
-        templateId: 'order_update_v1',
-        templateVariables: { '1': '1042' },
-        contentSubject: '',
-        contentBody: '',
-        rateLimitPerMinute: 50,
-        failurePauseThresholdPercent: 5.0,
-        isScheduled: false,
-      };
+Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: () => null } });
 
-      assert.equal(defaultState.rateLimitPerMinute, 50);
-      assert.equal(defaultState.failurePauseThresholdPercent, 5.0);
-      assert.equal(defaultState.channel, 'whatsapp-cloud');
-      assert.equal(defaultState.purpose, 'marketing');
-    });
+function mockResponse(context: TestContext, response: (request: InternalAxiosRequestConfig) => unknown) {
+  const original = api.defaults.adapter;
+  const adapter = context.mock.fn(async (request: InternalAxiosRequestConfig) => ({
+    data: response(request),
+    status: 200,
+    statusText: 'OK',
+    headers: {},
+    config: request,
+  }));
+  api.defaults.adapter = adapter;
+  context.after(() => { api.defaults.adapter = original; });
+  return adapter;
+}
 
-    it('calculates estimated duration accurately based on audience size and rate limit', () => {
-      const audienceCount = 1500;
-      const rateLimitPerMinute = 50;
-      const estimatedMinutes = Math.ceil(audienceCount / rateLimitPerMinute);
 
-      assert.equal(estimatedMinutes, 30);
-    });
+test('campaign drafts use the backend endpoint and require a draft response', async (context) => {
+  const draft = {
+    name: 'Aviso de temporada',
+    channel: 'whatsapp-cloud' as const,
+    purpose: 'marketing' as const,
+    segmentId: 'seg_12',
+    templateId: 'aviso_1',
+    rateLimitPerMinute: 50,
+    failurePauseThresholdPercent: 5,
+  };
+  const draftResponse = { id: 'cmp_12', status: 'draft', name: draft.name };
+  const adapter = mockResponse(context, (request) => {
+    assert.equal(request.url, '/v1/campaigns');
+    assert.equal(request.method, 'post');
+    assert.deepEqual(JSON.parse(request.data), draft);
+    return { success: true, data: draftResponse };
   });
 
-  describe('Suite 2: SegmentsManager Visual Rule Builder Data Contracts', () => {
-    it('constructs dynamic segment with AND combinator and multiple criteria rules', () => {
-      const segment: SegmentItem = {
-        id: 'seg_test_vip',
-        name: 'VIP Retail High Spenders',
-        description: 'Retail customers in Bogota active in last 30 days',
-        targetChannel: 'any',
-        dynamic: true,
-        calculatedCount: 380,
-        lastCalculatedAt: new Date().toISOString(),
-        criteria: {
-          combinator: 'AND',
-          rules: [
-            { field: 'tag', operator: 'equals', value: 'vip' },
-            { field: 'last_seen_days', operator: 'lt', value: '30' },
-            { field: 'metadata.city', operator: 'equals', value: 'Bogota' },
-          ],
-        },
-      };
+  assert.equal((await createCampaignDraft(draft)).id, 'cmp_12');
+  draftResponse.status = 'failed';
+  await assert.rejects(createCampaignDraft(draft), /no confirmó el borrador/);
+  assert.equal(adapter.mock.callCount(), 2);
+});
 
-      assert.equal(segment.dynamic, true);
-      assert.equal(segment.criteria.combinator, 'AND');
-      assert.equal(segment.criteria.rules.length, 3);
-      assert.equal(segment.criteria.rules[0].field, 'tag');
-      assert.equal(segment.calculatedCount, 380);
-    });
+test('campaign listing reports API errors and invalid responses without inventing campaigns', async (context) => {
+  const response: { success: boolean; data: unknown; message: string } = { success: false, data: [], message: 'API no disponible' };
+  mockResponse(context, (request) => {
+    assert.equal(request.url, '/v1/campaigns');
+    assert.equal(request.method, 'get');
+    return response;
+  });
+  const signal = new AbortController().signal;
+
+  await assert.rejects(listCampaigns(signal), /API no disponible/);
+  response.success = true;
+  response.data = {};
+  await assert.rejects(listCampaigns(signal), /listado de campañas no es válido/);
+  response.data = [];
+  assert.deepEqual(await listCampaigns(signal), []);
+});
+
+test('segments preserve server IDs and the count must correspond to the requested segment', async (context) => {
+  const draft = {
+    name: 'Clientes de Lima',
+    targetChannel: 'any' as const,
+    criteria: { combinator: 'AND' as const, rules: [{ field: 'metadata.city', operator: 'equals', value: 'Lima' }] },
+  };
+  const segmentId = 'segmento/1';
+  const calculation = { segmentId, count: 12 };
+  mockResponse(context, (request) => {
+    assert.equal(request.method, 'post');
+    if (request.url === '/v1/segments') {
+      assert.deepEqual(JSON.parse(request.data), draft);
+      return { success: true, data: { ...draft, id: segmentId, calculatedCount: 0 } };
+    }
+    assert.equal(request.url, '/v1/segments/segmento%2F1/calculate');
+    return { success: true, data: calculation };
   });
 
-  describe('Suite 3: EmailChannelConfig SMTP, IMAP & DKIM Data Model', () => {
-    it('validates standard email channel configuration data model', () => {
-      const config: EmailConfigData = {
-        smtpHost: 'smtp.mailgun.org',
-        smtpPort: 587,
-        smtpSecure: false,
-        smtpUser: 'postmaster@mail.example.com',
-        smtpPassword: 'secretpassword',
-        fromAddress: 'notifications@example.com',
-        fromName: 'Automat Bot',
-        dkimDomain: 'example.com',
-        dkimSelector: 'k1',
-        dkimPrivateKey: '-----BEGIN RSA PRIVATE KEY-----\nMIIE...',
-        imapHost: 'imap.mailgun.org',
-        imapPort: 993,
-        imapSecure: true,
-        imapUser: 'inbound@mail.example.com',
-        imapPassword: 'imapsecretpassword',
-        pollingIntervalSeconds: 30,
-      };
-
-      assert.equal(config.smtpPort, 587);
-      assert.equal(config.imapPort, 993);
-      assert.equal(config.dkimSelector, 'k1');
-      assert.equal(config.pollingIntervalSeconds, 30);
-    });
-  });
+  assert.equal((await createSegment(draft)).id, segmentId);
+  assert.equal(await calculateSegment(segmentId), 12);
+  calculation.segmentId = 'another';
+  await assert.rejects(calculateSegment(segmentId), /no confirmó el recuento/);
 });

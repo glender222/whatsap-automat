@@ -1,6 +1,7 @@
 // src/factures/mensajeria/services/messageService.ts
 
 import { api } from '../../../shared/axios/http';
+import type { WhatsAppMessage } from '../../../shared/types/wsp';
 
 function getSendErrorMessage(error: any): string {
   const data = error?.response?.data || {};
@@ -39,77 +40,26 @@ function getSendErrorMessage(error: any): string {
  * ✅ Token inyectado automáticamente por axios interceptor en src/shared/axios/http.ts
  * 🔐 Valida permisos en backend según rol del usuario
  */
-export async function getMessagesByChat(chatId: string, limit: number = 50) {
+export async function getMessagesByChat(
+  chatId: string,
+  limit: number = 50,
+  signal?: AbortSignal
+): Promise<WhatsAppMessage[]> {
   try {
-    console.log(`📥 Obteniendo mensajes del chat: ${chatId} (limit: ${limit})`);
-    
-    const response = await api.get<{ success: boolean; data: any[]; total: number }>(
-      `/chats/${encodeURIComponent(chatId)}/messages`, 
-      { params: { limit } }
+    const response = await api.get<{ success: boolean; data: WhatsAppMessage[]; total: number }>(
+      `/chats/${encodeURIComponent(chatId)}/messages`,
+      { params: { limit }, signal }
     );
-    
-    // El backend devuelve { success, data: [...], total }
-    const messageArray = response.data?.data || [];
-    return messageArray;
-  } catch (error: any) {
-    const status = error?.response?.status;
-    console.error(`❌ Error al obtener mensajes de ${chatId}:`, {
-      status,
-      statusText: error?.response?.statusText,
-      message: error?.response?.data?.message,
-      fullResponse: error?.response?.data,
-      error: error?.message,
-      config: {
-        url: error?.config?.url,
-        method: error?.config?.method
-      }
-    });
-    
-    if (error?.response?.status === 403) {
-      throw new Error('❌ No tienes permiso para acceder a este chat');
+    if (!response.data.success || !Array.isArray(response.data.data)) {
+      throw new Error('El historial de mensajes no es válido.');
     }
-
-    if (status === 429) {
-      const rateLimitError = new Error('Demasiadas solicitudes. Espera unos segundos y vuelve a intentar.');
-      (rateLimitError as any).status = 429;
-      throw rateLimitError;
-    }
-    
-    throw new Error(
-      error?.response?.data?.message || 'No se pudieron obtener los mensajes'
-    );
-  }
-}
-
-/**
- * Pre-carga mensajes de un chat (útil para grupos nuevos)
- * 📥 GET /api/chats/{chatId}/messages/preload?max=100
- * ✅ Token inyectado automáticamente por axios interceptor
- * Devuelve { success: true, data: [...], total: N }
- */
-export async function preloadChatMessages(chatId: string, max: number = 100) {
-  try {
-    console.log(`📥 Pre-cargando mensajes del chat: ${chatId} (max: ${max})`);
-    
-    const response = await api.get<{ success: boolean; data: any[]; total: number }>(
-      `/chats/${encodeURIComponent(chatId)}/messages/preload`, 
-      { params: { max } }
-    );
-    
-    // El backend devuelve { success: true, data: [...], total: N }
-    const messageArray = response.data?.data || [];
-    console.log(`✅ ${messageArray.length || 0} mensajes pre-cargados correctamente (total: ${response.data?.total || 0})`);
-    return messageArray;
-  } catch (error: any) {
-    console.error(`❌ Error al pre-cargar mensajes de ${chatId}:`, {
-      status: error?.response?.status,
-      message: error?.response?.data?.message,
-      error: error?.message
-    });
-    
-    throw new Error(
-      error?.response?.data?.message || 'No se pudieron pre-cargar los mensajes'
-    );
+    return response.data.data;
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    const response = (error as { response?: { status?: number; data?: { message?: string } } })?.response;
+    if (response?.status === 403) throw new Error('No tienes permiso para acceder a esta conversación.');
+    if (response?.status === 429) throw new Error('Demasiadas solicitudes. Espera unos segundos y vuelve a intentar.');
+    throw new Error(response?.data?.message || 'No se pudieron cargar los mensajes.');
   }
 }
 

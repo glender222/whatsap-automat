@@ -19,7 +19,6 @@ interface UseSocketSimpleProps {
 
 export const useSocketSimple = ({ selectedChat, onNewMessage, onChatUpdate, chats }: UseSocketSimpleProps) => {
   const socketRef = useRef<Socket | null>(null);
-  const previousChatRef = useRef<string | null>(null);
   const lastReadMarkRef = useRef<Record<string, number>>({});
 
   // Función de ordenamiento que coincide exactamente con el backend
@@ -122,7 +121,7 @@ export const useSocketSimple = ({ selectedChat, onNewMessage, onChatUpdate, chat
       }
 
       // Mostrar notificación solo si NO estoy en ese chat
-      if (!msg.fromMe && msg.chatId !== selectedChat && Notification.permission === 'granted') {
+      if (!msg.fromMe && msg.chatId !== selectedChat && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
         const chatName = chats.find(c => c.id === msg.chatId)?.name || 'Desconocido';
         new Notification(`Nuevo mensaje de ${chatName}`, {
           body: msg.body || 'Archivo multimedia',
@@ -176,16 +175,12 @@ export const useSocketSimple = ({ selectedChat, onNewMessage, onChatUpdate, chat
       });
     };
 
-    // Limpiar listeners anteriores
-    socket.off('message');
-    socket.off('message-replaced');
-
     // Configurar listener para mensajes normales
     socket.on('message', handleMessage);
 
     // Configurar listener para mensajes reconciliados (v1.34.4+)
     // Cuando falla el envío por bug de markedUnread, el backend reconcilia el mensaje
-    socket.on('message-replaced', (event: MessageReplacedEvent) => {
+    const handleMessageReplaced = (event: MessageReplacedEvent) => {
       console.log('🔄 Mensaje reemplazado:', event.tempId, '->', event.realMessage.id);
       
       // Normalizar el timestamp del mensaje real
@@ -196,32 +191,20 @@ export const useSocketSimple = ({ selectedChat, onNewMessage, onChatUpdate, chat
       
       // Llamar al callback para reemplazar el mensaje temporal
       onNewMessage(normalizedRealMessage);
-    });
+    };
+    socket.on('message-replaced', handleMessageReplaced);
 
     return () => {
       socket.off('message', handleMessage);
-      socket.off('message-replaced');
+      socket.off('message-replaced', handleMessageReplaced);
     };
   }, [selectedChat, onNewMessage, onChatUpdate, chats]);
 
-  // Manejar cambio de chat
   useEffect(() => {
-    if (selectedChat) {
-      const socketService = SocketService.getInstance();
-      const socket = socketService.getSocket();
-
-      if (socket) {
-        // Salir de la sala anterior
-        const previousChat = previousChatRef.current;
-        if (previousChat && previousChat !== selectedChat) {
-          socketService.leaveRoom(previousChat);
-        }
-
-        // Unirse a la nueva sala
-        socketService.joinRoom(selectedChat);
-        previousChatRef.current = selectedChat;
-      }
-    }
+    if (!selectedChat) return;
+    const socketService = SocketService.getInstance();
+    socketService.joinRoom(selectedChat);
+    return () => socketService.leaveRoom(selectedChat);
   }, [selectedChat]);
 
   return socketRef.current;

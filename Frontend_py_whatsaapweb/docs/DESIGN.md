@@ -141,3 +141,11 @@ Actualizar `docs/DESIGN.md` cuando:
 - Cambien las definiciones de metricas (chats activos, pedidos hoy, SLA, statusTag).
 - Se agreguen componentes del sistema IA (suggestion panel, handoff widget, gateways UI, runtime logs viewer).
 - Se eliminen modulos obsoletos (ej: bots rule router eliminado en Sprint 6 v3).
+
+## Espacio de trabajo operativo
+
+La navegación de escritorio y móvil conserva el mismo orden entre bandeja, resumen y administración. En pantallas estrechas el menú se abre desde la barra superior. La bandeja y el hilo ocupan vistas separadas y el botón de regreso devuelve el foco al buscador. En escritorio, la lista y el hilo se muestran juntos.
+
+Cada conversación tiene un enlace directo con su identificador. Cambiar de conversación cancela la carga anterior y conserva el borrador local del hilo. La cola general se carga desde la API de conversaciones aunque las etiquetas estén fuera de servicio.
+
+Campañas muestra el listado del servidor y permite preparar borradores. Segmentos solicita el recuento al backend. Auditoría y Salud del sistema muestran el error de consulta cuando el servicio no está disponible.

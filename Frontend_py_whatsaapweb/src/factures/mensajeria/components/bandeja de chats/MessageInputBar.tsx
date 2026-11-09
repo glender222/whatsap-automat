@@ -326,6 +326,7 @@ const MessageInputBar: React.FC<MessageInputBarProps> = ({
         {/* Textarea con soporte Ctrl+V */}
         <div className="flex-1">
           <textarea
+            aria-label="Mensaje"
             value={message}
             onChange={(e) => setMessage(e.target.value)}
             onKeyPress={handleKeyPressWithFile} // ✅ USAR LA NUEVA FUNCIÓN
@@ -349,6 +350,8 @@ const MessageInputBar: React.FC<MessageInputBarProps> = ({
 
         {/* Botón enviar */}
         <button
+          type="button"
+          aria-label="Enviar mensaje"
           onClick={handleCombinedSend} // ✅ USAR LA NUEVA FUNCIÓN
           disabled={(!message.trim() && !selectedFile) || !selectedChat || uploading || !canSendFreeForm}
           className={`p-2 rounded-lg transition-colors min-w-[40px] flex items-center justify-center ${(message.trim() || selectedFile) && selectedChat && !uploading && canSendFreeForm
