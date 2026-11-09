@@ -133,7 +133,7 @@ npm --prefix Frontend_py_whatsaapweb ci</code></pre>
           <li>
             <span class="step-number" aria-hidden="true">03</span>
             <h3 id="env-title">Configura PostgreSQL y los archivos de entorno</h3>
-            <p>Copia los ejemplos a <code>.env</code> en cada aplicación. Usa una base aislada, rellena las variables <code>DB_*</code> y genera un <code>JWT_SECRET</code> aleatorio de al menos 32 caracteres. Para conectar WhatsApp Cloud, configura los valores <code>META_*</code> con una cuenta de prueba. En la web, apunta <code>VITE_API_URL</code> al backend local.</p>
+            <p>Copia los ejemplos a <code>.env</code> en cada aplicación. Usa una base aislada, rellena <code>DB_*</code> y genera claves independientes de al menos 32 caracteres para <code>JWT_SECRET</code> y <code>MASTER_ENCRYPTION_KEY</code>. WhatsApp Cloud requiere sus valores <code>META_*</code> para arrancar. Usa una cuenta de prueba y configura una clave independiente en <code>META_TOKEN_ENCRYPTION_KEY</code> para producción. En la web, apunta <code>VITE_API_URL</code> al backend local.</p>
             <div class="code-block">
               <div class="code-header"><span>Desde la raíz</span><button type="button" data-copy="env-command" aria-describedby="env-title" hidden><svg aria-hidden="true"><use href="#i-copy"/></svg><span>Copiar</span></button></div>
               <pre><code id="env-command">cp -n WhatsaapWeb-JS/.env.example WhatsaapWeb-JS/.env

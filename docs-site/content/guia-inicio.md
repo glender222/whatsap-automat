@@ -29,7 +29,7 @@ cp -n WhatsaapWeb-JS/.env.example WhatsaapWeb-JS/.env
 cp -n Frontend_py_whatsaapweb/.env.example Frontend_py_whatsaapweb/.env
 ```
 
-Rellena `DB_*` con la conexión local y genera un `JWT_SECRET` aleatorio de al menos 32 caracteres. Para una prueba con WhatsApp Cloud, configura `META_*` con una cuenta de prueba. Guarda credenciales solo en tu entorno local. Configura `VITE_API_URL=http://localhost:3000/api` en la web si usas el puerto por defecto del backend.
+Rellena `DB_*` con la conexión local y genera claves independientes de al menos 32 caracteres para `JWT_SECRET` y `MASTER_ENCRYPTION_KEY`. El proveedor predeterminado, WhatsApp Cloud, requiere configurar `META_*` para arrancar. Usa una cuenta de prueba para las llamadas a Meta. En producción, configura también una clave independiente en `META_TOKEN_ENCRYPTION_KEY`. Guarda las credenciales en tu entorno local. Configura `VITE_API_URL=http://localhost:3000/api` en la web si usas el puerto por defecto del backend.
 
 ```sh
 npm --prefix WhatsaapWeb-JS run db:migrate
