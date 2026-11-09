@@ -285,7 +285,8 @@ export class App {
 
   private setupLegacyRoutes(conversationCore: any): void {
     const multer = require('multer') as any;
-    const upload = multer({ dest: 'uploads/' });
+    const upload = multer({ dest: config.multer.dest, limits: { fileSize: config.multer.maxFileSize } });
+    const { cleanRejectedUpload } = require('./middleware/legacyHumanSend');
     const AuthController = require('./controllers/authController');
     const ChatController = require('./controllers/chatController');
     const MediaController = require('./controllers/mediaController');
@@ -301,7 +302,7 @@ export class App {
     this.app.post('/logout', requireJwt as any, authController.logoutLegacy);
     this.app.get('/chats', requireJwt as any, chatController.getChatsLegacy);
     this.app.get('/messages/:chatId', requireJwt as any, requireChatTenantAccess as any, chatController.getMessagesLegacy);
-    this.app.post('/send-message', requireJwt as any, upload.single('file'), requireChatTenantAccess as any, chatController.sendMessageLegacy);
+    this.app.post('/send-message', requireJwt as any, upload.single('file'), cleanRejectedUpload(requireChatTenantAccess), chatController.sendMessageLegacy);
     this.app.get('/api/media/:messageId', requireJwt as any, requireMediaTenantAccess as any, mediaController.downloadMedia);
     this.app.get('/api/media/:messageId/info', requireJwt as any, requireMediaTenantAccess as any, mediaController.getMediaInfo);
     this.app.get('/api/media/:messageId/thumbnail', requireJwt as any, requireMediaTenantAccess as any, mediaController.getMediaThumbnail);

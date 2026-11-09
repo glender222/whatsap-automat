@@ -2,6 +2,7 @@ const { asyncHandler } = require('../middleware/errorHandler');
 const fs = require('fs');
 const ffmpeg = require('fluent-ffmpeg');
 const path = require('path');
+const { legacyHumanSend, removeTemporaryUpload, withTemporaryUpload } = require('../middleware/legacyHumanSend');
 
 function getWhatsappCompanyId(req) {
   const user = req?.user || {};
@@ -33,13 +34,16 @@ function sendMediaError(res, err) {
 class MediaController {
   constructor(whatsappService) {
     this.whatsappService = whatsappService;
+    this.sendMessage = legacyHumanSend(whatsappService, this.sendMessage);
+    this.sendMedia = withTemporaryUpload(this.sendMedia);
+    this.sendDocument = withTemporaryUpload(this.sendDocument);
   }
 
   /**
    * POST /api/media/send-media
    * Solo para imágenes y videos (envía como media, nunca como documento)
    */
-  sendMedia = asyncHandler(async (req, res) => {
+  sendMedia = async (req, res) => {
     const { chatId, message } = req.body;
     let file = req.file || null;
 
@@ -55,63 +59,68 @@ class MediaController {
       return res.status(400).json({ success: false, error: 'Solo se permiten imágenes o videos en este endpoint' });
     }
 
-    // Si es video, convertir a MP4 H.264 si no es compatible
-    if (mimetype.startsWith('video/')) {
-      // Solo convertir si no es mp4/h264
-      const ext = path.extname(file.originalname).toLowerCase();
-      const isMp4 = ext === '.mp4';
-      // No podemos detectar codec aquí, así que convertimos todo a mp4 por compatibilidad
-      if (!isMp4 || mimetype !== 'video/mp4') {
-        const outputPath = path.join('tmp_uploads', `${path.parse(file.filename).name}-converted.mp4`);
-        await new Promise((resolve, reject) => {
-          ffmpeg(file.path)
-            .outputOptions([
-              '-c:v libx264',
-              '-preset veryfast',
-              '-movflags +faststart',
-              '-pix_fmt yuv420p',
-              '-profile:v baseline',
-              '-level 3.0',
-              '-c:a aac',
-              '-b:a 128k'
-            ])
-            .output(outputPath)
-            .on('end', () => {
-              // Actualizar file para enviar el convertido
-              file = {
-                ...file,
-                path: outputPath,
-                mimetype: 'video/mp4',
-                originalname: path.basename(outputPath)
-              };
-              resolve();
-            })
-            .on('error', (err) => {
-              console.error('Error al convertir video:', err);
-              reject(new Error('No se pudo convertir el video a formato compatible MP4'));
-            })
-            .run();
-        });
+    let outputPath;
+    try {
+      // Si es video, convertir a MP4 H.264 si no es compatible
+      if (mimetype.startsWith('video/')) {
+        // Solo convertir si no es mp4/h264
+        const ext = path.extname(file.originalname).toLowerCase();
+        const isMp4 = ext === '.mp4';
+        // No podemos detectar codec aquí, así que convertimos todo a mp4 por compatibilidad
+        if (!isMp4 || mimetype !== 'video/mp4') {
+          outputPath = `${file.path}-converted.mp4`;
+          await new Promise((resolve, reject) => {
+            ffmpeg(file.path)
+              .outputOptions([
+                '-c:v libx264',
+                '-preset veryfast',
+                '-movflags +faststart',
+                '-pix_fmt yuv420p',
+                '-profile:v baseline',
+                '-level 3.0',
+                '-c:a aac',
+                '-b:a 128k'
+              ])
+              .output(outputPath)
+              .on('end', () => {
+                // Actualizar file para enviar el convertido
+                file = {
+                  ...file,
+                  path: outputPath,
+                  mimetype: 'video/mp4',
+                  originalname: path.basename(outputPath)
+                };
+                resolve();
+              })
+              .on('error', (err) => {
+                console.error('Error al convertir video:', err);
+                reject(new Error('No se pudo convertir el video a formato compatible MP4'));
+              })
+              .run();
+          });
+        }
       }
-    }
 
-    // Forzar nunca como documento
-    const options = { forceDocument: false, companyId: getWhatsappCompanyId(req) };
-    const sent = await this.whatsappService.sendMessage(chatId, message, file, options);
-    return res.json({
-      success: true,
-      data: {
-        id: sent.id?._serialized || sent.id || null,
-        timestamp: sent.timestamp || Math.floor(Date.now()/1000),
-      }
-    });
-  });
+      // Forzar nunca como documento
+      const options = { forceDocument: false, companyId: getWhatsappCompanyId(req) };
+      const sent = await this.whatsappService.sendMessage(chatId, message, file, options);
+      return res.json({
+        success: true,
+        data: {
+          id: sent.id?._serialized || sent.id || null,
+          timestamp: sent.timestamp || Math.floor(Date.now()/1000),
+        }
+      });
+    } finally {
+      await removeTemporaryUpload(outputPath);
+    }
+  };
 
   /**
    * POST /api/media/send-document
    * Solo para documentos (no imagen/video/audio)
    */
-  sendDocument = asyncHandler(async (req, res) => {
+  sendDocument = async (req, res) => {
     const { chatId, message } = req.body;
     const file = req.file || null;
 
@@ -136,7 +145,7 @@ class MediaController {
         timestamp: sent.timestamp || Math.floor(Date.now()/1000),
       }
     });
-  });
+  };
 
 
 // controllers/MediaController.js
@@ -183,8 +192,8 @@ class MediaController {
    *  - asSticker=true -> enviar imagen/GIF como sticker
    * ============================================================
    */
-  sendMessage = asyncHandler(async (req, res) => {
-    const { chatId, message, forceDocument, ptt, asSticker } = req.body;
+  sendMessage = async (req, res) => {
+    const { chatId, message, forceDocument, ptt, asSticker } = req.body || {};
     const file = req.file || null; // multer debe haberse aplicado en la ruta
 
     if (!chatId) {
@@ -213,7 +222,7 @@ class MediaController {
         timestamp: sent.timestamp || Math.floor(Date.now()/1000),
       }
     });
-  });
+  };
 
   /**
    * ============================================================

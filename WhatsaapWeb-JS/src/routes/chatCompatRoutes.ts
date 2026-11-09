@@ -3,6 +3,7 @@ import WhatsAppService from '../services/whatsappService';
 import config from '../config/index';
 import { JwtRequest, resolveWhatsappCompanyId } from '../middleware/jwtAuth';
 import { requireChatTenantAccess } from '../middleware/resourceAuth';
+import { explicitTemplateName, legacyHumanSend } from '../middleware/legacyHumanSend';
 import { withTenantTransaction } from '../db/TenantScopedUoW';
 import { OperationalRecordRepositoryPg, OperationalRecordService } from '../modules/operations';
 import AgentService from '../services/ai/AgentService';
@@ -103,13 +104,13 @@ export function createChatCompatRoutes(whatsappService: WhatsAppService): Router
     }
   });
 
-  router.post('/:chatId/messages', requireChatTenantAccess, upload.single('file'), async (req: Request, res: Response, next: NextFunction) => {
+  const sendMessage = legacyHumanSend(whatsappService, async (req: Request, res: Response, next: NextFunction) => {
     try {
       const companyId = resolveWhatsappCompanyId(req as JwtRequest);
-      const body = req.body as Record<string, string>;
+      const body = (req.body || {}) as Record<string, string>;
       const file = (req as any).file || null;
       const message = body.message || '';
-      const templateName = body.templateName || body.template;
+      const templateName = explicitTemplateName(body);
       const templateLanguage = body.templateLanguage || body.language;
 
       if (!message && !file && !templateName) {
@@ -150,7 +151,8 @@ export function createChatCompatRoutes(whatsappService: WhatsAppService): Router
     } catch (error) {
       next(error);
     }
-  });
+  }, { allowTemplates: true });
+  router.post('/:chatId/messages', requireChatTenantAccess, upload.single('file'), sendMessage);
 
   const markAsRead = async (req: Request, res: Response, next: NextFunction) => {
     try {

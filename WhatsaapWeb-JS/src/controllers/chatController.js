@@ -1,5 +1,6 @@
 const { asyncHandler } = require('../middleware/errorHandler');
 const config = require('../config');
+const { explicitTemplateName, legacyHumanSend } = require('../middleware/legacyHumanSend');
 
 function getTenantCompanyId(req) {
   const user = req?.user || {};
@@ -19,6 +20,8 @@ class ChatController {
   constructor(whatsappService, conversationCore = null) {
     this.whatsappService = whatsappService;
     this.conversationCore = conversationCore;
+    this.sendMessageLegacy = legacyHumanSend(whatsappService, this.sendMessageLegacy);
+    this.sendMessage = legacyHumanSend(whatsappService, this.sendMessage, { allowTemplates: true });
   }
 
   async _logFallback(action, entityType, entityId, error, endpoint, req = null) {
@@ -191,9 +194,9 @@ class ChatController {
   });
 
   // POST /send-message (compatibilidad legacy)
-  sendMessageLegacy = asyncHandler(async (req, res) => {
+  sendMessageLegacy = async (req, res) => {
     const companyId = getTenantCompanyId(req);
-    const { chatId, message } = req.body;
+    const { chatId, message } = req.body || {};
     const file = req.file;
 
     if (!chatId) {
@@ -210,7 +213,7 @@ class ChatController {
       });
     }
 
-    if (config.features?.persistWrites && this.conversationCore && !file) {
+    if (this.whatsappService.provider !== 'meta-cloud' && config.features?.persistWrites && this.conversationCore && !file) {
       try {
         const dto = {
           companyId,
@@ -236,27 +239,19 @@ class ChatController {
 
     const sentMessage = await this.whatsappService.sendMessage(chatId, message, file, { companyId });
 
-    if (file && file.path) {
-      const fs = require('fs');
-      try {
-        fs.unlinkSync(file.path);
-      } catch (e) {
-        console.warn('No se pudo eliminar archivo temporal:', file.path);
-      }
-    }
-
     res.json({
       success: true,
       sentType: file ? "media" : "text",
-      messageId: sentMessage?.id?._serialized
+      messageId: sentMessage?.id?._serialized || sentMessage?.id || null
     });
-  });
+  };
 
   // POST /api/chats/:chatId/messages
-  sendMessage = asyncHandler(async (req, res) => {
+  sendMessage = async (req, res) => {
     const companyId = getTenantCompanyId(req);
     const { chatId } = req.params;
-    const { message, templateName, template, templateLanguage, language } = req.body;
+    const { message, templateLanguage, language } = req.body || {};
+    const templateName = explicitTemplateName(req.body);
     const file = req.file;
 
     if (!chatId) {
@@ -266,14 +261,14 @@ class ChatController {
       });
     }
 
-    if (!message && !file && !templateName && !template) {
+    if (!message && !file && !templateName) {
       return res.status(400).json({
         success: false,
         error: "Mensaje, archivo o template es requerido"
       });
     }
 
-    if (config.features?.persistWrites && this.conversationCore && !file) {
+    if (this.whatsappService.provider !== 'meta-cloud' && config.features?.persistWrites && this.conversationCore && !file) {
       try {
         const dto = {
           companyId,
@@ -300,28 +295,19 @@ class ChatController {
     }
 
     const sentMessage = await this.whatsappService.sendMessage(chatId, message, file, {
-      templateName: templateName || template,
+      templateName,
       templateLanguage: templateLanguage || language,
       companyId,
     });
 
-    if (file && file.path) {
-      const fs = require('fs');
-      try {
-        fs.unlinkSync(file.path);
-      } catch (e) {
-        console.warn('No se pudo eliminar archivo temporal:', file.path);
-      }
-    }
-
     res.json({
       success: true,
       data: {
-        sentType: file ? "media" : "text",
+        sentType: file ? "media" : (templateName ? "template" : "text"),
         messageId: sentMessage?.id?._serialized || sentMessage?.id || null
       }
     });
-  });
+  };
 
   // PUT /api/chats/:chatId/read
   markAsRead = asyncHandler(async (req, res) => {

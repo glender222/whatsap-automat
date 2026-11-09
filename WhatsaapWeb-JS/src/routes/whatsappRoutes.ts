@@ -3,6 +3,7 @@ import WhatsAppService from '../services/whatsappService';
 import config from '../config/index';
 import { JwtRequest, resolveWhatsappCompanyId } from '../middleware/jwtAuth';
 import { requireChatTenantAccess } from '../middleware/resourceAuth';
+import { cleanRejectedUpload, explicitTemplateName, legacyHumanSend } from '../middleware/legacyHumanSend';
 
 const multer = require('multer') as any;
 
@@ -99,20 +100,22 @@ export function createWhatsAppRoutes(whatsappService: WhatsAppService): Router {
     }
   });
 
-  router.post('/send-message', upload.single('file'), requireChatTenantAccess, async (req: Request, res: Response, next: NextFunction) => {
+  const sendMessage = legacyHumanSend(whatsappService, async (req: Request, res: Response, next: NextFunction) => {
     try {
       const companyId = resolveWhatsappCompanyId(req as JwtRequest);
-      const body = req.body as Record<string, string>;
+      const body = (req.body || {}) as Record<string, string>;
+      const file = (req as any).file || null;
+      const templateName = explicitTemplateName(body);
       const target = body.chatId || body.to;
       if (!target) {
         return res.status(400).json({ success: false, error: 'chatId o to es requerido' });
       }
-      if (!body.message && !(req as any).file && !body.templateName && !body.template) {
+      if (!body.message && !file && !templateName) {
         return res.status(400).json({ success: false, error: 'Mensaje, archivo o template requerido' });
       }
 
-      const sent = await whatsappService.sendMessage(target, body.message || '', (req as any).file || null, {
-        templateName: body.templateName || body.template,
+      const sent = await whatsappService.sendMessage(target, body.message || '', file, {
+        templateName,
         templateLanguage: body.templateLanguage || body.language,
         companyId,
       });
@@ -120,7 +123,7 @@ export function createWhatsAppRoutes(whatsappService: WhatsAppService): Router {
       return res.json({
         success: true,
         data: {
-          sentType: (req as any).file ? 'media' : (body.templateName || body.template ? 'template' : 'text'),
+          sentType: file ? 'media' : (templateName ? 'template' : 'text'),
           messageId: sent?.id?._serialized || sent?.id || null,
           timestamp: sent?.timestamp || Math.floor(Date.now() / 1000),
         },
@@ -128,7 +131,8 @@ export function createWhatsAppRoutes(whatsappService: WhatsAppService): Router {
     } catch (error) {
       next(error);
     }
-  });
+  }, { allowTemplates: true });
+  router.post('/send-message', upload.single('file'), cleanRejectedUpload(requireChatTenantAccess), sendMessage);
 
   return router;
 }
