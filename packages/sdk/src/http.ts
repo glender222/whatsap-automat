@@ -61,6 +61,8 @@ export class HttpClient {
     const url = this.buildUrl(subPath, options.query);
     const headers = this.buildHeaders(options.headers);
     const timeout = options.timeoutMs ?? this.defaultTimeoutMs;
+    const canRetry = method === 'GET' || Object.entries(options.headers ?? {})
+      .some(([name, value]) => name.toLowerCase() === 'idempotency-key' && value.trim() !== '');
 
     let attempt = 0;
     while (true) {
@@ -87,7 +89,7 @@ export class HttpClient {
         }
 
         const isRetryable = response.status === 429 || response.status === 503;
-        if (isRetryable && attempt <= this.maxRetries) {
+        if (canRetry && isRetryable && attempt <= this.maxRetries) {
           const retryAfter = response.headers.get('retry-after');
           const delayMs = retryAfter
             ? parseInt(retryAfter, 10) * 1000
@@ -96,11 +98,12 @@ export class HttpClient {
           continue;
         }
 
-        let errorBody: unknown;
+        const errorText = await response.text();
+        let errorBody: unknown = { detail: errorText };
         try {
-          errorBody = await response.json();
+          errorBody = JSON.parse(errorText);
         } catch {
-          errorBody = { detail: await response.text() };
+          // Proxies can return plain-text or HTML errors.
         }
 
         throw createErrorFromResponse(response.status, errorBody, response.headers);
@@ -116,7 +119,7 @@ export class HttpClient {
             detail: `Request timed out after ${timeout}ms`,
           });
         }
-        if (attempt <= this.maxRetries) {
+        if (canRetry && attempt <= this.maxRetries) {
           await new Promise((resolve) => setTimeout(resolve, 100 * Math.pow(2, attempt)));
           continue;
         }

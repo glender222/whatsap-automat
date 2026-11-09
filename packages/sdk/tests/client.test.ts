@@ -112,6 +112,41 @@ describe('@whatsap-automat/sdk: AutomatClient & HttpClient', () => {
     );
   });
 
+  it('does not replay an unkeyed mutation after HTTP or network failure', async () => {
+    let attempts = 0;
+    const client = new AutomatClient({
+      baseUrl: 'https://api.example.com',
+      fetchFn: async () => {
+        attempts++;
+        if (attempts === 1) return new Response('Proxy unavailable', { status: 503 });
+        throw new TypeError('Network closed before the response');
+      },
+    });
+    await assert.rejects(client.conversations.takeover('conv_1', { expectedVersion: 1 }),
+      (error) => error instanceof ProblemDetailsError && error.status === 503 &&
+        error.detail === 'Proxy unavailable');
+    assert.equal(attempts, 1);
+    await assert.rejects(client.conversations.takeover('conv_1', { expectedVersion: 1 }),
+      (error) => error instanceof ProblemDetailsError && error.status === 500);
+    assert.equal(attempts, 2);
+  });
+
+  it('replays a keyed send with the same key and body after a retryable response', async () => {
+    const attempts: Array<[string | null, RequestInit['body']]> = [];
+    const client = new AutomatClient({
+      baseUrl: 'https://api.example.com',
+      fetchFn: async (_url, request) => {
+        attempts.push([new Headers(request?.headers).get('idempotency-key'), request?.body]);
+        if (attempts.length === 1) return new Response(null, { status: 503, headers: { 'retry-after': '0' } });
+        return Response.json({ accepted: true });
+      },
+    });
+    assert.equal((await client.conversations.sendText('conv_1', 'hola', 1, 'effect-key')).accepted, true);
+    assert.equal(attempts.length, 2);
+    assert.deepEqual(attempts[1], attempts[0]);
+    assert.equal(attempts[0][0], 'effect-key');
+  });
+
   it('handles takeover command invoking /conversations/{id}/takeover', async () => {
     let capturedBody: any;
     let capturedMethod: string | undefined;

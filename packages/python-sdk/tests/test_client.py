@@ -19,6 +19,7 @@ from whatsap_automat_sdk import (
     Conversation,
     NotFoundError,
     PolicyDeniedError,
+    ProblemDetailsError,
     RateLimitedError,
     ServiceUnavailableError,
     UnauthorizedError,
@@ -28,6 +29,38 @@ from whatsap_automat_sdk import (
 
 class TestAutomatClient(unittest.TestCase):
     """Test suite for synchronous AutomatClient and core functionality."""
+
+    def test_unkeyed_mutation_does_not_retry_a_service_failure(self) -> None:
+        attempts = 0
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal attempts
+            attempts += 1
+            self.assertEqual(request.method, "POST")
+            return httpx.Response(503, text="Proxy unavailable")
+
+        with AutomatClient(base_url="https://api.example.com", transport=httpx.MockTransport(handler)) as client:
+            with self.assertRaises(ServiceUnavailableError):
+                client.conversations.takeover("conv_1", expected_version=1)
+        self.assertEqual(attempts, 1)
+
+    def test_keyed_send_reuses_key_and_body(self) -> None:
+        attempts: list[tuple[str, bytes]] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            attempts.append((request.headers["idempotency-key"], request.content))
+            if len(attempts) == 1:
+                return httpx.Response(503, headers={"retry-after": "0"})
+            return httpx.Response(200, json={
+                "providerMessageId": "wamid.fixture", "accepted": True,
+                "rawStatus": "accepted", "deliveryState": "provider_accepted",
+            })
+
+        with AutomatClient(base_url="https://api.example.com", transport=httpx.MockTransport(handler)) as client:
+            self.assertTrue(client.conversations.send_text("conv_1", "hola", 1, "effect-key").accepted)
+        self.assertEqual(len(attempts), 2)
+        self.assertEqual(attempts[0], attempts[1])
+        self.assertEqual(attempts[0][0], "effect-key")
 
     def test_client_initialization_and_headers(self) -> None:
         captured_headers: Dict[str, str] = {}
@@ -391,6 +424,19 @@ class TestAutomatClient(unittest.TestCase):
 
 class TestAsyncAutomatClient(unittest.IsolatedAsyncioTestCase):
     """Test suite for asynchronous AsyncAutomatClient."""
+
+    async def test_unkeyed_mutation_does_not_retry_a_transport_failure(self) -> None:
+        attempts = 0
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal attempts
+            attempts += 1
+            raise httpx.ReadError("Network closed before the response", request=request)
+
+        async with AsyncAutomatClient(base_url="https://api.example.com", transport=httpx.MockTransport(handler)) as client:
+            with self.assertRaises(ProblemDetailsError):
+                await client.conversations.takeover("conv_1", expected_version=1)
+        self.assertEqual(attempts, 1)
 
     async def test_async_simulation_projects_envelope_to_node_list(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:

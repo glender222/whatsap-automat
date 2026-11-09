@@ -40,6 +40,13 @@ from .pagination import AsyncCursorPager, CursorPager
 T = TypeVar("T")
 
 
+def _allows_retry(method: str, headers: Optional[Mapping[str, str]]) -> bool:
+    return method == "GET" or any(
+        name.lower() == "idempotency-key" and value.strip()
+        for name, value in (headers or {}).items()
+    )
+
+
 @dataclass
 class ClientConfig:
     base_url: str
@@ -357,6 +364,7 @@ class AutomatClient:
         headers: Optional[Mapping[str, str]] = None,
     ) -> Any:
         clean_path = path if path.startswith("/") else f"/{path}"
+        can_retry = _allows_retry(method, headers)
         attempt = 0
 
         while True:
@@ -376,7 +384,7 @@ class AutomatClient:
                     return response.json()
 
                 # Retry logic for 429 and 503
-                if response.status_code in (429, 503) and attempt <= self.max_retries:
+                if can_retry and response.status_code in (429, 503) and attempt <= self.max_retries:
                     retry_after = response.headers.get("retry-after")
                     if retry_after and retry_after.isdigit():
                         delay = float(retry_after)
@@ -393,7 +401,7 @@ class AutomatClient:
                 raise create_error_from_response(response.status_code, error_body, response.headers)
 
             except httpx.RequestError as exc:
-                if attempt <= self.max_retries:
+                if can_retry and attempt <= self.max_retries:
                     time.sleep(0.1 * (2 ** attempt))
                     continue
                 raise ProblemDetailsError(
@@ -709,6 +717,7 @@ class AsyncAutomatClient:
         headers: Optional[Mapping[str, str]] = None,
     ) -> Any:
         clean_path = path if path.startswith("/") else f"/{path}"
+        can_retry = _allows_retry(method, headers)
         attempt = 0
 
         while True:
@@ -728,7 +737,7 @@ class AsyncAutomatClient:
                     return response.json()
 
                 # Retry logic for 429 and 503
-                if response.status_code in (429, 503) and attempt <= self.max_retries:
+                if can_retry and response.status_code in (429, 503) and attempt <= self.max_retries:
                     retry_after = response.headers.get("retry-after")
                     if retry_after and retry_after.isdigit():
                         delay = float(retry_after)
@@ -745,7 +754,7 @@ class AsyncAutomatClient:
                 raise create_error_from_response(response.status_code, error_body, response.headers)
 
             except httpx.RequestError as exc:
-                if attempt <= self.max_retries:
+                if can_retry and attempt <= self.max_retries:
                     await asyncio.sleep(0.1 * (2 ** attempt))
                     continue
                 raise ProblemDetailsError(

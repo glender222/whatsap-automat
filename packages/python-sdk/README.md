@@ -6,7 +6,7 @@ Official typed Python client library for the **Whatsap-Automat v0.4 REST API**.
 
 - **Full Typing**: Comprehensive Pydantic v2 data models for Conversations, Messages, Channels, Agent Traces, and Approvals.
 - **Dual Client Support**: Both synchronous (`AutomatClient`) and asynchronous (`AsyncAutomatClient`) interfaces powered by `httpx`.
-- **Automatic Resilience**: Transparent retry logic with exponential backoff and `Retry-After` header parsing for HTTP 429 (Rate Limited) and HTTP 503 (Service Unavailable).
+- **Automatic retries**. GET requests and operations with a per-request idempotency key can retry network errors and HTTP 429 or 503 with exponential backoff. An unkeyed mutation is attempted once.
 - **Pythonic Pagination**: Native cursor-based iteration supporting `for conv in client.conversations.list():` and `async for conv in client.conversations.list():`.
 - **RFC 7807 / RFC 9457 Errors**: Strongly-typed exceptions mapping HTTP status codes (`UnauthorizedError`, `ConflictError`, `PolicyDeniedError`, `ValidationError`).
 
