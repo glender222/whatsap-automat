@@ -71,6 +71,8 @@ export interface WorkflowStartOptions {
   workflowRunTimeout?: string | number;
   workflowTaskTimeout?: string | number;
 
+  workflowIdReusePolicy?: 'REJECT_DUPLICATE';
+
   /**
    * Optional custom retry policy for workflow task execution.
    */

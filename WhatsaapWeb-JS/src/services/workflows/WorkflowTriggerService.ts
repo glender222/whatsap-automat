@@ -1,203 +1,160 @@
 import crypto from 'node:crypto';
 import { Pool } from 'pg';
 import defaultPool from '../../config/database';
-import { TenantScopedUoW, tenantScopedUoW } from '../../db/TenantScopedUoW';
-import { OutboxRepository, outboxRepository } from '../outbox/OutboxRepository';
-import { Queryable } from '../../shared/UnitOfWorkPort';
+import { TenantScopedUoW } from '../../db/TenantScopedUoW';
+import { PgUnitOfWork } from '../../shared/PgUnitOfWork';
+import { OutboxRepository } from '../outbox/OutboxRepository';
 import {
   InboundWebhookResult,
-  TriggerNotFoundError,
   TriggerInactiveError,
+  TriggerNotFoundError,
   WebhookAuthenticationError,
+  WorkflowIdempotencyConflictError,
+  WorkflowInputError,
   WorkflowNotPublishedError,
 } from './types';
 
-export class WorkflowTriggerService {
-  constructor(
-    private readonly pool: Pool = defaultPool,
-    private readonly uow: TenantScopedUoW = tenantScopedUoW,
-    private readonly outboxRepo: OutboxRepository = outboxRepository
-  ) {}
+export const WORKFLOW_WEBHOOK_EVENT = 'workflow.trigger.webhook';
+const ledgerSource = 'workflow_webhook_trigger';
 
-  /**
-   * Resolves a channel-less inbound webhook and writes to processing_outbox within TenantScopedUoW.
-   */
+function hash(value: string): string {
+  return crypto.createHash('sha256').update(value).digest('hex');
+}
+
+function verifyWebhookToken(token: string | undefined, expectedHash: string | null): void {
+  if (!token || !expectedHash || !/^[0-9a-f]{64}$/i.test(expectedHash)) {
+    throw new WebhookAuthenticationError();
+  }
+  if (!crypto.timingSafeEqual(Buffer.from(hash(token), 'hex'), Buffer.from(expectedHash, 'hex'))) {
+    throw new WebhookAuthenticationError();
+  }
+}
+
+function requestKey(
+  headers: Record<string, string | string[] | undefined>,
+  body: Record<string, unknown>
+): string {
+  const value = headers['idempotency-key'] ?? headers['x-idempotency-key'] ??
+    (typeof body.id === 'string' ? body.id : crypto.randomUUID());
+  if (typeof value !== 'string' || !/^[\x20-\x7e]{1,128}$/.test(value.trim())) {
+    throw new WorkflowInputError('Idempotency key must be 1-128 printable ASCII characters.');
+  }
+  return value.trim();
+}
+
+function payloadHash(body: Record<string, unknown>): string {
+  return hash(JSON.stringify(body, (_key, value: unknown) => {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) return value;
+    const object = value as Record<string, unknown>;
+    return Object.fromEntries(Object.keys(object).sort().map((key) => [key, object[key]]));
+  }));
+}
+
+export class WorkflowTriggerService {
+  private readonly endpointLookup: PgUnitOfWork;
+
+  constructor(
+    pool: Pool = defaultPool,
+    private readonly uow = new TenantScopedUoW(pool),
+    private readonly outbox = new OutboxRepository(uow)
+  ) {
+    this.endpointLookup = new PgUnitOfWork(pool);
+  }
+
   async processInboundWebhook(
     endpointKey: string,
     rawToken: string | undefined,
     headers: Record<string, string | string[] | undefined>,
     body: Record<string, unknown>
   ): Promise<InboundWebhookResult> {
-    // 1. Global lookup by unique endpoint_key
-    const triggerRes = await this.pool.query(
-      `SELECT id, tenant_id, workspace_id, workflow_id, type, endpoint_key, auth_token_hash, is_active, metadata
-       FROM workflow_triggers
-       WHERE endpoint_key = $1
-       LIMIT 1;`,
-      [endpointKey]
-    );
+    const resolved = await this.endpointLookup.transaction(async ({ client }) => {
+      await client.query("SELECT set_config('app.workflow_endpoint_key', $1, true)", [endpointKey]);
+      const { rows } = await client.query(`
+        SELECT id, tenant_id, auth_token_hash
+        FROM workflow_triggers WHERE endpoint_key = $1 AND type = 'webhook'
+      `, [endpointKey]);
+      return rows[0];
+    });
+    if (!resolved) throw new TriggerNotFoundError(endpointKey);
+    verifyWebhookToken(rawToken, resolved.auth_token_hash);
 
-    if (!triggerRes.rows || triggerRes.rows.length === 0) {
-      throw new TriggerNotFoundError(endpointKey);
-    }
+    const tenantId = Number(resolved.tenant_id);
+    const idempotencyKey = requestKey(headers, body);
+    const scopedDigest = hash(JSON.stringify([resolved.id, idempotencyKey]));
+    const ledgerKey = `workflow:${scopedDigest}`;
+    const bodyHash = payloadHash(body);
 
-    const trigger = triggerRes.rows[0];
-    if (!trigger.is_active) {
-      throw new TriggerInactiveError(endpointKey);
-    }
-    if (trigger.type !== 'webhook') {
-      throw new Error(`Trigger type '${trigger.type}' is not configured for webhook ingestion`);
-    }
+    return this.uow.run(tenantId, async (client) => {
+      const { rows: [trigger] } = await client.query(`
+        SELECT workflow_id, auth_token_hash, is_active FROM workflow_triggers
+        WHERE id = $1 AND tenant_id = $2 AND endpoint_key = $3 AND type = 'webhook'
+        FOR SHARE
+      `, [resolved.id, tenantId, endpointKey]);
+      if (!trigger) throw new TriggerNotFoundError(endpointKey);
+      verifyWebhookToken(rawToken, trigger.auth_token_hash);
+      if (!trigger.is_active) throw new TriggerInactiveError(endpointKey);
 
-    // 2. Token verification via timingSafeEqual
-    if (trigger.auth_token_hash) {
-      if (!rawToken) {
-        throw new WebhookAuthenticationError('Missing mandatory webhook token');
-      }
-      const computedHash = crypto.createHash('sha256').update(rawToken.trim()).digest('hex');
-      const hashBuf = Buffer.from(computedHash, 'utf8');
-      const storedBuf = Buffer.from(trigger.auth_token_hash, 'utf8');
-
-      if (hashBuf.length !== storedBuf.length || !crypto.timingSafeEqual(hashBuf, storedBuf)) {
-        throw new WebhookAuthenticationError('Invalid webhook authentication token');
-      }
-    }
-
-    const tenantId = Number(trigger.tenant_id);
-
-    // 3. Resolve Idempotency Key
-    const headerIdempKey = (headers['x-idempotency-key'] || headers['idempotency-key']) as string | undefined;
-    const bodyId = typeof body?.id === 'string' && body.id.trim().length > 0 ? body.id.trim() : undefined;
-    const idempotencyKey = headerIdempKey || bodyId || crypto.randomUUID();
-
-    // 4. Enter TenantScopedUoW transaction
-    return this.uow.run(tenantId, async (client: Queryable) => {
-      // 4.1 Check idempotency ledger for duplicate requests
-      const ledgerCheck = await client.query(
-        `SELECT response_status, response_body
-         FROM idempotency_ledger
-         WHERE tenant_id = $1 AND idempotency_key = $2
-         LIMIT 1;`,
-        [tenantId, idempotencyKey]
-      );
-
-      if (ledgerCheck.rows && ledgerCheck.rows.length > 0) {
-        const cached = ledgerCheck.rows[0];
-        const parsedBody =
-          typeof cached.response_body === 'string'
-            ? JSON.parse(cached.response_body)
-            : cached.response_body;
-
-        return {
-          status: 'accepted',
-          runId: parsedBody.runId,
-          workflowId: parsedBody.workflowId,
-          revisionId: parsedBody.revisionId,
-          idempotencyKey,
-          duplicate: true,
-        };
+      const claim = await client.query(`
+        INSERT INTO idempotency_ledger (tenant_id, idempotency_key, source, request_hash, response_status)
+        VALUES ($1, $2, $3, $4, 202)
+        ON CONFLICT (tenant_id, idempotency_key) DO NOTHING RETURNING id
+      `, [tenantId, ledgerKey, ledgerSource, bodyHash]);
+      if (!claim.rows.length) {
+        const { rows: [prior] } = await client.query(`
+          SELECT source, request_hash, response_body FROM idempotency_ledger
+          WHERE tenant_id = $1 AND idempotency_key = $2
+        `, [tenantId, ledgerKey]);
+        if (!prior?.response_body || prior.source !== ledgerSource || prior.request_hash !== bodyHash) {
+          throw new WorkflowIdempotencyConflictError();
+        }
+        return { ...prior.response_body, duplicate: true } as InboundWebhookResult;
       }
 
-      // 4.2 Verify target published revision in workflow_definitions
-      const wfDefRes = await client.query(
-        `SELECT id, published_revision_id, status
-         FROM workflow_definitions
-         WHERE id = $1 AND tenant_id = $2
-         LIMIT 1;`,
-        [trigger.workflow_id, tenantId]
-      );
-
-      if (!wfDefRes.rows || wfDefRes.rows.length === 0) {
-        throw new Error(`Associated workflow definition '${trigger.workflow_id}' not found`);
-      }
-
-      const wfDef = wfDefRes.rows[0];
-      if (wfDef.status !== 'published' || !wfDef.published_revision_id) {
-        throw new WorkflowNotPublishedError(trigger.workflow_id);
-      }
-
-      // Verify revision status in workflow_revisions
-      const revRes = await client.query(
-        `SELECT id, revision_number
-         FROM workflow_revisions
-         WHERE id = $1 AND tenant_id = $2
-         LIMIT 1;`,
-        [wfDef.published_revision_id, tenantId]
-      );
-
-      if (!revRes.rows || revRes.rows.length === 0) {
-        throw new Error(`Published revision '${wfDef.published_revision_id}' does not exist in revision store`);
-      }
+      const { rows: [definition] } = await client.query(`
+        SELECT definition.workspace_id, revision.id AS revision_id
+        FROM workflow_definitions AS definition
+        JOIN workflow_revisions AS revision
+          ON revision.id = definition.published_revision_id
+         AND revision.tenant_id = definition.tenant_id AND revision.workflow_id = definition.id
+        WHERE definition.id = $1 AND definition.tenant_id = $2
+          AND definition.status = 'published' AND revision.status = 'published'
+        FOR SHARE OF definition
+      `, [trigger.workflow_id, tenantId]);
+      if (!definition) throw new WorkflowNotPublishedError(trigger.workflow_id);
 
       const runId = `run_${crypto.randomUUID()}`;
-      const correlationId = (headers['x-correlation-id'] as string) || `corr_${crypto.randomUUID()}`;
-      const temporalWorkflowId = `wf_${tenantId}_${idempotencyKey}`;
-
-      const acceptedPayload = {
-        status: 'accepted',
+      const providedCorrelation = headers['x-correlation-id'];
+      const correlationId = typeof providedCorrelation === 'string' && /^[a-zA-Z0-9_.:-]{1,128}$/.test(providedCorrelation)
+        ? providedCorrelation
+        : `corr_${crypto.randomUUID()}`;
+      const temporalWorkflowId = `wf_${tenantId}_${scopedDigest}`;
+      const result = {
+        status: 'accepted' as const,
         runId,
         workflowId: trigger.workflow_id,
-        revisionId: wfDef.published_revision_id,
+        revisionId: definition.revision_id,
         idempotencyKey,
       };
 
-      // 4.3 Persist into workflow_runs
-      await client.query(
-        `INSERT INTO workflow_runs (
-           id, tenant_id, workspace_id, workflow_id, revision_id,
-           temporal_workflow_id, correlation_id, trigger_type, trigger_payload,
-           status, current_step, step_count, state_snapshot, started_at
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'webhook', $8, 'queued', 'phase_ingestion', 0, '{}', NOW());`,
-        [
-          runId,
-          tenantId,
-          trigger.workspace_id || null,
-          trigger.workflow_id,
-          wfDef.published_revision_id,
-          temporalWorkflowId,
-          correlationId,
-          JSON.stringify(body || {}),
-        ]
-      );
+      await client.query(`
+        INSERT INTO workflow_runs (
+          id, tenant_id, workspace_id, workflow_id, revision_id, temporal_workflow_id,
+          correlation_id, trigger_type, trigger_payload, status, current_step
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'webhook', $8, 'queued', 'ingress')
+      `, [runId, tenantId, definition.workspace_id, result.workflowId, result.revisionId,
+        temporalWorkflowId, correlationId, JSON.stringify(body)]);
+      await this.outbox.enqueue(tenantId, {
+        workspaceId: definition.workspace_id,
+        eventType: WORKFLOW_WEBHOOK_EVENT,
+        correlationId,
+        idempotencyKey: ledgerKey,
+        payload: { runId },
+      }, client);
+      await client.query('INSERT INTO workflow_dispatch_tenants (tenant_id) VALUES ($1) ON CONFLICT DO NOTHING', [tenantId]);
+      await client.query('UPDATE idempotency_ledger SET response_body = $1 WHERE id = $2',
+        [JSON.stringify(result), claim.rows[0].id]);
 
-      // 4.4 Persist into idempotency_ledger
-      const requestHash = crypto.createHash('sha256').update(JSON.stringify(body || {})).digest('hex');
-      await client.query(
-        `INSERT INTO idempotency_ledger (
-           tenant_id, idempotency_key, source, request_hash, response_status, response_body, created_at
-         ) VALUES ($1, $2, 'workflow_webhook_trigger', $3, 202, $4, NOW());`,
-        [tenantId, idempotencyKey, requestHash, JSON.stringify(acceptedPayload)]
-      );
-
-      // 4.5 Enqueue into processing_outbox
-      await this.outboxRepo.enqueue(
-        tenantId,
-        {
-          workspaceId: trigger.workspace_id || null,
-          eventType: 'workflow.trigger.webhook',
-          eventId: crypto.randomUUID(),
-          correlationId,
-          idempotencyKey,
-          payload: {
-            workflowId: trigger.workflow_id,
-            revisionId: wfDef.published_revision_id,
-            triggerId: trigger.id,
-            triggerType: 'webhook',
-            endpointKey,
-            runId,
-            triggerPayload: body || {},
-            taskQueue: 'automation-workflows-v1',
-            workflowType: 'ChannelLessBusinessWorkflow',
-          },
-        },
-        client
-      );
-
-      return {
-        ...acceptedPayload,
-        status: 'accepted',
-        duplicate: false,
-      };
+      return { ...result, duplicate: false };
     });
   }
 }

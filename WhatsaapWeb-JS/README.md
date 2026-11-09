@@ -167,6 +167,55 @@ Comprueba el proceso:
 curl http://localhost:3000/health
 ```
 
+## Automatizaciones duraderas por webhook
+
+Aplica la migración `033_durable_workflow_dispatch.sql` con `npm run db:migrate` y compila con `npm run build`. El backend acepta los webhooks y guarda la ejecución con su revisión publicada. Un proceso independiente lee el outbox, inicia el workflow en Temporal y guarda sus estados en PostgreSQL. Ambos procesos usan las mismas variables de PostgreSQL. El worker admite `TEMPORAL_ADDRESS`, `TEMPORAL_NAMESPACE` y `TEMPORAL_TLS`.
+
+Para una prueba local, inicia Temporal en una terminal y el worker en otra. Mantén también el backend en ejecución.
+
+```bash
+temporal server start-dev --ip 127.0.0.1 --headless
+```
+
+```bash
+TEMPORAL_ADDRESS=127.0.0.1:7233 node dist/services/temporal/automationWorker.js
+```
+
+Con un JWT de administrador de la empresa, crea un workflow con `POST /api/v1/workflows`. El cuerpo incluye `name`, `dagGraph` y, opcionalmente, `limits`. Este grafo espera 500 ms antes de completar.
+
+```json
+{
+  "name": "Espera breve",
+  "dagGraph": {
+    "nodes": [
+      { "id": "inicio", "kind": "trigger" },
+      { "id": "espera", "kind": "delay", "config": { "durationMs": 500 } },
+      { "id": "fin", "kind": "end" }
+    ],
+    "edges": [
+      { "id": "inicio-espera", "source": "inicio", "target": "espera" },
+      { "id": "espera-fin", "source": "espera", "target": "fin" }
+    ]
+  }
+}
+```
+
+1. Publica la revisión devuelta con `POST /api/v1/workflows/{workflowId}/publish` y el campo `revisionId`.
+2. Crea el disparador con `POST /api/v1/workflows/{workflowId}/triggers/webhook`. Guarda el `endpointKey` y el `token` que devuelve esa operación.
+3. Envía un objeto JSON a `POST /api/v1/workflows/triggers/webhook/{endpointKey}` con `Authorization: Bearer <token>` o `X-Webhook-Token`. Usa `Idempotency-Key` para reintentar el mismo envío. Repetir la clave en otro disparador crea una ejecución independiente.
+4. Consulta `GET /api/v1/workflows/runs/{runId}` con el JWT de la empresa. La respuesta contiene el estado persistido, la revisión y el identificador de ejecución de Temporal.
+5. Para desactivar el disparador, usa `PATCH /api/v1/workflows/{workflowId}/triggers/{triggerId}` con `{"isActive":false}`.
+
+Para cambiar el grafo, crea otra revisión con `POST /api/v1/workflows/{workflowId}/revisions` y publícala. `POST /api/v1/workflows/{workflowId}/rollback` vuelve a apuntar a una revisión publicada. Cada ejecución existente conserva su revisión original.
+
+Este worker admite nodos de disparo, condiciones, esperas y fin. Las condiciones requieren salidas `true` y `false` declaradas en `sourceHandle`. La API rechaza al validar los grafos con aprobaciones o acciones externas, que necesitan integración propia antes de usarse en el worker.
+
+Para reproducir la prueba de integración, usa una base desechable con migraciones aplicadas, un rol sin `SUPERUSER` ni `BYPASSRLS`, un servidor Temporal de prueba en loopback y el worker compilado. Configura `WORKFLOW_TEST_DATABASE_URL` y `WORKFLOW_TEST_TEMPORAL_ADDRESS` y ejecuta:
+
+```bash
+node --import tsx --test src/test/workflows-ingress-rollback.test.ts
+```
+
 ## Cloudflare Quick Tunnel
 
 El comando principal es:

@@ -1,39 +1,73 @@
 import { Request, Response, NextFunction } from 'express';
+import { createProblemDetails, StandardErrorCode } from '@whatsap-automat/contracts';
+import { extractBearerToken, toPositiveInt } from '../middleware/jwtAuth';
+import { workflowTriggerService, WorkflowTriggerService } from '../services/workflows/WorkflowTriggerService';
+import { workflowRevisionService, WorkflowRevisionService } from '../services/workflows/WorkflowRevisionService';
 import {
-  createProblemDetails,
-  StandardErrorCode,
-} from '@whatsap-automat/contracts';
-import { JwtRequest, resolveWhatsappCompanyId, toPositiveInt } from '../middleware/jwtAuth';
-import {
-  workflowTriggerService,
-  WorkflowTriggerService,
-} from '../services/workflows/WorkflowTriggerService';
-import {
-  workflowRevisionService,
-  WorkflowRevisionService,
-} from '../services/workflows/WorkflowRevisionService';
-import {
-  TriggerNotFoundError,
-  TriggerInactiveError,
-  WebhookAuthenticationError,
-  WorkflowNotPublishedError,
-  WorkflowNotFoundError,
-  WorkflowArchivedError,
   RevisionNotFoundError,
+  TriggerInactiveError,
+  TriggerNotFoundError,
+  WebhookAuthenticationError,
+  WorkflowArchivedError,
+  WorkflowIdempotencyConflictError,
+  WorkflowInputError,
+  WorkflowNotFoundError,
+  WorkflowNotPublishedError,
+  WorkflowPolicyError,
 } from '../services/workflows/types';
 
-function getCorrelationId(req: Request): string {
-  return (
-    (req.headers?.['x-correlation-id'] as string) ||
-    (req.headers?.['x-request-id'] as string) ||
-    'none'
-  );
+function getActor(req: Request, needsAdmin = true) {
+  const actor = req.tenantContext;
+  if (!actor?.userId || (needsAdmin && actor.role !== 'ADMIN')) {
+    throw new WorkflowPolicyError(needsAdmin ? 'Administrator access is required.' : 'Authenticated tenant identity is required.');
+  }
+  if (req.body?.tenantId !== undefined && toPositiveInt(req.body.tenantId) !== actor.tenantId) {
+    throw new WorkflowPolicyError('Tenant ID in payload does not match the authenticated tenant.');
+  }
+  return actor;
 }
 
-function setProblemContentType(res: Response): void {
-  if (typeof res.setHeader === 'function') {
-    res.setHeader('Content-Type', 'application/problem+json');
+function readId(value: unknown, name: string): string {
+  if (typeof value !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(value)) {
+    throw new WorkflowInputError(`Invalid ${name}.`);
   }
+  return value;
+}
+
+function sendFailure(error: unknown, req: Request, res: Response, next: NextFunction): void {
+  let problem: { status: number; code: StandardErrorCode; title: string };
+  if (error instanceof WorkflowInputError) {
+    problem = { status: 400, code: StandardErrorCode.VALIDATION_ERROR, title: 'Validation Error' };
+  } else if (error instanceof WebhookAuthenticationError) {
+    problem = { status: 401, code: StandardErrorCode.UNAUTHORIZED, title: 'Unauthorized Webhook Trigger' };
+  } else if (error instanceof WorkflowPolicyError || error instanceof TriggerInactiveError) {
+    problem = { status: 403, code: StandardErrorCode.POLICY_DENIED, title: 'Workflow Access Denied' };
+  } else if (error instanceof TriggerNotFoundError || error instanceof WorkflowNotFoundError ||
+             error instanceof RevisionNotFoundError) {
+    problem = { status: 404, code: StandardErrorCode.NOT_FOUND, title: 'Workflow Resource Not Found' };
+  } else if (error instanceof WorkflowNotPublishedError || error instanceof WorkflowArchivedError ||
+             error instanceof WorkflowIdempotencyConflictError) {
+    problem = { status: 409, code: StandardErrorCode.CONFLICT, title: 'Workflow Conflict' };
+  } else {
+    const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
+    console.error('Workflow request failed', { code });
+    next(new Error('The workflow request could not be completed.'));
+    return;
+  }
+
+  const correlation = req.headers['x-correlation-id'] ?? req.headers['x-request-id'];
+  const correlationId = typeof correlation === 'string' && /^[a-zA-Z0-9_.:-]{1,128}$/.test(correlation) ? correlation : 'none';
+  res.setHeader('Content-Type', 'application/problem+json');
+  res.status(problem.status).json({
+    ...createProblemDetails({
+      code: problem.code,
+      title: problem.title,
+      detail: error.message,
+      instance: (req.originalUrl || req.url).split('?')[0],
+      correlationId,
+    }),
+    status: problem.status,
+  });
 }
 
 export class WorkflowController {
@@ -42,290 +76,115 @@ export class WorkflowController {
     private readonly revisionService: WorkflowRevisionService = workflowRevisionService
   ) {}
 
-  /**
-   * Channel-less Inbound Webhook (UC-06)
-   * POST /api/v1/workflows/triggers/webhook/:endpointKey
-   */
-  handleWebhookTrigger = async (
-    req: Request,
-    res: Response,
-    next: NextFunction
-  ): Promise<void> => {
-    const correlationId = getCorrelationId(req);
-    const instance = req.originalUrl || req.url;
-    const endpointKey = String(req.params?.endpointKey || '').trim();
-
-    if (!endpointKey || !/^[a-zA-Z0-9_\-]{3,128}$/.test(endpointKey)) {
-      setProblemContentType(res);
-      res.status(400).json(
-        createProblemDetails({
-          code: StandardErrorCode.VALIDATION_ERROR,
-          title: 'Invalid Endpoint Key',
-          detail:
-            'endpointKey must be 3-128 alphanumeric characters (hyphens and underscores allowed)',
-          instance,
-          correlationId,
-        })
-      );
-      return;
-    }
-
-    // Extract authorization token from headers or query
-    const headers = req.headers || {};
-    const authHeader = headers['authorization'];
-    const xToken = headers['x-webhook-token'] as string | undefined;
-    let token: string | undefined = undefined;
-
-    if (xToken) {
-      token = xToken;
-    } else if (authHeader && authHeader.startsWith('Bearer ')) {
-      token = authHeader.slice(7).trim();
-    } else if (typeof req.query?.token === 'string') {
-      token = req.query.token;
-    }
-
+  handleWebhookTrigger = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const result = await this.triggerService.processInboundWebhook(
-        endpointKey,
-        token,
-        headers,
-        req.body || {}
-      );
-
-      res.status(202).json({
-        status: 'accepted',
-        runId: result.runId,
-        workflowId: result.workflowId,
-        revisionId: result.revisionId,
-        idempotencyKey: result.idempotencyKey,
-        duplicate: result.duplicate,
-      });
-    } catch (err: any) {
-      setProblemContentType(res);
-
-      if (err instanceof TriggerNotFoundError) {
-        res.status(404).json(
-          createProblemDetails({
-            code: StandardErrorCode.NOT_FOUND,
-            title: 'Trigger Not Found',
-            detail: err.message,
-            instance,
-            correlationId,
-          })
-        );
-        return;
+      const endpointKey = readId(req.params.endpointKey, 'endpoint key');
+      if (endpointKey.length < 3) throw new WorkflowInputError('Endpoint key must contain at least three characters.');
+      const body = req.body ?? {};
+      if (typeof body !== 'object' || Array.isArray(body)) {
+        throw new WorkflowInputError('Webhook payload must be a JSON object.');
       }
-
-      if (err instanceof TriggerInactiveError) {
-        res.status(403).json(
-          createProblemDetails({
-            code: StandardErrorCode.POLICY_DENIED,
-            title: 'Trigger Inactive',
-            detail: err.message,
-            instance,
-            correlationId,
-          })
-        );
-        return;
-      }
-
-      if (err instanceof WebhookAuthenticationError) {
-        res.status(401).json(
-          createProblemDetails({
-            code: StandardErrorCode.UNAUTHORIZED,
-            title: 'Unauthorized Webhook Trigger',
-            detail: err.message,
-            instance,
-            correlationId,
-          })
-        );
-        return;
-      }
-
-      if (err instanceof WorkflowNotPublishedError) {
-        res.status(409).json(
-          createProblemDetails({
-            code: StandardErrorCode.CONFLICT,
-            title: 'Workflow Not Published',
-            detail: err.message,
-            instance,
-            correlationId,
-          })
-        );
-        return;
-      }
-
-      next(err);
+      const headerToken = req.headers['x-webhook-token'];
+      const token = typeof headerToken === 'string' ? headerToken.trim() : extractBearerToken(req.headers.authorization) ?? undefined;
+      const result = await this.triggerService.processInboundWebhook(endpointKey, token, req.headers, body);
+      res.status(202).json(result);
+    } catch (error) {
+      sendFailure(error, req, res, next);
     }
   };
 
-  /**
-   * Atomic Rollback Engine
-   * POST /api/v1/workflows/:id/rollback
-   */
-  rollbackWorkflow = async (
-    req: JwtRequest,
-    res: Response,
-    next: NextFunction
-  ): Promise<void> => {
-    const correlationId = getCorrelationId(req);
-    const instance = req.originalUrl || req.url;
-    const workflowId = String(req.params?.id || '').trim();
-
-    if (!workflowId) {
-      setProblemContentType(res);
-      res.status(400).json(
-        createProblemDetails({
-          code: StandardErrorCode.VALIDATION_ERROR,
-          title: 'Missing Workflow ID',
-          detail: 'Workflow ID parameter is required',
-          instance,
-          correlationId,
-        })
-      );
-      return;
-    }
-
-    let tenantId: number | null = null;
+  createWorkflow = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      tenantId = resolveWhatsappCompanyId(req);
-    } catch {
-      tenantId = req.tenantId || null;
+      const { tenantId } = getActor(req);
+      const draft = await this.revisionService.createWorkflow(tenantId, req.body ?? {});
+      res.status(201).json({ success: true, data: draft });
+    } catch (error) {
+      sendFailure(error, req, res, next);
     }
+  };
 
-    if (!tenantId) {
-      setProblemContentType(res);
-      res.status(403).json(
-        createProblemDetails({
-          code: StandardErrorCode.POLICY_DENIED,
-          title: 'Missing Tenancy Context',
-          detail: 'Authenticated tenant context could not be resolved',
-          instance,
-          correlationId,
-        })
-      );
-      return;
-    }
-
-    // Cross-tenant payload anti-spoofing check
-    if (req.body?.tenantId && toPositiveInt(req.body.tenantId) !== tenantId) {
-      setProblemContentType(res);
-      res.status(403).json(
-        createProblemDetails({
-          code: StandardErrorCode.POLICY_DENIED,
-          title: 'Cross-Tenant Access Denied',
-          detail: 'Tenant ID in payload does not match authenticated token',
-          instance,
-          correlationId,
-        })
-      );
-      return;
-    }
-
-    const targetRevisionNumber =
-      req.body?.targetRevisionNumber !== undefined && req.body?.targetRevisionNumber !== null
-        ? Number(req.body.targetRevisionNumber)
-        : undefined;
-    const targetRevisionId =
-      typeof req.body?.targetRevisionId === 'string'
-        ? req.body.targetRevisionId.trim()
-        : undefined;
-    const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
-
-    if (!reason || reason.length < 5) {
-      setProblemContentType(res);
-      res.status(400).json(
-        createProblemDetails({
-          code: StandardErrorCode.VALIDATION_ERROR,
-          title: 'Validation Error',
-          detail: 'reason is mandatory and must contain at least 5 characters',
-          instance,
-          correlationId,
-          invalidParams: [{ name: 'reason', reason: 'Must be at least 5 characters' }],
-        })
-      );
-      return;
-    }
-
-    if (targetRevisionNumber === undefined && !targetRevisionId) {
-      setProblemContentType(res);
-      res.status(400).json(
-        createProblemDetails({
-          code: StandardErrorCode.VALIDATION_ERROR,
-          title: 'Validation Error',
-          detail: 'Either targetRevisionNumber or targetRevisionId must be provided',
-          instance,
-          correlationId,
-          invalidParams: [
-            { name: 'targetRevisionNumber', reason: 'Missing target revision pointer' },
-          ],
-        })
-      );
-      return;
-    }
-
-    const userId = Number(req.user?.userId || req.user?.id || req.body?.userId) || 1;
-
+  createRevision = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
+      const { tenantId } = getActor(req);
+      const workflowId = readId(req.params.id, 'workflow ID');
+      const draft = await this.revisionService.createRevision(tenantId, workflowId, req.body?.dagGraph, req.body?.limits);
+      res.status(201).json({ success: true, data: draft });
+    } catch (error) {
+      sendFailure(error, req, res, next);
+    }
+  };
+
+  publishWorkflow = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const { tenantId } = getActor(req);
+      const workflowId = readId(req.params.id, 'workflow ID');
+      const revisionId = readId(req.body?.revisionId, 'revision ID');
+      const published = await this.revisionService.publishRevision(tenantId, workflowId, revisionId);
+      res.status(200).json({ success: true, data: published });
+    } catch (error) {
+      sendFailure(error, req, res, next);
+    }
+  };
+
+  createWebhookTrigger = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const { tenantId } = getActor(req);
+      const workflowId = readId(req.params.id, 'workflow ID');
+      const trigger = await this.revisionService.createWebhookTrigger(tenantId, workflowId);
+      res.setHeader('Cache-Control', 'private, no-store');
+      res.status(201).json({ success: true, data: trigger });
+    } catch (error) {
+      sendFailure(error, req, res, next);
+    }
+  };
+
+  setWebhookTriggerActive = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const { tenantId } = getActor(req);
+      const workflowId = readId(req.params.id, 'workflow ID');
+      const triggerId = readId(req.params.triggerId, 'trigger ID');
+      const isActive = req.body?.isActive;
+      if (typeof isActive !== 'boolean') throw new WorkflowInputError('isActive must be a boolean.');
+      const trigger = await this.revisionService.setWebhookTriggerActive(tenantId, workflowId, triggerId, isActive);
+      res.status(200).json({ success: true, data: trigger });
+    } catch (error) {
+      sendFailure(error, req, res, next);
+    }
+  };
+
+  getRun = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const { tenantId } = getActor(req, false);
+      const runId = readId(req.params.runId, 'workflow run ID');
+      const run = await this.revisionService.getRun(tenantId, runId);
+      if (!run) throw new WorkflowNotFoundError(runId);
+      res.setHeader('Cache-Control', 'private, no-store');
+      res.status(200).json({ success: true, data: run });
+    } catch (error) {
+      sendFailure(error, req, res, next);
+    }
+  };
+
+  rollbackWorkflow = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const { tenantId, userId } = getActor(req);
+      const workflowId = readId(req.params.id, 'workflow ID');
+      const body = req.body ?? {};
+      const reason = typeof body.reason === 'string' ? body.reason.trim() : '';
+      if (reason.length < 5 || reason.length > 500) {
+        throw new WorkflowInputError('Rollback reason must contain 5-500 characters.');
+      }
+      const targetRevisionNumber = body.targetRevisionNumber == null ? undefined : toPositiveInt(body.targetRevisionNumber);
+      const targetRevisionId = body.targetRevisionId == null ? undefined : readId(body.targetRevisionId, 'target revision ID');
+      if (targetRevisionNumber === null || (targetRevisionNumber === undefined && !targetRevisionId)) {
+        throw new WorkflowInputError('Specify a target revision ID or positive revision number.');
+      }
       const result = await this.revisionService.rollbackRevision(tenantId, workflowId, {
-        targetRevisionNumber,
-        targetRevisionId,
-        reason,
-        userId,
+        targetRevisionNumber, targetRevisionId, reason, userId,
       });
-
-      res.status(200).json({
-        success: true,
-        workflowId: result.workflowId,
-        previousRevisionId: result.previousRevisionId,
-        publishedRevisionId: result.publishedRevisionId,
-        targetRevisionNumber: result.targetRevisionNumber,
-        latencyMs: result.latencyMs,
-        updatedAt: result.updatedAt,
-      });
-    } catch (err: any) {
-      setProblemContentType(res);
-
-      if (err instanceof WorkflowNotFoundError) {
-        res.status(404).json(
-          createProblemDetails({
-            code: StandardErrorCode.NOT_FOUND,
-            title: 'Workflow Not Found',
-            detail: err.message,
-            instance,
-            correlationId,
-          })
-        );
-        return;
-      }
-
-      if (err instanceof WorkflowArchivedError) {
-        res.status(409).json(
-          createProblemDetails({
-            code: StandardErrorCode.CONFLICT,
-            title: 'Workflow Archived',
-            detail: err.message,
-            instance,
-            correlationId,
-          })
-        );
-        return;
-      }
-
-      if (err instanceof RevisionNotFoundError) {
-        res.status(404).json(
-          createProblemDetails({
-            code: StandardErrorCode.NOT_FOUND,
-            title: 'Revision Not Found',
-            detail: err.message,
-            instance,
-            correlationId,
-          })
-        );
-        return;
-      }
-
-      next(err);
+      res.status(200).json(result);
+    } catch (error) {
+      sendFailure(error, req, res, next);
     }
   };
 }

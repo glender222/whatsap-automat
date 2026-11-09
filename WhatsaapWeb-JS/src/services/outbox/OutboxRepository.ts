@@ -24,6 +24,7 @@ export interface OutboxRecord<TPayload = unknown> {
   max_retries: number;
   next_retry_at?: Date | null;
   last_error?: string | null;
+  lease_token?: string;
   created_at: Date;
   updated_at: Date;
 
@@ -57,6 +58,7 @@ export interface MarkStatusOptions {
   error?: string;
   nextRetryAt?: Date | null;
   incrementRetry?: boolean;
+  leaseToken?: string;
 }
 
 export function mapRowToOutboxRecord<T = unknown>(row: any): OutboxRecord<T> {
@@ -101,6 +103,7 @@ export function mapRowToOutboxRecord<T = unknown>(row: any): OutboxRecord<T> {
     max_retries: maxRetries,
     next_retry_at: nextRetryAt,
     last_error: lastError,
+    ...(row.lease_token ? { lease_token: String(row.lease_token) } : {}),
     created_at: createdAt,
     updated_at: updatedAt,
 
@@ -279,6 +282,26 @@ export class OutboxRepository {
     return this.uow.run(tenantId, execute);
   }
 
+  async claimWorkflowDispatch(tenantId: number, limit: number, leaseMs: number): Promise<OutboxRecord[]> {
+    return this.uow.run(tenantId, async (client) => {
+      const { rows } = await client.query(`
+        WITH claimable AS (
+          SELECT id FROM processing_outbox
+          WHERE tenant_id = $1 AND event_type = 'workflow.trigger.webhook'
+            AND status IN ('pending', 'processing', 'delivery_unknown')
+            AND (next_retry_at IS NULL OR next_retry_at <= NOW())
+          ORDER BY created_at, id LIMIT $2 FOR UPDATE SKIP LOCKED
+        )
+        UPDATE processing_outbox AS outbox
+        SET status = 'processing', lease_token = gen_random_uuid(), updated_at = NOW(),
+            next_retry_at = NOW() + ($3::integer * interval '1 millisecond')
+        FROM claimable WHERE outbox.id = claimable.id
+        RETURNING outbox.*
+      `, [tenantId, limit, leaseMs]);
+      return rows.map((row) => mapRowToOutboxRecord(row));
+    });
+  }
+
   /**
    * Updates status and retry metadata for an outbox record.
    */
@@ -290,14 +313,16 @@ export class OutboxRepository {
     client?: Queryable
   ): Promise<OutboxRecord<T> | null> {
     const execute = async (qClient: Queryable): Promise<OutboxRecord<T> | null> => {
+      const leaseAssignments = options?.leaseToken ? ', lease_token = NULL' : '';
+      const leaseCondition = options?.leaseToken ? "AND status = 'processing' AND lease_token = $7::uuid" : '';
       const sql = `
         UPDATE processing_outbox
         SET status = $1,
             last_error = CASE WHEN $2::text IS NOT NULL THEN $2 ELSE last_error END,
             next_retry_at = $3,
             retry_count = CASE WHEN $4 = true THEN retry_count + 1 ELSE retry_count END,
-            updated_at = NOW()
-        WHERE tenant_id = $5 AND id = $6
+            updated_at = NOW()${leaseAssignments}
+        WHERE tenant_id = $5 AND id = $6 ${leaseCondition}
         RETURNING *;
       `;
       const res = await qClient.query(sql, [
@@ -307,6 +332,7 @@ export class OutboxRepository {
         Boolean(options?.incrementRetry),
         tenantId,
         id,
+        ...(options?.leaseToken ? [options.leaseToken] : []),
       ]);
       if (res.rows && res.rows.length > 0) {
         return mapRowToOutboxRecord<T>(res.rows[0]);

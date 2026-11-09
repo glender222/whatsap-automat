@@ -1,6 +1,7 @@
 import { OutboxRecord, OutboxRepository, outboxRepository } from './OutboxRepository';
 import { getTemporalClient } from '../temporal/TemporalClientFactory';
 import { ITemporalClient } from '../temporal/types';
+import type { WorkflowDispatchService } from '../workflows/WorkflowDispatchService';
 
 export interface OutboxRelayDaemonOptions {
   outboxRepo?: OutboxRepository;
@@ -12,6 +13,8 @@ export interface OutboxRelayDaemonOptions {
   baseBackoffMs?: number;
   maxBackoffMs?: number;
   onError?: (err: unknown) => void;
+  workflowDispatch?: Pick<WorkflowDispatchService, 'getTenantIds' | 'prepare'>;
+  leaseMs?: number;
 }
 
 export interface DaemonMetrics {
@@ -70,6 +73,8 @@ export class OutboxRelayDaemon {
   private readonly baseBackoffMs: number;
   private readonly maxBackoffMs: number;
   private readonly onError?: (err: unknown) => void;
+  private readonly workflowDispatch?: OutboxRelayDaemonOptions['workflowDispatch'];
+  private readonly leaseMs: number;
 
   private metrics: DaemonMetrics = {
     isRunning: false,
@@ -98,6 +103,8 @@ export class OutboxRelayDaemon {
       this.baseBackoffMs = opts.baseBackoffMs ?? 1000;
       this.maxBackoffMs = opts.maxBackoffMs ?? 60_000;
       this.onError = opts.onError;
+      this.workflowDispatch = opts.workflowDispatch;
+      this.leaseMs = opts.leaseMs ?? 60_000;
     } else {
       this.outboxRepo = (outboxRepoOrOptions as OutboxRepository) || outboxRepository;
       this.temporalClientPromise = temporalClientPromise || getTemporalClient;
@@ -107,6 +114,7 @@ export class OutboxRelayDaemon {
       this.defaultTaskQueue = 'automation-workflows-v1';
       this.baseBackoffMs = 1000;
       this.maxBackoffMs = 60_000;
+      this.leaseMs = 60_000;
     }
   }
 
@@ -177,12 +185,15 @@ export class OutboxRelayDaemon {
    * Otherwise processes for all configured tenantIds.
    */
   async processBatch(specificTenantId?: number): Promise<number> {
-    const tenantsToPoll = specificTenantId !== undefined ? [specificTenantId] : this.tenantIds;
+    const tenantsToPoll = specificTenantId !== undefined ? [specificTenantId]
+      : this.workflowDispatch ? await this.workflowDispatch.getTenantIds() : this.tenantIds;
     let totalClaimedAndProcessed = 0;
 
     for (const tenantId of tenantsToPoll) {
       // 1. Claim records using FOR UPDATE SKIP LOCKED
-      const claimedRecords = await this.outboxRepo.claimPending(tenantId, this.batchSize);
+      const claimedRecords = this.workflowDispatch
+        ? await this.outboxRepo.claimWorkflowDispatch(tenantId, this.batchSize, this.leaseMs)
+        : await this.outboxRepo.claimPending(tenantId, this.batchSize);
       if (!claimedRecords || claimedRecords.length === 0) {
         continue;
       }
@@ -205,40 +216,49 @@ export class OutboxRelayDaemon {
   async dispatchRecord(
     tenantId: number,
     record: OutboxRecord
-  ): Promise<'dispatched' | 'delivery_unknown' | 'dead_letter'> {
+  ): Promise<'dispatched' | 'delivery_unknown' | 'dead_letter' | 'lease_lost'> {
     const idempotencyKey = record.idempotency_key || record.idempotencyKey || record.id;
     const workflowId = `wf_${tenantId}_${idempotencyKey}`;
     const payload = (record.payload as Record<string, unknown>) || {};
     const taskQueue = (payload.taskQueue as string) || this.defaultTaskQueue;
     const workflowType = (payload.workflowType as string) || record.event_type || 'DurableAutomationWorkflow';
+    const leaseToken = record.lease_token;
+    const markDispatched = async () => {
+      if (leaseToken) return this.outboxRepo.markStatus(tenantId, record.id, 'dispatched', { leaseToken });
+      return this.outboxRepo.markDispatched(tenantId, record.id);
+    };
 
     try {
       const client = await this.temporalClientPromise();
 
-      // Trigger workflow execution idempotently
-      await client.workflow.start(workflowType, {
-        workflowId,
-        taskQueue,
-        args: [
-          {
+      if (this.workflowDispatch) {
+        const dispatch = await this.workflowDispatch.prepare(tenantId, record);
+        await client.workflow.start(dispatch.workflowType, dispatch.options);
+      } else {
+        await client.workflow.start(workflowType, {
+          workflowId,
+          taskQueue,
+          args: [{
             tenantId,
             workflowId,
             correlationId: record.correlation_id || record.correlationId,
             eventPayload: payload,
             eventType: record.event_type || record.eventType,
             eventId: record.event_id || record.eventId,
-          },
-        ],
-      });
+          }],
+        });
+      }
 
       // Mark outbox dispatched on successful initiation
-      await this.outboxRepo.markDispatched(tenantId, record.id);
+      const marked = await markDispatched();
+      if (leaseToken && !marked) return 'lease_lost';
       this.metrics.totalDispatched++;
       return 'dispatched';
     } catch (err: any) {
       // 1. Check for idempotent deduplication: workflow already exists in Temporal
-      if (isAlreadyStartedError(err)) {
-        await this.outboxRepo.markDispatched(tenantId, record.id);
+      if (this.workflowDispatch ? err?.name === 'WorkflowExecutionAlreadyStartedError' : isAlreadyStartedError(err)) {
+        const marked = await markDispatched();
+        if (leaseToken && !marked) return 'lease_lost';
         this.metrics.totalDispatched++;
         return 'dispatched';
       }
@@ -250,7 +270,10 @@ export class OutboxRelayDaemon {
       // 2. Max retries exceeded or permanent failure -> Dead Letter
       if (retryCount >= maxRetries || isPermanent) {
         const errorMsg = `Permanent dispatch failure or max retries exceeded: ${err.message}`;
-        await this.outboxRepo.markDeadLetter(tenantId, record.id, errorMsg);
+        const marked = leaseToken
+          ? await this.outboxRepo.markStatus(tenantId, record.id, 'dead_letter', { error: errorMsg, incrementRetry: true, leaseToken })
+          : await this.outboxRepo.markDeadLetter(tenantId, record.id, errorMsg);
+        if (leaseToken && !marked) return 'lease_lost';
         this.metrics.totalDeadLetter++;
         this.metrics.lastError = errorMsg;
         return 'dead_letter';
@@ -261,11 +284,13 @@ export class OutboxRelayDaemon {
       const nextRetryAt = new Date(Date.now() + delayMs);
       const transientErrorMsg = `Temporal dispatch failed (attempt ${retryCount}/${maxRetries}): ${err.message}`;
 
-      await this.outboxRepo.markStatus(tenantId, record.id, 'delivery_unknown', {
+      const marked = await this.outboxRepo.markStatus(tenantId, record.id, 'delivery_unknown', {
         error: transientErrorMsg,
         nextRetryAt,
         incrementRetry: true,
+        ...(leaseToken ? { leaseToken } : {}),
       });
+      if (leaseToken && !marked) return 'lease_lost';
 
       this.metrics.totalDeliveryUnknown++;
       this.metrics.lastError = transientErrorMsg;

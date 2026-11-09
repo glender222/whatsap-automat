@@ -42,6 +42,8 @@ export interface CheckpointInput {
   runId: string;
   tenantId: number;
   workflowId?: string;
+  temporalWorkflowId?: string;
+  temporalRunId?: string;
   currentStep: string;
   stepCount: number;
   stateSnapshot: Record<string, unknown>;

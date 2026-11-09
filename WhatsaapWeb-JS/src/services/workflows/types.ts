@@ -52,6 +52,15 @@ export class WebhookAuthenticationError extends Error {
   }
 }
 
+export class WorkflowInputError extends Error {}
+export class WorkflowPolicyError extends Error {}
+
+export class WorkflowIdempotencyConflictError extends Error {
+  constructor() {
+    super('The webhook idempotency key has already been used with a different payload.');
+  }
+}
+
 export class WorkflowNotPublishedError extends Error {
   readonly code = 'WORKFLOW_NOT_PUBLISHED';
   constructor(workflowId: string) {

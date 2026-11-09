@@ -7,12 +7,16 @@ export default function createWorkflowRoutes(
   controller: WorkflowController = workflowController
 ): Router {
   const router = Router();
+  const authenticatedTenant = [requireJwt, tenantContext({ allowSandbox: false })];
 
-  // 1. Channel-less Inbound Webhook (UC-06) — Public / Token-gated
   router.post('/triggers/webhook/:endpointKey', controller.handleWebhookTrigger);
-
-  // 2. Atomic Rollback Engine — Authenticated via JWT & Tenant Context
-  router.post('/:id/rollback', requireJwt, tenantContext(), controller.rollbackWorkflow);
+  router.get('/runs/:runId', ...authenticatedTenant, controller.getRun);
+  router.post('/', ...authenticatedTenant, controller.createWorkflow);
+  router.post('/:id/revisions', ...authenticatedTenant, controller.createRevision);
+  router.post('/:id/publish', ...authenticatedTenant, controller.publishWorkflow);
+  router.post('/:id/triggers/webhook', ...authenticatedTenant, controller.createWebhookTrigger);
+  router.patch('/:id/triggers/:triggerId', ...authenticatedTenant, controller.setWebhookTriggerActive);
+  router.post('/:id/rollback', ...authenticatedTenant, controller.rollbackWorkflow);
 
   return router;
 }

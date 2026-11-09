@@ -131,9 +131,11 @@ export class TemporalClientFactory {
    * Cleans up the active client connection and resets singleton state.
    */
   async close(): Promise<void> {
-    if (this.clientInstance && typeof this.clientInstance.close === 'function') {
+    const connection = this.clientInstance?.connection as { close?: () => Promise<void> } | undefined;
+    if (this.clientInstance) {
       try {
-        await this.clientInstance.close();
+        if (typeof this.clientInstance.close === 'function') await this.clientInstance.close();
+        else await connection?.close?.();
       } catch {
         // Ignore close error on teardown
       }

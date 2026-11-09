@@ -11,11 +11,11 @@ import { humanApprovalSignal, cancelWorkflowSignal, ApprovalDecisionInput } from
 import { getWorkflowRunStateQuery, WorkflowRunState, WorkflowRunHistoryItem } from './queries';
 import type { DurableWorkflowInput, DurableWorkflowResult } from './types';
 import type { WorkflowNodeDefinitionV1, WorkflowEdgeDefinitionV1 } from '@whatsap-automat/contracts';
+import { evaluateCondition } from './evaluateCondition';
 
 const {
   executeHttpRequestActivity,
   executeBusinessEffectActivity,
-  recordWorkflowRunCheckpointActivity,
 } = proxyActivities<typeof activities>({
   startToCloseTimeout: '1m',
   retry: {
@@ -26,52 +26,10 @@ const {
   },
 });
 
-function evaluateCondition(
-  expression: string | undefined,
-  variables: Record<string, unknown>
-): boolean {
-  if (!expression || expression.trim().length === 0) {
-    return true;
-  }
-
-  // Simple safe expression evaluator (no eval or Function constructor)
-  // Supports: "var > 1000", "var == value", "var != value", "var < 1000", "boolean_var"
-  const cleanExpr = expression.trim();
-
-  // Greater than / less than
-  const gtMatch = cleanExpr.match(/^([a-zA-Z0-9_.]+)\s*>\s*([0-9.]+)/);
-  if (gtMatch) {
-    const val = getNestedValue(variables, gtMatch[1]);
-    return typeof val === 'number' && val > Number(gtMatch[2]);
-  }
-
-  const ltMatch = cleanExpr.match(/^([a-zA-Z0-9_.]+)\s*<\s*([0-9.]+)/);
-  if (ltMatch) {
-    const val = getNestedValue(variables, ltMatch[1]);
-    return typeof val === 'number' && val < Number(ltMatch[2]);
-  }
-
-  // Equality
-  const eqMatch = cleanExpr.match(/^([a-zA-Z0-9_.]+)\s*===?\s*['"]?([^'"]+)['"]?/);
-  if (eqMatch) {
-    const val = String(getNestedValue(variables, eqMatch[1]));
-    return val === eqMatch[2];
-  }
-
-  // Truthy check on variable
-  const val = getNestedValue(variables, cleanExpr);
-  return Boolean(val);
-}
-
-function getNestedValue(obj: Record<string, unknown>, path: string): unknown {
-  const parts = path.split('.');
-  let current: any = obj;
-  for (const part of parts) {
-    if (current === undefined || current === null) return undefined;
-    current = current[part];
-  }
-  return current;
-}
+const { recordWorkflowRunCheckpointActivity } = proxyActivities<typeof activities>({
+  startToCloseTimeout: '10s',
+  retry: { initialInterval: '500ms', maximumInterval: '10s' },
+});
 
 /**
  * Generic, deterministic DAG Workflow Engine for Whatsap-Automat
@@ -146,20 +104,26 @@ export async function DurableAutomationWorkflow(
     lastUpdated: new Date().toISOString(),
   }));
 
-  // Initial Checkpoint
-  try {
+  async function checkpoint(
+    currentStep: string,
+    checkpointStatus: WorkflowRunState['status'],
+    errorDetails?: Record<string, unknown>
+  ): Promise<void> {
     await recordWorkflowRunCheckpointActivity({
       runId: input.runId,
       tenantId: input.tenantId,
       workflowId: input.workflowId,
-      currentStep: currentNode ? currentNode.id : 'start',
-      stepCount: 0,
+      temporalWorkflowId: info.workflowId,
+      temporalRunId: info.runId,
+      currentStep,
+      stepCount,
       stateSnapshot: variables,
-      status: 'running',
+      status: checkpointStatus,
+      errorDetails,
     });
-  } catch {
-    // Non-fatal if checkpoint activity fails during replay or testing harness
   }
+
+  await checkpoint(currentNode?.id || 'start', 'running');
 
   // 3. DAG Execution Loop
   while (currentNode && currentNode.kind !== 'end' && !isCancelled) {
@@ -175,6 +139,7 @@ export async function DurableAutomationWorkflow(
         status: 'loop_limit_exceeded',
         timestamp: new Date().toISOString(),
       });
+      await checkpoint(currentNode.id, 'failed', { code: 'LOOP_LIMIT_EXCEEDED', message: err.message });
       throw err;
     }
 
@@ -200,16 +165,7 @@ export async function DurableAutomationWorkflow(
           Number(currentNode.config?.durationMs) ||
           (Number(currentNode.config?.seconds) ? Number(currentNode.config.seconds) * 1000 : 1000);
 
-        try {
-          await recordWorkflowRunCheckpointActivity({
-            runId: input.runId,
-            tenantId: input.tenantId,
-            currentStep: activeNodeId,
-            stepCount,
-            stateSnapshot: variables,
-            status: 'waiting_timer',
-          });
-        } catch {}
+        await checkpoint(activeNodeId, 'waiting_timer');
 
         await sleep(delayMs);
         status = 'running';
@@ -227,16 +183,7 @@ export async function DurableAutomationWorkflow(
           timeoutMs,
         };
 
-        try {
-          await recordWorkflowRunCheckpointActivity({
-            runId: input.runId,
-            tenantId: input.tenantId,
-            currentStep: activeNodeId,
-            stepCount,
-            stateSnapshot: variables,
-            status: 'waiting_approval',
-          });
-        } catch {}
+        await checkpoint(activeNodeId, 'waiting_approval');
 
         const signalReceived = await condition(() => stateHolder.approvalDecision !== null, timeoutMs);
 
@@ -297,17 +244,7 @@ export async function DurableAutomationWorkflow(
       }
     }
 
-    // Step Checkpoint
-    try {
-      await recordWorkflowRunCheckpointActivity({
-        runId: input.runId,
-        tenantId: input.tenantId,
-        currentStep: activeNodeId,
-        stepCount,
-        stateSnapshot: variables,
-        status: 'running',
-      });
-    } catch {}
+    await checkpoint(activeNodeId, isCancelled ? 'cancelled' : 'running');
 
     // Find outgoing edge
     const outgoingEdges: readonly WorkflowEdgeDefinitionV1[] = input.dagGraph.edges.filter(
@@ -336,16 +273,7 @@ export async function DurableAutomationWorkflow(
 
   // 4. Final Completion
   status = isCancelled ? 'cancelled' : 'completed';
-  try {
-    await recordWorkflowRunCheckpointActivity({
-      runId: input.runId,
-      tenantId: input.tenantId,
-      currentStep: 'completed',
-      stepCount,
-      stateSnapshot: variables,
-      status,
-    });
-  } catch {}
+  await checkpoint(status, status);
 
   historyTrace.push({
     nodeId: currentNode?.id || 'end',
