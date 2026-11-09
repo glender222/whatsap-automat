@@ -5,6 +5,8 @@ export type RootStackParamList = {
   ChatDetail: {
     chat: MobileConversation;
   };
+  Approvals: undefined;
+  ApprovalDetail: { approvalId: string };
 };
 
 export const DARK_THEME = {

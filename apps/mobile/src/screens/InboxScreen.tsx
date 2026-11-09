@@ -10,6 +10,8 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
+import ClipboardCheck from 'lucide-react-native/icons/clipboard-check';
 import LogOut from 'lucide-react-native/icons/log-out';
 import MessageSquare from 'lucide-react-native/icons/message-square';
 import Search from 'lucide-react-native/icons/search';
@@ -48,7 +50,19 @@ export function InboxScreen({ navigation }: Props) {
   const [loadingMore, setLoadingMore] = useState(false);
   const [canLoadMore, setCanLoadMore] = useState(false);
   const [error, setError] = useState('');
+  const [canReviewApprovals, setCanReviewApprovals] = useState(false);
   const offset = useRef(0);
+
+  useFocusEffect(useCallback(() => {
+    let active = true;
+    setCanReviewApprovals(false);
+    void apiClient.getCurrentWorkspace().then((workspace) => {
+      if (active) setCanReviewApprovals(workspace.capabilities.includes('approvals.review'));
+    }).catch(() => {
+      if (active) setCanReviewApprovals(false);
+    });
+    return () => { active = false; };
+  }, []));
 
   const load = useCallback(async () => {
     try {
@@ -119,6 +133,13 @@ export function InboxScreen({ navigation }: Props) {
             <LogOut size={20} color={colors.textSecondary} />
           </Pressable>
         </View>
+
+        {canReviewApprovals ? (
+          <Pressable style={styles.approvals} accessibilityRole="button" onPress={() => navigation.navigate('Approvals')}>
+            <ClipboardCheck size={18} color={colors.accent} />
+            <Text style={styles.action}>Aprobaciones</Text>
+          </Pressable>
+        ) : null}
 
         <View style={styles.search}>
           <Search color={colors.textMuted} size={18} />
@@ -217,6 +238,7 @@ const styles = StyleSheet.create({
   eyebrow: { color: colors.accent, fontSize: 11, fontWeight: '700', letterSpacing: 1.7 },
   title: { color: colors.textPrimary, fontSize: 25, fontWeight: '800' },
   iconButton: { width: 44, height: 44, borderRadius: 10, backgroundColor: colors.surface, justifyContent: 'center', alignItems: 'center' },
+  approvals: { minHeight: 44, alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, borderRadius: 10, backgroundColor: colors.surface },
   search: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, minHeight: 46, backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1, borderRadius: 10 },
   searchInput: { flex: 1, minHeight: 44, color: colors.textPrimary, fontSize: 16 },
   filters: { flexDirection: 'row', flexWrap: 'wrap', paddingVertical: 12, paddingHorizontal: 16, gap: 8 },

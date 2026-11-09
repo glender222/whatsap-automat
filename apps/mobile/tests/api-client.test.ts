@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { afterEach, beforeEach, test } from 'node:test';
 import { apiClient, handleUnauthorized, MobileApiError, normalizeServerUrl } from '../src/services/apiClient';
 import { authStorage, MemoryStorageBackend } from '../src/services/authStorage';
+import { canDecideMobileApproval } from '../src/services/approvalPolicy';
 
 const originalFetch = globalThis.fetch;
 const session = {
@@ -21,6 +22,64 @@ function json(status: number, body: unknown) {
     headers: { 'Content-Type': 'application/json' },
   });
 }
+
+const approval = {
+  id: 'approval-fixture', policyVersion: 7, risk: 'write', status: 'pending' as const,
+  expiresAt: '2026-11-20T10:00:00Z', createdAt: '2026-11-20T09:00:00Z',
+};
+
+test('reads canonical workspace capability and tenant-scoped approval list and detail with the signed session', async () => {
+  await authStorage.saveAuthSession(session);
+  globalThis.fetch = async (url, init) => {
+    assert.equal(new Headers(init?.headers).get('Authorization'), 'Bearer access-token');
+    assert.equal(new Headers(init?.headers).has('X-Tenant-Id'), false);
+    switch (url) {
+      case `${session.apiUrl}/api/v1/workspaces/current`: return json(200, { capabilities: ['approvals.review'] });
+      case `${session.apiUrl}/api/v1/approvals?status=pending&limit=50&offset=50`: return json(200, [approval]);
+      case `${session.apiUrl}/api/v1/approvals/${approval.id}`: return json(200, approval);
+      default: throw new Error(`Unexpected route ${url}`);
+    }
+  };
+  assert.deepEqual(await apiClient.getCurrentWorkspace(), { capabilities: ['approvals.review'] });
+  assert.deepEqual(await apiClient.listApprovals(50), [approval]);
+  assert.deepEqual(await apiClient.getApproval(approval.id), approval);
+});
+
+test('writes only the canonical decision and version, reuses the given key and preserves 409 and 410', async () => {
+  await authStorage.saveAuthSession(session);
+  const command = { approvalId: approval.id, decision: 'approved' as const, expectedVersion: approval.policyVersion, key: 'approval-key' };
+  let attempts = 0;
+  globalThis.fetch = async (url, init) => {
+    assert.equal(url, `${session.apiUrl}/api/v1/approvals/${approval.id}/decision`);
+    assert.equal(init?.method, 'POST');
+    assert.equal(new Headers(init?.headers).get('Idempotency-Key'), command.key);
+    assert.deepEqual(JSON.parse(String(init?.body)), { decision: 'approved', expectedVersion: 7 });
+    attempts++;
+    if (attempts === 1) throw new TypeError('Fixture dropped connection');
+    if (attempts === 3) return json(409, { detail: 'Approval changed' });
+    if (attempts === 4) return json(410, { detail: 'Approval expired' });
+    return json(200, { approvalId: approval.id, status: 'approved' });
+  };
+  await assert.rejects(apiClient.decideApproval(command), TypeError);
+  assert.equal(attempts, 1);
+  assert.equal((await apiClient.decideApproval(command)).status, 'approved');
+  await assert.rejects(apiClient.decideApproval(command), { status: 409 });
+  await assert.rejects(apiClient.decideApproval(command), { status: 410 });
+});
+
+test('fails closed for high, financial, destructive or unknown risks and for stale or invalid details', () => {
+  const now = Date.parse('2026-11-20T09:30:00Z');
+  for (const risk of ['low', 'medium', 'read', 'write', 'send']) {
+    assert.equal(canDecideMobileApproval({ ...approval, risk }, now), true);
+  }
+  for (const risk of ['high', 'financial', 'destructive', 'unexpected-risk']) {
+    assert.equal(canDecideMobileApproval({ ...approval, risk }, now), false);
+  }
+  assert.equal(canDecideMobileApproval({ ...approval, status: 'rejected' }, now), false);
+  assert.equal(canDecideMobileApproval({ ...approval, policyVersion: 0 }, now), false);
+  assert.equal(canDecideMobileApproval({ ...approval, expiresAt: 'invalid' }, now), false);
+  assert.equal(canDecideMobileApproval(approval, Date.parse(approval.expiresAt)), false);
+});
 
 test('uses HTTPS except private development servers and strips the documented API suffix', () => {
   assert.equal(normalizeServerUrl(' HTTPS://EXAMPLE.COM:8443/api/v1/ '), 'https://example.com:8443');

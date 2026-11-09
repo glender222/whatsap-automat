@@ -4,12 +4,13 @@ import { DarkTheme, NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { apiClient, handleUnauthorized, type MobileTextCommand } from './src/services/apiClient';
+import { apiClient, handleUnauthorized, type MobileApprovalCommand, type MobileTextCommand } from './src/services/apiClient';
 import { authStorage, type AuthSession } from './src/services/authStorage';
 import { SessionContext } from './src/services/sessionContext';
 import { SignInScreen } from './src/screens/SignInScreen';
 import { InboxScreen } from './src/screens/InboxScreen';
 import { ChatDetailScreen } from './src/screens/ChatDetailScreen';
+import { ApprovalDetailScreen, ApprovalsScreen } from './src/screens/ApprovalsScreen';
 import { DARK_THEME as colors, type RootStackParamList } from './src/types/navigation';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -31,6 +32,7 @@ export default function App() {
   const [storageError, setStorageError] = useState<'read' | 'clear' | null>(null);
   const [signInNotice, setSignInNotice] = useState('');
   const [pendingReplies, setPendingReplies] = useState(() => new Map<string, MobileTextCommand>());
+  const approvalAttempts = useRef(new Map<string, MobileApprovalCommand>());
   const currentSession = useRef<AuthSession | null>(null);
 
   function updateSession(value: AuthSession | null) {
@@ -50,6 +52,7 @@ export default function App() {
     setSession(undefined);
     setStorageError(null);
     setPendingReplies(new Map());
+    approvalAttempts.current.clear();
     try {
       await authStorage.clearAuthSession();
       updateSession(null);
@@ -109,11 +112,13 @@ export default function App() {
     screen = <SignInScreen onSignIn={signIn} notice={signInNotice} />;
   } else if (session) {
     screen = (
-      <SessionContext.Provider value={{ session, signOut, pendingReplies, rememberReply, forgetReply }}>
+      <SessionContext.Provider value={{ session, signOut, pendingReplies, rememberReply, forgetReply, approvalAttempts: approvalAttempts.current }}>
         <NavigationContainer theme={navigationTheme}>
           <Stack.Navigator screenOptions={{ headerShown: false }}>
             <Stack.Screen name="Inbox" component={InboxScreen} />
             <Stack.Screen name="ChatDetail" component={ChatDetailScreen} />
+            <Stack.Screen name="Approvals" component={ApprovalsScreen} />
+            <Stack.Screen name="ApprovalDetail" component={ApprovalDetailScreen} />
           </Stack.Navigator>
         </NavigationContainer>
       </SessionContext.Provider>

@@ -60,6 +60,31 @@ export interface MobileTextCommand {
 
 export type MobileSendOutcome = 'accepted' | 'failed' | 'unknown_delivery';
 
+export interface MobileApproval {
+  id: string;
+  policyVersion: number;
+  risk: string;
+  status: 'pending' | 'approved' | 'rejected' | 'expired' | 'revoked';
+  expiresAt: string;
+  createdAt: string;
+  details?: {
+    toolName: string;
+    summary: string;
+    parametersRedacted: Record<string, unknown>;
+  };
+}
+
+export type MobileApprovalDecision = 'approved' | 'rejected';
+
+export interface MobileApprovalCommand {
+  approvalId: string;
+  decision: MobileApprovalDecision;
+  expectedVersion: number;
+  key: string;
+}
+
+export const APPROVAL_PAGE_SIZE = 50;
+
 interface TakeoverResult {
   conversationId: string;
   newVersion: number;
@@ -145,7 +170,53 @@ async function authenticated<T>(path: string, init?: RequestInit, format?: Respo
   return request<T>(origin, path, init, session.accessToken, format);
 }
 
+function isMobileApproval(value: unknown): value is MobileApproval {
+  if (!value || typeof value !== 'object') return false;
+  const approval = value as Partial<MobileApproval>;
+  return typeof approval.id === 'string' && !!approval.id &&
+    typeof approval.risk === 'string' && typeof approval.expiresAt === 'string' &&
+    Number.isSafeInteger(approval.policyVersion) &&
+    ['pending', 'approved', 'rejected', 'expired', 'revoked'].includes(approval.status ?? '');
+}
+
 export const apiClient = {
+  getCurrentWorkspace(): Promise<{ capabilities: string[] }> {
+    return authenticated('/v1/workspaces/current', undefined, 'canonical');
+  },
+
+  async listApprovals(offset = 0): Promise<MobileApproval[]> {
+    const items = await authenticated<unknown>(
+      `/v1/approvals?status=pending&limit=${APPROVAL_PAGE_SIZE}&offset=${offset}`,
+      undefined,
+      'canonical',
+    );
+    if (!Array.isArray(items) || !items.every(isMobileApproval)) {
+      throw new MobileApiError(502, 'El servidor no devolvió una lista de aprobaciones válida.');
+    }
+    return items;
+  },
+
+  async getApproval(approvalId: string): Promise<MobileApproval> {
+    const approval = await authenticated<unknown>(`/v1/approvals/${encodeURIComponent(approvalId)}`, undefined, 'canonical');
+    if (!isMobileApproval(approval) || approval.id !== approvalId) {
+      throw new MobileApiError(502, 'El servidor no devolvió la aprobación solicitada.');
+    }
+    return approval;
+  },
+
+  async decideApproval(command: MobileApprovalCommand): Promise<{ approvalId: string; status: MobileApprovalDecision }> {
+    const { approvalId, decision, expectedVersion, key } = command;
+    const result = await authenticated<{ approvalId: string; status: MobileApprovalDecision }>(
+      `/v1/approvals/${encodeURIComponent(approvalId)}/decision`,
+      { method: 'POST', headers: { 'Idempotency-Key': key }, body: JSON.stringify({ decision, expectedVersion }) },
+      'canonical',
+    );
+    if (result.approvalId !== approvalId || result.status !== decision) {
+      throw new MobileApiError(502, 'El servidor no confirmó la decisión solicitada.');
+    }
+    return result;
+  },
+
   async signIn(server: string, email: string, password: string, allowLocalHttp = false): Promise<AuthSession> {
     const apiUrl = normalizeServerUrl(server, allowLocalHttp);
     const data = await request<LoginData>(apiUrl, '/auth/login', {
