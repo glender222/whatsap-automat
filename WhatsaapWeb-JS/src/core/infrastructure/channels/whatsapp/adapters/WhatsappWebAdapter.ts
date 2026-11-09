@@ -63,7 +63,7 @@ export class WhatsappWebAdapter implements MessageChannelPort {
   }
 
   async getStatus(): Promise<StatusResult> {
-    const status = this.legacyService.getStatus();
+    const status = await this.legacyService.getStatus();
     return {
       connected: !!status?.isConnected,
       authenticated: !!status?.isReady,

@@ -37,6 +37,7 @@ test('Meta en development puede usar el token de .env sin persistirlo si no hay 
   const { MetaAccountStore } = await import('../services/whatsapp/meta/MetaAccountStore');
   const originalEncryptionKey = config.security.tokenEncryptionKey;
   const originalAccessToken = config.meta.accessToken;
+  const originalPhone = config.meta.phoneNumberId;
   const envOnlyToken = 'test-only-env-access-token-not-for-production';
   const query = mock.fn(async (_sql: string, params: unknown[]) => ({
     rows: [{
@@ -50,23 +51,26 @@ test('Meta en development puede usar el token de .env sin persistirlo si no hay 
       token_last_four: params[8],
       webhook_verify_token: params[11],
       status: params[12],
+      metadata_json: JSON.parse(String(params[13])),
     }],
   }));
 
   try {
     config.security.tokenEncryptionKey = '';
     config.meta.accessToken = envOnlyToken;
+    config.meta.phoneNumberId = 'test-phone-number-id';
     const statements: string[] = [];
     const store = new MetaAccountStore({
       connect: async () => ({
         query: async (sql: string, params: unknown[]) => {
           statements.push(sql);
-          return params ? query(sql, params) : { rows: [] };
+          return sql.startsWith('INSERT INTO whatsapp_business_accounts') ? query(sql, params) : { rows: [] };
         },
         release() {},
       }),
     } as any);
-    const account = await store.ensureEnvAccount(1, {
+    const companyId = config.defaultCompanyId || 1;
+    const account = await store.ensureEnvAccount(companyId, {
       graphVersion: 'v25.0',
       phoneNumberId: 'test-phone-number-id',
       wabaId: 'test-waba-id',
@@ -75,16 +79,24 @@ test('Meta en development puede usar el token de .env sin persistirlo si no hay 
     });
 
     const parameters = query.mock.calls[0].arguments[1] as unknown[];
-    assert.deepEqual(statements.slice(0, 2), ['BEGIN', "SET LOCAL app.current_tenant_id = '1'"]);
+    assert.deepEqual(statements.slice(0, 2), ['BEGIN', `SET LOCAL app.current_tenant_id = '${companyId}'`]);
     assert.equal(statements.at(-1), 'COMMIT');
     assert.equal(parameters[6], 'META_WA_ACCESS_TOKEN');
     assert.equal(parameters[7], null);
     assert.equal(parameters[8], null);
     assert.equal(JSON.stringify(parameters).includes(envOnlyToken), false);
     assert.equal(store.toClientConfig(account as any, true)?.accessToken, envOnlyToken);
+    assert.equal(store.toClientConfig({ ...account, company_id: companyId + 1 }, true)?.accessToken, '');
+    assert.equal(store.toClientConfig({ ...account, phone_number_id: 'wrong-phone' }, true)?.accessToken, '');
+    assert.equal(store.toClientConfig({ ...account, status: 'disconnected' }, true), null);
+    assert.equal(store.toClientConfig(null, true), null);
+    const configFromEditedAccount = store.toClientConfig({ ...account, graph_version: 'wrong/account', waba_id: 'wrong' }, true);
+    assert.equal(configFromEditedAccount?.graphVersion, config.meta.graphVersion);
+    assert.equal(configFromEditedAccount?.wabaId, config.meta.wabaId);
   } finally {
     config.security.tokenEncryptionKey = originalEncryptionKey;
     config.meta.accessToken = originalAccessToken;
+    config.meta.phoneNumberId = originalPhone;
   }
 });
 

@@ -27,24 +27,28 @@ export function createWhatsAppRoutes(whatsappService: WhatsAppService): Router {
     res.json({ qr: whatsappService.getQR() || null, provider: whatsappService.provider });
   });
 
-  router.get('/me', (_req: Request, res: Response) => {
-    const info = whatsappService.getMyInfo();
-    if (!info) {
-      return res.status(503).json({
-        success: false,
-        error: 'WhatsApp no configurado o no disponible',
-      });
+  router.get('/me', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const info = await whatsappService.getMyInfo(resolveWhatsappCompanyId(req as JwtRequest));
+      if (!info) {
+        return res.status(503).json({
+          success: false,
+          error: 'WhatsApp no configurado o no disponible',
+        });
+      }
+      return res.json(info);
+    } catch (error) {
+      next(error);
     }
-    return res.json(info);
   });
 
-  router.post('/init', async (_req: Request, res: Response, next: NextFunction) => {
+  router.post('/init', async (req: Request, res: Response, next: NextFunction) => {
     try {
       await whatsappService.initialize();
       res.json({
         success: true,
         provider: whatsappService.provider,
-        status: whatsappService.getStatus(),
+        status: await whatsappService.getCompanyStatus(resolveWhatsappCompanyId(req as JwtRequest)),
       });
     } catch (error) {
       next(error);

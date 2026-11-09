@@ -2,6 +2,7 @@ import { Pool } from 'pg';
 import pool from '../../../config/database';
 import config from '../../../config/index';
 import { TenantScopedUoW } from '../../../db/TenantScopedUoW';
+import type { Queryable } from '../../../shared/UnitOfWorkPort';
 import { PgUnitOfWork } from '../../../shared/PgUnitOfWork';
 import SecretCipher from '../../security/SecretCipher';
 import { MetaCloudConfig } from './MetaCloudClient';
@@ -44,40 +45,57 @@ export class MetaAccountStore {
     return this.tenantWork.run(companyId, (client) => client.query(sql, parameters));
   }
 
-  async ensureEnvAccount(companyId: number, metaConfig: any): Promise<Record<string, unknown> | null> {
-    if (!metaConfig.phoneNumberId) return null;
-
-    const encryptedToken = metaConfig.accessToken && this.cipher
-      ? this.cipher.encrypt(metaConfig.accessToken)
-      : null;
-    return this.upsertConnection(companyId, {
-      phoneNumberId: metaConfig.phoneNumberId,
-      accessToken: metaConfig.accessToken || null,
-      wabaId: metaConfig.wabaId || null,
-      displayPhoneNumber: metaConfig.displayPhoneNumber || null,
-      businessPhoneNumber: metaConfig.displayPhoneNumber || null,
-      graphVersion: metaConfig.graphVersion || 'v25.0',
-      webhookVerifyToken: metaConfig.webhookVerifyToken || null,
-      status: metaConfig.accessToken ? 'connected' : 'missing_token',
-      metadata: { source: 'env' },
-    }, encryptedToken, { preserveExistingToken: true });
+  private changeConnections<T>(companyId: number, change: (client: Queryable) => Promise<T>) {
+    return this.tenantWork.run(companyId, async (client) => {
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended('meta-company-connection:' || $1::text, 0))", [companyId]);
+      return change(client);
+    });
   }
 
-  async upsertConnection(
-    companyId: number,
-    input: MetaConnectionInput,
-    preEncryptedToken?: string | null,
-    options: { preserveExistingToken?: boolean } = {}
-  ): Promise<Record<string, unknown>> {
-    const encryptedToken = preEncryptedToken !== undefined
-      ? preEncryptedToken
-      : input.accessToken && this.cipher
-        ? this.cipher.encrypt(input.accessToken)
-        : null;
+  async ensureEnvAccount(companyId: number, metaConfig: MetaCloudConfig): Promise<Record<string, unknown> | null> {
+    if (companyId !== (config.defaultCompanyId || 1) || !metaConfig.phoneNumberId ||
+        metaConfig.phoneNumberId !== config.meta.phoneNumberId) return null;
+
+    try {
+      return await this.persistConnection(companyId, {
+        phoneNumberId: metaConfig.phoneNumberId,
+        accessToken: metaConfig.accessToken || null,
+        wabaId: metaConfig.wabaId || null,
+        displayPhoneNumber: metaConfig.displayPhoneNumber || null,
+        businessPhoneNumber: metaConfig.displayPhoneNumber || null,
+        graphVersion: metaConfig.graphVersion || 'v25.0',
+        webhookVerifyToken: metaConfig.webhookVerifyToken || null,
+        status: metaConfig.accessToken ? 'connected' : 'missing_token',
+        metadata: { source: 'env' },
+      }, true);
+    } catch (error) {
+      const failure = error as { code?: string; constraint?: string } | undefined;
+      if (failure?.code === '23505' && failure.constraint === 'uq_whatsapp_accounts_provider_phone_active') return null;
+      throw error;
+    }
+  }
+
+  async upsertConnection(companyId: number, input: MetaConnectionInput): Promise<Record<string, unknown>> {
+    if (input.accessToken && !this.cipher) {
+      throw Object.assign(new Error('El cifrado de credenciales de WhatsApp no está disponible.'), {
+        statusCode: 503, code: 'META_CREDENTIAL_ENCRYPTION_UNAVAILABLE',
+      });
+    }
+    const account = await this.persistConnection(companyId, input, false);
+    if (!account) {
+      throw Object.assign(new Error('Para reconectar WhatsApp Business, introduce un token.'), {
+        statusCode: 409, code: 'META_RECONNECTION_TOKEN_REQUIRED',
+      });
+    }
+    return account;
+  }
+
+  private async persistConnection(companyId: number, input: MetaConnectionInput, bootstrap: boolean): Promise<Record<string, unknown> | null> {
+    const encryptedToken = input.accessToken && this.cipher ? this.cipher.encrypt(input.accessToken) : null;
     const tokenLastFour = encryptedToken ? lastFour(input.accessToken) : null;
     const status = input.status || (input.accessToken ? 'connected' : 'missing_token');
 
-    const result = await this.query(companyId,
+    const result = await this.changeConnections(companyId, (client) => client.query(
       `INSERT INTO whatsapp_business_accounts (
          company_id, provider, waba_id, phone_number_id,
          display_phone_number, business_phone_number, graph_version,
@@ -85,14 +103,17 @@ export class MetaAccountStore {
          token_configured_at, app_id, meta_business_id, webhook_verify_token,
          status, connected_at, disconnected_at, metadata_json, updated_at
        )
-       VALUES (
-         $1, 'meta-cloud', $2, $3,
+       SELECT
+         $1::integer, 'meta-cloud', $2, $3::varchar,
          $4, $5, $6,
          $7, $8, $9,
          CASE WHEN $8::text IS NOT NULL THEN NOW() ELSE NULL END,
          $10, $11, $12,
          $13::varchar(50), CASE WHEN $13::varchar(50) IN ('connected', 'configured') THEN NOW() ELSE NULL END,
          NULL, $14::jsonb, NOW()
+       WHERE NOT $15::boolean OR NOT EXISTS (
+         SELECT 1 FROM whatsapp_business_accounts
+         WHERE company_id = $1 AND provider = 'meta-cloud' AND phone_number_id <> $3::varchar
        )
        ON CONFLICT (company_id, provider, phone_number_id)
        DO UPDATE SET
@@ -100,23 +121,10 @@ export class MetaAccountStore {
          display_phone_number = COALESCE(EXCLUDED.display_phone_number, whatsapp_business_accounts.display_phone_number),
          business_phone_number = COALESCE(EXCLUDED.business_phone_number, whatsapp_business_accounts.business_phone_number),
          graph_version = COALESCE(EXCLUDED.graph_version, whatsapp_business_accounts.graph_version),
-         token_secret_ref = CASE
-           WHEN $15::boolean AND whatsapp_business_accounts.access_token_encrypted IS NOT NULL
-             THEN whatsapp_business_accounts.token_secret_ref
-           ELSE COALESCE(EXCLUDED.token_secret_ref, whatsapp_business_accounts.token_secret_ref)
-         END,
-         access_token_encrypted = CASE
-           WHEN $15::boolean AND whatsapp_business_accounts.access_token_encrypted IS NOT NULL
-             THEN whatsapp_business_accounts.access_token_encrypted
-           ELSE COALESCE(EXCLUDED.access_token_encrypted, whatsapp_business_accounts.access_token_encrypted)
-         END,
-         token_last_four = CASE
-           WHEN $15::boolean AND whatsapp_business_accounts.access_token_encrypted IS NOT NULL
-             THEN whatsapp_business_accounts.token_last_four
-           ELSE COALESCE(EXCLUDED.token_last_four, whatsapp_business_accounts.token_last_four)
-         END,
+         token_secret_ref = COALESCE(EXCLUDED.token_secret_ref, whatsapp_business_accounts.token_secret_ref),
+         access_token_encrypted = COALESCE(EXCLUDED.access_token_encrypted, whatsapp_business_accounts.access_token_encrypted),
+         token_last_four = COALESCE(EXCLUDED.token_last_four, whatsapp_business_accounts.token_last_four),
          token_configured_at = CASE
-           WHEN $15::boolean AND whatsapp_business_accounts.access_token_encrypted IS NOT NULL THEN whatsapp_business_accounts.token_configured_at
            WHEN EXCLUDED.access_token_encrypted IS NOT NULL THEN NOW()
            ELSE whatsapp_business_accounts.token_configured_at
          END,
@@ -124,17 +132,29 @@ export class MetaAccountStore {
          meta_business_id = COALESCE(EXCLUDED.meta_business_id, whatsapp_business_accounts.meta_business_id),
          webhook_verify_token = COALESCE(EXCLUDED.webhook_verify_token, whatsapp_business_accounts.webhook_verify_token),
          status = CASE
-           WHEN $15::boolean AND whatsapp_business_accounts.access_token_encrypted IS NOT NULL THEN whatsapp_business_accounts.status
-           ELSE EXCLUDED.status
+           WHEN $15::boolean OR EXCLUDED.access_token_encrypted IS NOT NULL THEN EXCLUDED.status
+           ELSE whatsapp_business_accounts.status
          END,
          connected_at = CASE
            WHEN EXCLUDED.status IN ('connected', 'configured') THEN COALESCE(whatsapp_business_accounts.connected_at, NOW())
            ELSE whatsapp_business_accounts.connected_at
          END,
-         disconnected_at = NULL,
+         disconnected_at = CASE WHEN EXCLUDED.access_token_encrypted IS NULL
+           THEN whatsapp_business_accounts.disconnected_at ELSE NULL END,
          last_error_message = NULL,
-         metadata_json = COALESCE(whatsapp_business_accounts.metadata_json, '{}'::jsonb) || EXCLUDED.metadata_json,
+         metadata_json = whatsapp_business_accounts.metadata_json || CASE
+           WHEN NOT $15::boolean AND EXCLUDED.access_token_encrypted IS NULL THEN EXCLUDED.metadata_json - 'source'
+           ELSE EXCLUDED.metadata_json END,
          updated_at = NOW()
+       WHERE (NOT $15::boolean AND (
+         EXCLUDED.access_token_encrypted IS NOT NULL OR
+         (whatsapp_business_accounts.status <> 'disconnected' AND whatsapp_business_accounts.disconnected_at IS NULL)
+       )) OR (
+         $15::boolean AND whatsapp_business_accounts.status IN ('connected', 'configured', 'missing_token')
+         AND whatsapp_business_accounts.disconnected_at IS NULL
+         AND whatsapp_business_accounts.access_token_encrypted IS NULL
+         AND whatsapp_business_accounts.metadata_json ->> 'source' = 'env'
+       )
        RETURNING *`,
       [
         companyId,
@@ -143,7 +163,7 @@ export class MetaAccountStore {
         input.displayPhoneNumber || null,
         input.businessPhoneNumber || input.displayPhoneNumber || null,
         input.graphVersion || config.meta.graphVersion || 'v25.0',
-        encryptedToken ? 'db:encrypted' : 'META_WA_ACCESS_TOKEN',
+        encryptedToken ? 'db:encrypted' : bootstrap ? 'META_WA_ACCESS_TOKEN' : null,
         encryptedToken,
         tokenLastFour,
         input.appId || null,
@@ -151,11 +171,11 @@ export class MetaAccountStore {
         input.webhookVerifyToken || null,
         status,
         json(input.metadata || {}),
-        Boolean(options.preserveExistingToken),
+        bootstrap,
       ]
-    );
+    ));
 
-    return result.rows[0];
+    return result.rows[0] ?? null;
   }
 
   async getAccountForCompany(companyId: number): Promise<Record<string, any> | null> {
@@ -164,9 +184,8 @@ export class MetaAccountStore {
        FROM whatsapp_business_accounts
        WHERE company_id = $1
          AND provider = 'meta-cloud'
-         AND status <> 'disconnected'
        ORDER BY
-         CASE status WHEN 'connected' THEN 0 WHEN 'configured' THEN 1 WHEN 'missing_token' THEN 2 ELSE 3 END,
+         CASE status WHEN 'connected' THEN 0 WHEN 'configured' THEN 1 WHEN 'missing_token' THEN 2 WHEN 'disconnected' THEN 4 ELSE 3 END,
          updated_at DESC
        LIMIT 1`,
       [companyId]
@@ -179,7 +198,7 @@ export class MetaAccountStore {
       `SELECT *
        FROM whatsapp_business_accounts
        WHERE company_id = $1 AND phone_number_id = $2 AND provider = 'meta-cloud'
-         AND status IN ('connected', 'configured')`,
+         AND status IN ('connected', 'configured') AND disconnected_at IS NULL`,
       [companyId, phoneNumberId]
     );
     return result.rows[0] ?? null;
@@ -191,7 +210,7 @@ export class MetaAccountStore {
       const { rows } = await client.query(
         `SELECT company_id
          FROM whatsapp_business_accounts
-         WHERE provider = 'meta-cloud' AND phone_number_id = $1 AND status <> 'disconnected'
+         WHERE provider = 'meta-cloud' AND phone_number_id = $1 AND status <> 'disconnected' AND disconnected_at IS NULL
          LIMIT 2`,
         [phoneNumberId]
       );
@@ -200,14 +219,28 @@ export class MetaAccountStore {
   }
 
   async disconnect(companyId: number): Promise<void> {
-    await this.query(companyId,
-      `UPDATE whatsapp_business_accounts
-       SET status = 'disconnected',
-           disconnected_at = NOW(),
-           updated_at = NOW()
-       WHERE company_id = $1 AND provider = 'meta-cloud'`,
-      [companyId]
-    );
+    await this.changeConnections(companyId, async (client) => {
+      const result = await client.query(
+        `UPDATE whatsapp_business_accounts
+         SET status = 'disconnected',
+             disconnected_at = COALESCE(disconnected_at, NOW()),
+             access_token_encrypted = NULL,
+             token_secret_ref = NULL,
+             token_last_four = NULL,
+             token_configured_at = NULL,
+             updated_at = NOW()
+         WHERE company_id = $1 AND provider = 'meta-cloud'`,
+        [companyId],
+      );
+      // A concurrent first bootstrap must also honor an explicit disconnect.
+      if (result.rowCount === 0 && companyId === (config.defaultCompanyId || 1) && config.meta.phoneNumberId) {
+        await client.query(
+          `INSERT INTO whatsapp_business_accounts (company_id, provider, phone_number_id, status, disconnected_at)
+           VALUES ($1, 'meta-cloud', $2, 'disconnected', NOW())`,
+          [companyId, config.meta.phoneNumberId],
+        );
+      }
+    });
   }
 
   async recordLastError(companyId: number, message: string | null): Promise<void> {
@@ -223,21 +256,17 @@ export class MetaAccountStore {
   }
 
   toClientConfig(account: Record<string, any> | null, fallbackAllowed = false): MetaCloudConfig | null {
-    if (!account) {
-      if (!fallbackAllowed || !config.meta.phoneNumberId) return null;
-      return config.meta;
-    }
+    if (!account || account.status === 'disconnected' || account.disconnected_at ||
+        (fallbackAllowed && !['connected', 'configured'].includes(account.status))) return null;
 
-    let accessToken = '';
-    if (account.access_token_encrypted && this.cipher) {
-      accessToken = this.cipher.decrypt(account.access_token_encrypted);
-    } else if (fallbackAllowed) {
-      accessToken = config.meta.accessToken || '';
+    if (fallbackAllowed && !account.access_token_encrypted) {
+      const accessToken = this.envAccessToken(account);
+      if (accessToken) return { ...config.meta, accessToken, displayPhoneNumber: account.display_phone_number || config.meta.displayPhoneNumber };
     }
 
     return {
       graphVersion: account.graph_version || config.meta.graphVersion,
-      accessToken,
+      accessToken: account.access_token_encrypted ? this.cipher?.decrypt(account.access_token_encrypted) || '' : '',
       phoneNumberId: account.phone_number_id,
       wabaId: account.waba_id || undefined,
       displayPhoneNumber: account.display_phone_number || undefined,
@@ -245,6 +274,12 @@ export class MetaAccountStore {
       appSecret: config.meta.appSecret,
       requestTimeoutMs: config.meta.requestTimeoutMs,
     };
+  }
+
+  private envAccessToken(account: Record<string, any>): string {
+    return !this.cipher && account.provider === 'meta-cloud' && account.company_id === (config.defaultCompanyId || 1) &&
+      account.phone_number_id === config.meta.phoneNumberId && account.metadata_json?.source === 'env' &&
+      account.token_secret_ref === 'META_WA_ACCESS_TOKEN' ? config.meta.accessToken || '' : '';
   }
 
   sanitize(account: Record<string, any> | null): Record<string, unknown> | null {
@@ -261,7 +296,8 @@ export class MetaAccountStore {
       appId: account.app_id,
       businessId: account.meta_business_id,
       status: account.status,
-      tokenConfigured: Boolean(account.access_token_encrypted || account.token_secret_ref),
+      tokenConfigured: ['connected', 'configured'].includes(account.status) && !account.disconnected_at &&
+        Boolean(account.access_token_encrypted ? this.cipher : this.envAccessToken(account)),
       tokenLastFour: account.token_last_four || null,
       tokenConfiguredAt: account.token_configured_at,
       webhookVerifyTokenConfigured: Boolean(account.webhook_verify_token || config.meta.webhookVerifyToken),

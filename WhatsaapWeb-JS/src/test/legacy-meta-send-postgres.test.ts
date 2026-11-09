@@ -20,8 +20,8 @@ const phone = '12025550145';
 const graphPhoneId = String(tenantA) + '73';
 const fixtureToken = 'test-only-legacy-graph-token';
 
-function token(tenantId: number) {
-  return jwt.sign({ companyId: tenantId, userId: tenantId + 2, rol: 'EMPLEADO' }, process.env.JWT_SECRET!);
+function token(tenantId: number, role = 'EMPLEADO') {
+  return jwt.sign({ companyId: tenantId, userId: tenantId + 2, rol: role }, process.env.JWT_SECRET!);
 }
 
 async function listen(t: TestContext, server: Server) {
@@ -63,11 +63,13 @@ test('legacy HTTP routes never send or persist free-form Meta text and preserve 
   const { requireChatTenantAccess } = await import('../middleware/resourceAuth');
   const { default: createChatCompatRoutes } = await import('../routes/chatCompatRoutes');
   const { default: createWhatsAppRoutes } = await import('../routes/whatsappRoutes');
+  const { default: createCompanyRoutes } = await import('../routes/companyRoutes');
   const { default: WhatsApp } = await import('../services/whatsappService');
   const { cleanRejectedUpload } = require('../middleware/legacyHumanSend');
   const createChatRoutes = require('../routes/chatRoutes');
   const createMediaRoutes = require('../routes/mediaRoutes');
   const ChatController = require('../controllers/chatController');
+  const AuthController = require('../controllers/authController');
   const multer = require('multer');
   const { errorHandler } = require('../middleware/errorHandler');
 
@@ -104,14 +106,17 @@ test('legacy HTTP routes never send or persist free-form Meta text and preserve 
   }[] = [];
   let failUpload = false;
   let failVideoSend = false;
+  const graphCredentials = new Map([[graphPhoneId, fixtureToken]]);
   const graph = await listen(t, createServer(async (req, res) => {
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(Buffer.from(chunk));
     const bytes = Buffer.concat(chunks);
     const payload = bytes.toString();
-    assert.equal(req.headers.authorization, `Bearer ${fixtureToken}`);
-    assert.equal(req.method, 'POST');
     const path = req.url || '';
+    const credential = graphCredentials.get(path.split('/')[2]);
+    assert.ok(credential);
+    assert.equal(req.headers.authorization, `Bearer ${credential}`);
+    assert.equal(req.method, 'POST');
     const upload = path.endsWith('/media');
     const data = upload ? undefined : JSON.parse(payload);
     let media;
@@ -135,7 +140,6 @@ test('legacy HTTP routes never send or persist free-form Meta text and preserve 
   t.mock.method(globalThis, 'fetch', async (input: string | URL | Request, init?: RequestInit) => {
     const target = new URL(String(input));
     assert.equal(target.origin, 'https://graph.facebook.com');
-    assert.equal(target.pathname.split('/')[2], graphPhoneId);
     return nativeFetch(`${graph}${target.pathname}${target.search}`, init);
   });
 
@@ -449,5 +453,174 @@ fs.truncateSync(file, ${overLimit});
     assert.equal(attempts[oversizedStart].media?.bytes.length, overLimit);
     assert.equal(attempts[oversizedStart + 1].type, 'document');
     await assertCleanUploadDir();
+  });
+
+  await t.test('disconnect revokes environment access across reads and restart until explicit reconnection', async (subtest) => {
+    const defaultTenant = tenantA + 10;
+    const envPhoneId = `${defaultTenant}81`;
+    const changedEnvPhoneId = `${defaultTenant}82`;
+    const otherPhoneId = `${defaultTenant}83`;
+    const tenantBPhoneId = `${defaultTenant}84`;
+    const envToken = 'test-only-env-credential';
+    const reconnectedToken = 'test-only-manual-credential';
+    const originalMeta = { ...config.meta };
+    const originalCompany = config.defaultCompanyId;
+    const originalCipher = config.security.tokenEncryptionKey;
+    subtest.after(() => {
+      Object.assign(config.meta, originalMeta);
+      config.defaultCompanyId = originalCompany;
+      config.security.tokenEncryptionKey = originalCipher;
+    });
+    config.defaultCompanyId = defaultTenant;
+    config.security.tokenEncryptionKey = '';
+    Object.assign(config.meta, { phoneNumberId: envPhoneId, accessToken: envToken, graphVersion: 'v25.0' });
+    graphCredentials.set(envPhoneId, envToken);
+    await uow.run(defaultTenant, async (client) => {
+      await client.query("INSERT INTO companies (id, name) VALUES ($1, 'Environment connection fixture')", [defaultTenant]);
+      await client.query("INSERT INTO conversations (company_id, channel, external_conversation_id) VALUES ($1, 'whatsapp', $2)",
+        [defaultTenant, phone]);
+    });
+
+    let service = new WhatsApp();
+    async function appFor(instance: WhatsAppService) {
+      const fixture = express();
+      fixture.use(express.json());
+      const controller = new AuthController(instance);
+      fixture.get('/status', requireJwt, controller.getStatusLegacy);
+      fixture.get('/me', requireJwt, controller.getMeLegacy);
+      fixture.use('/api/company', requireJwt, createCompanyRoutes(instance));
+      fixture.use('/api/whatsapp', requireJwt, createWhatsAppRoutes(instance));
+      fixture.use(errorHandler);
+      return listen(subtest, fixture.listen(0, '127.0.0.1'));
+    }
+    let origin = await appFor(service);
+    const connectionPath = '/api/company/whatsapp/connection';
+    async function request(path: string, companyId = defaultTenant, method = 'GET', body?: Record<string, unknown>, role = 'ADMIN') {
+      const response = await nativeFetch(`${origin}${path}`, {
+        method, headers: { authorization: `Bearer ${token(companyId, role)}`, 'content-type': 'application/json' },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+      return { status: response.status, body: await response.json() };
+    }
+    const settings = (companyId = defaultTenant) => request(connectionPath, companyId);
+    const sendTemplate = (companyId = defaultTenant) => request(whatsappAlias, companyId, 'POST', {
+      chatId: phone, template: 'approved_fixture', language: 'es',
+    });
+    const accountRow = () => uow.run(defaultTenant, async (client) => (await client.query(`
+      SELECT status, disconnected_at, access_token_encrypted, token_secret_ref, display_phone_number
+      FROM whatsapp_business_accounts WHERE company_id = $1 AND phone_number_id = $2
+    `, [defaultTenant, envPhoneId])).rows[0]);
+    const graphStart = attempts.length;
+    assert.equal((await settings()).body.data.status.accountStatus, 'missing_config');
+    assert.equal(await accountRow(), undefined);
+    assert.equal((await sendTemplate()).status, 409);
+    assert.equal(attempts.length, graphStart);
+
+    await service.initialize();
+    assert.equal((await settings()).body.data.status.configured, true);
+    assert.equal((await request('/status')).body.configured, true);
+    assert.equal((await request('/me')).body.id, envPhoneId);
+    assert.equal((await accountRow()).access_token_encrypted, null);
+    assert.equal((await accountRow()).token_secret_ref, 'META_WA_ACCESS_TOKEN');
+    assert.equal((await sendTemplate()).status, 200);
+    assert.equal(attempts.length, graphStart + 1);
+    assert.equal(attempts.at(-1)?.path, `/v25.0/${envPhoneId}/messages`);
+
+    await uow.run(tenantB, async (client) => {
+      await client.query(`
+        INSERT INTO whatsapp_business_accounts (company_id, phone_number_id, status, token_secret_ref, metadata_json)
+        VALUES ($1, $2, 'connected', 'META_WA_ACCESS_TOKEN', '{"source":"env"}')
+      `, [tenantB, tenantBPhoneId]);
+      await client.query("INSERT INTO conversations (company_id, channel, external_conversation_id) VALUES ($1, 'whatsapp', $2)",
+        [tenantB, phone]);
+    });
+    assert.equal((await settings(tenantB)).body.data.status.configured, false);
+    assert.equal((await request('/me', tenantB)).status, 503);
+    assert.equal((await sendTemplate(tenantB)).status, 409);
+    assert.equal(attempts.length, graphStart + 1);
+    assert.equal((await request(connectionPath, defaultTenant, 'DELETE', undefined, 'EMPLEADO')).status, 403);
+    assert.equal((await request(connectionPath, defaultTenant, 'DELETE')).status, 200);
+    const revoked = await accountRow();
+    assert.equal(revoked.status, 'disconnected');
+    assert.equal(revoked.token_secret_ref, null);
+    assert.ok(revoked.disconnected_at instanceof Date);
+    assert.equal((await settings()).body.data.connection, null);
+    assert.equal((await settings()).body.data.status.accountStatus, 'disconnected');
+    assert.equal((await request('/status')).body.connected, false);
+    assert.equal((await request('/api/whatsapp/me')).status, 503);
+    assert.equal((await request('/api/whatsapp/init', defaultTenant, 'POST', {})).body.status.connected, false);
+    assert.equal((await sendTemplate()).status, 409);
+    assert.equal(attempts.length, graphStart + 1);
+
+    service = new WhatsApp();
+    await service.initialize();
+    origin = await appFor(service);
+    assert.equal((await settings()).body.data.status.accountStatus, 'disconnected');
+    assert.equal((await request(connectionPath, defaultTenant, 'POST', { phoneNumberId: envPhoneId })).status, 409);
+    assert.equal((await sendTemplate()).status, 409);
+    config.meta.phoneNumberId = changedEnvPhoneId;
+    await new WhatsApp().initialize();
+    const scopedPhones = () => uow.run(defaultTenant, async (client) => (await client.query(`
+      SELECT phone_number_id FROM whatsapp_business_accounts WHERE company_id = $1 ORDER BY phone_number_id
+    `, [defaultTenant])).rows);
+    assert.deepEqual(await scopedPhones(), [{ phone_number_id: envPhoneId }]);
+    assert.deepEqual(await accountRow(), revoked);
+
+    config.meta.phoneNumberId = envPhoneId;
+    assert.equal((await request(connectionPath, defaultTenant, 'POST', { phoneNumberId: otherPhoneId })).status, 200);
+    assert.equal((await settings()).body.data.status.configured, false);
+    assert.equal((await sendTemplate()).status, 409);
+    assert.equal(attempts.length, graphStart + 1);
+
+    config.security.tokenEncryptionKey = originalCipher;
+    service = new WhatsApp();
+    await service.initialize();
+    origin = await appFor(service);
+    assert.equal((await settings()).body.data.status.configured, false);
+    const connected = await request(connectionPath, defaultTenant, 'POST', {
+      phoneNumberId: envPhoneId, accessToken: reconnectedToken, graphVersion: 'v25.0',
+    });
+    assert.equal(connected.status, 200, JSON.stringify(connected.body));
+    assert.equal(JSON.stringify(connected.body).includes(reconnectedToken), false);
+    assert.equal((await settings()).body.data.status.configured, true);
+    assert.equal((await accountRow()).status, 'connected');
+    assert.equal((await accountRow()).disconnected_at, null);
+    assert.ok((await accountRow()).access_token_encrypted);
+    graphCredentials.set(envPhoneId, reconnectedToken);
+    assert.equal((await request(connectionPath, defaultTenant, 'POST', {
+      phoneNumberId: envPhoneId, displayPhoneNumber: '12025550123',
+    })).body.data.tokenConfigured, true);
+    assert.equal((await sendTemplate()).status, 200);
+    assert.equal(attempts.length, graphStart + 2);
+    assert.equal((await request(connectionPath, defaultTenant, 'DELETE')).status, 200);
+    assert.equal((await accountRow()).access_token_encrypted, null);
+    assert.equal((await sendTemplate()).status, 409);
+    assert.equal(attempts.length, graphStart + 2);
+    assert.equal((await settings(tenantA)).body.data.status.configured, true);
+    assert.equal((await sendTemplate(tenantA)).status, 200);
+    assert.equal(attempts.at(-1)?.path, `/v25.0/${graphPhoneId}/messages`);
+
+    // A DELETE that reaches another process before its initial bootstrap is also durable.
+    const unseededTenant = defaultTenant + 1;
+    config.defaultCompanyId = unseededTenant;
+    config.meta.phoneNumberId = changedEnvPhoneId;
+    await uow.run(unseededTenant, (client) => client.query(
+      "INSERT INTO companies (id, name) VALUES ($1, 'Unseeded connection fixture')", [unseededTenant]));
+    const notYetStarted = new WhatsApp();
+    origin = await appFor(notYetStarted);
+    assert.equal((await request(connectionPath, unseededTenant, 'DELETE')).status, 200);
+    await notYetStarted.initialize();
+    assert.equal((await settings(unseededTenant)).body.data.status.accountStatus, 'disconnected');
+
+    const unboundTenant = unseededTenant + 1;
+    config.defaultCompanyId = unboundTenant;
+    config.meta.phoneNumberId = graphPhoneId;
+    await uow.run(unboundTenant, (client) => client.query(
+      "INSERT INTO companies (id, name) VALUES ($1, 'Other company phone fixture')", [unboundTenant]));
+    const colliding = new WhatsApp();
+    await colliding.initialize();
+    origin = await appFor(colliding);
+    assert.equal((await settings(unboundTenant)).body.data.status.accountStatus, 'missing_config');
+    assert.equal((await settings(tenantA)).body.data.status.configured, true);
   });
 });

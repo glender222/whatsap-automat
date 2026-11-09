@@ -17,12 +17,16 @@ class AuthController {
   });
 
   getStatusLegacy = asyncHandler(async (req, res) => {
-    const status = this.whatsappService.getStatus();
+    const status = await (this.whatsappService.getCompanyStatus
+      ? this.whatsappService.getCompanyStatus(require('../middleware/jwtAuth').resolveWhatsappCompanyId(req))
+      : this.whatsappService.getStatus());
     res.json(status);
   });
 
   getMeLegacy = asyncHandler(async (req, res) => {
-    const info = this.whatsappService.getMyInfo();
+    const info = await (this.whatsappService.getCompanyStatus
+      ? this.whatsappService.getMyInfo(require('../middleware/jwtAuth').resolveWhatsappCompanyId(req))
+      : this.whatsappService.getMyInfo());
     
     if (!info) {
       return res.status(503).json({ error: "No disponible aún" });
@@ -224,10 +228,7 @@ class AuthController {
     res.json({ qr: qr || null });
   });
 
-  getStatus = asyncHandler(async (req, res) => {
-    const status = this.whatsappService.getStatus();
-    res.json(status);
-  });
+  getStatus = this.getStatusLegacy;
 
   logoutWhatsapp = asyncHandler(async (req, res) => {
     console.log("🔴 Iniciando cierre de sesión...");

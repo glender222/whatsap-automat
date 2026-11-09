@@ -68,9 +68,11 @@ Obligatorias cuando `WHATSAPP_PROVIDER=meta-cloud`:
 - `META_WA_ACCESS_TOKEN`
 - `META_WEBHOOK_VERIFY_TOKEN`, aleatorio y con al menos 16 caracteres
 - `META_APP_SECRET`
-- `META_TOKEN_ENCRYPTION_KEY`, independiente del JWT y con al menos 32 caracteres
+- `META_TOKEN_ENCRYPTION_KEY`, independiente del JWT y con al menos 32 caracteres, obligatoria en producción y para guardar tokens desde la aplicación
 
 `META_WA_DISPLAY_PHONE_NUMBER` es descriptiva. `DEFAULT_COMPANY_ID` identifica la empresa donde se registra la cuenta configurada por entorno; no se utiliza como fallback para webhooks con un `phone_number_id` desconocido.
+
+En desarrollo sin clave de cifrado, el token de entorno se usa para el número configurado mientras su cuenta de arranque esté habilitada. La desconexión se guarda en PostgreSQL y sigue vigente después de reiniciar. Para reconectar, un administrador guarda un token en la configuración de WhatsApp Business con `META_TOKEN_ENCRYPTION_KEY` activa.
 
 Para producción, compila con las dependencias de desarrollo y prepara el entorno de ejecución con `npm ci --omit=dev`. Ejecuta `npm start` con `NODE_ENV=production` y `WHATSAPP_PROVIDER=meta-cloud`. El adaptador Web.js y el servidor legacy quedan disponibles en desarrollo. Si vas a probar la conexión legacy, instala sin `PUPPETEER_SKIP_DOWNLOAD` para incluir su navegador.
 

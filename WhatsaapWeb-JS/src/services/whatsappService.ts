@@ -91,7 +91,7 @@ export class WhatsAppService {
   constructor() {
     this.provider = (config.whatsapp.provider || 'webjs') as Provider;
     this.whatsappClient = this.provider === 'meta-cloud' ? null : new (require('./whatsapp/WhatsAppClient'))();
-    this.metaClient = this.provider === 'meta-cloud' ? new MetaCloudClient(config.meta) : null;
+    this.metaClient = this.provider === 'meta-cloud' ? new MetaCloudClient({ ...config.meta, accessToken: '' }) : null;
     this.metaAccountStore = this.provider === 'meta-cloud' ? new MetaAccountStore() : null;
     this.agentService = new AgentService();
     this.metaStore = this.provider === 'meta-cloud'
@@ -133,44 +133,21 @@ export class WhatsAppService {
     return this.whatsappClient.getQR();
   }
 
-  getStatus(): Record<string, unknown> {
-    if (this.provider === 'meta-cloud') {
-      const configured = Boolean(this.metaClient?.isConfigured());
-      return {
-        provider: 'meta-cloud',
-        configured,
-        connected: configured,
-        isReady: configured,
-        isConnected: configured,
-        authenticated: configured,
-        hasQR: false,
-        qr: null,
-        phoneNumberId: config.meta.phoneNumberId || null,
-        wabaId: config.meta.wabaId || null,
-        phoneNumber: config.meta.displayPhoneNumber || null,
-        graphVersion: config.meta.graphVersion,
-        message: configured
-          ? 'Meta Cloud API configurado'
-          : 'Faltan META_WA_ACCESS_TOKEN o META_WA_PHONE_NUMBER_ID',
-      };
-    }
-    return this.whatsappClient.getStatus();
+  async getStatus(): Promise<Record<string, unknown>> {
+    return this.getCompanyStatus();
   }
 
   async getCompanyStatus(companyId = config.defaultCompanyId || 1): Promise<Record<string, unknown>> {
-    if (this.provider !== 'meta-cloud') return this.getStatus();
+    if (this.provider !== 'meta-cloud') return this.whatsappClient.getStatus();
 
     const account = await this.metaAccountStore?.getAccountForCompany(companyId);
-    const clientConfig = this.metaAccountStore?.toClientConfig(
-      account || null,
-      companyId === (config.defaultCompanyId || 1)
-    );
+    const clientConfig = this.metaAccountStore?.toClientConfig(account || null, true);
     const configured = Boolean(clientConfig?.accessToken && clientConfig?.phoneNumberId);
 
     return {
       provider: 'meta-cloud',
       configured,
-      connected: configured && account?.status !== 'disconnected',
+      connected: configured,
       isReady: configured,
       isConnected: configured,
       authenticated: configured,
@@ -190,11 +167,7 @@ export class WhatsAppService {
 
   async getCompanyConnection(companyId = config.defaultCompanyId || 1): Promise<Record<string, unknown> | null> {
     const account = await this.metaAccountStore?.getAccountForCompany(companyId);
-    if (!account && companyId === (config.defaultCompanyId || 1) && config.meta.phoneNumberId) {
-      const seeded = await this.metaAccountStore?.ensureEnvAccount(companyId, config.meta);
-      return this.metaAccountStore?.sanitize(seeded || null) || null;
-    }
-    return this.metaAccountStore?.sanitize(account || null) || null;
+    return account?.status !== 'disconnected' ? this.metaAccountStore?.sanitize(account || null) ?? null : null;
   }
 
   async saveCompanyConnection(companyId: number, input: Record<string, any>): Promise<Record<string, unknown> | null> {
@@ -207,9 +180,10 @@ export class WhatsAppService {
       throw error;
     }
 
+    const accessToken = typeof input.accessToken === 'string' ? input.accessToken.trim() : '';
     const account = await this.metaAccountStore.upsertConnection(companyId, {
       phoneNumberId,
-      accessToken: input.accessToken ? String(input.accessToken).trim() : null,
+      accessToken: accessToken || null,
       wabaId: input.wabaId || input.waba_id || null,
       displayPhoneNumber: input.displayPhoneNumber || input.display_phone_number || null,
       businessPhoneNumber: input.businessPhoneNumber || input.business_phone_number || input.displayPhoneNumber || null,
@@ -217,7 +191,7 @@ export class WhatsAppService {
       appId: input.appId || input.app_id || null,
       businessId: input.businessId || input.business_id || null,
       webhookVerifyToken: input.webhookVerifyToken || input.webhook_verify_token || null,
-      status: input.accessToken ? 'connected' : 'missing_token',
+      status: accessToken ? 'connected' : 'missing_token',
       metadata: { source: 'manual_settings' },
     });
     return this.metaAccountStore.sanitize(account);
@@ -231,9 +205,7 @@ export class WhatsAppService {
     const account = phoneNumberId
       ? await this.metaAccountStore?.getAccountForCompanyPhone(companyId, phoneNumberId)
       : await this.metaAccountStore?.getAccountForCompany(companyId);
-    const fallbackAllowed = companyId === (config.defaultCompanyId || 1) &&
-      (!phoneNumberId || (Boolean(account) && phoneNumberId === config.meta.phoneNumberId));
-    const clientConfig = this.metaAccountStore?.toClientConfig(account || null, fallbackAllowed);
+    const clientConfig = this.metaAccountStore?.toClientConfig(account || null, true);
 
     if (!clientConfig?.accessToken || !clientConfig?.phoneNumberId) {
       const error = new Error('WhatsApp Business no esta conectado para esta empresa') as Error & {
@@ -252,14 +224,15 @@ export class WhatsAppService {
     return new MetaCloudClient(clientConfig);
   }
 
-  getMyInfo(): Record<string, unknown> | null {
+  async getMyInfo(companyId = config.defaultCompanyId || 1): Promise<Record<string, unknown> | null> {
     if (this.provider === 'meta-cloud') {
-      if (!this.metaClient?.isConfigured()) return null;
+      const status = await this.getCompanyStatus(companyId);
+      if (!status.configured) return null;
       return {
-        id: config.meta.phoneNumberId,
-        user: config.meta.displayPhoneNumber || config.meta.phoneNumberId,
+        id: status.phoneNumberId,
+        user: status.phoneNumber || status.phoneNumberId,
         provider: 'meta-cloud',
-        wabaId: config.meta.wabaId || null,
+        wabaId: status.wabaId,
       };
     }
     return this.whatsappClient.getMyInfo();
