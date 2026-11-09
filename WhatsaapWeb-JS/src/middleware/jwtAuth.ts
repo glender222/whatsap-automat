@@ -106,6 +106,7 @@ export function requireJwt(req: JwtRequest, res: Response, next: NextFunction): 
     return res.status(401).json({
       success: false,
       error: 'Token invalido o expirado',
+      ...(error?.name === 'TokenExpiredError' && { code: 'ACCESS_TOKEN_EXPIRED' }),
       details: error?.message || undefined,
     });
   }

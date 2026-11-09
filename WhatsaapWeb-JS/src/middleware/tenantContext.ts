@@ -126,6 +126,7 @@ export function tenantContext(options: TenantContextOptions = {}) {
         return res.status(401).json({
           success: false,
           error: 'Token invalido o expirado',
+          ...(err?.name === 'TokenExpiredError' && { code: 'ACCESS_TOKEN_EXPIRED' }),
           details: err?.message || undefined,
         });
       }

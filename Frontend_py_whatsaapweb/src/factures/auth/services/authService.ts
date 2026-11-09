@@ -39,21 +39,14 @@ export const authService = {
 
   /** Refresca el acceso con el token de renovación. */
   async refreshToken(refreshToken: string): Promise<AuthTokens> {
-    try {
-      const { data } = await api.post<{ success: boolean; data: AuthTokens }>(
-        "/auth/refresh",
-        { refreshToken }
-      );
-
-      if (!data.success) throw new Error("No se pudo refrescar el token");
-      return data.data;
-    } catch (error: any) {
-      const message =
-        error?.response?.data?.message ||
-        error?.message ||
-        "Error al refrescar token";
-      throw new Error(message);
+    const { data } = await api.post<{ success: boolean; data: AuthTokens }>(
+      "/auth/refresh",
+      { refreshToken }
+    );
+    if (!data.success || typeof data.data?.accessToken !== 'string' || !data.data.accessToken) {
+      throw new Error("No se pudo refrescar el token");
     }
+    return data.data;
   },
 
   /**

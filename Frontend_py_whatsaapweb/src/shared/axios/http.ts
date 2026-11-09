@@ -1,30 +1,45 @@
-// services/http.ts
-import axios from "axios";
-import { authService } from "../../factures/auth/services/authService";
+import axios, { CanceledError, type InternalAxiosRequestConfig } from 'axios';
+import { authService } from '../../factures/auth/services/authService';
 
 export const api = axios.create({
-  baseURL: import.meta.env?.VITE_API_URL ?? "http://localhost:3000/api",
-  timeout: 20000, // Aumentado a 20 segundos para permitir descargas de WhatsApp
-  headers: { "Content-Type": "application/json" },
+  baseURL: import.meta.env?.VITE_API_URL ?? 'http://localhost:3000/api',
+  timeout: 20000,
+  headers: { 'Content-Type': 'application/json' },
 });
 
 const publicAuthRoutes = new Set(['/auth/register', '/auth/login', '/auth/refresh']);
 
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('accessToken');
-  if (token && !publicAuthRoutes.has(config.url ?? '')) {
-    config.headers.set('Authorization', `Bearer ${token}`);
+interface SessionSnapshot {
+  accessToken: string | null;
+  refreshToken: string | null;
+  generation: number;
+}
+
+type SessionRequest = InternalAxiosRequestConfig & { authRetryGeneration?: number };
+
+let observedSession: SessionSnapshot = { accessToken: null, refreshToken: null, generation: 0 };
+const requestSessions = new WeakMap<InternalAxiosRequestConfig, SessionSnapshot>();
+const pendingRenewals = new Map<number, Promise<void>>();
+
+function readSession(): SessionSnapshot {
+  const accessToken = localStorage.getItem('accessToken');
+  const refreshToken = localStorage.getItem('refreshToken');
+  const changed = refreshToken !== observedSession.refreshToken ||
+    (!refreshToken && accessToken !== observedSession.accessToken);
+  observedSession = { accessToken, refreshToken, generation: observedSession.generation + Number(changed) };
+  return observedSession;
+}
+
+api.interceptors.request.use((config: SessionRequest) => {
+  if (publicAuthRoutes.has(config.url ?? '')) return config;
+  const session = readSession();
+  if (config.authRetryGeneration !== undefined && config.authRetryGeneration !== session.generation) {
+    throw new CanceledError('La sesión cambió antes del reintento.');
   }
+  requestSessions.set(config, session);
+  if (session.accessToken) config.headers.set('Authorization', `Bearer ${session.accessToken}`);
   return config;
 });
-
-// ===== Response interceptor: refresh token on 401 (with concurrency handling) =====
-let isRefreshing = false;
-let refreshSubscribers: Array<(token: string | null) => void> = [];
-
-function subscribeTokenRefresh(cb: (token: string | null) => void) {
-  refreshSubscribers.push(cb);
-}
 
 function clearExpiredSession() {
   for (const key of ['accessToken', 'refreshToken', 'auth', 'userRole']) {
@@ -33,78 +48,57 @@ function clearExpiredSession() {
   window.location.assign('/auth/login');
 }
 
-function onRefreshed(token: string | null) {
-  refreshSubscribers.forEach((cb) => cb(token));
-  refreshSubscribers = [];
+function renewAccess(generation: number, refreshToken: string): Promise<void> {
+  const pending = pendingRenewals.get(generation);
+  if (pending) return pending;
+
+  const renewal = authService.refreshToken(refreshToken).then((tokens) => {
+    if (readSession().generation !== generation) throw new CanceledError('La sesión cambió durante la renovación.');
+    localStorage.setItem('accessToken', tokens.accessToken);
+    const nextRefreshToken = tokens.refreshToken || refreshToken;
+    localStorage.setItem('refreshToken', nextRefreshToken);
+    observedSession = { accessToken: tokens.accessToken, refreshToken: nextRefreshToken, generation };
+  }).finally(() => pendingRenewals.delete(generation));
+  pendingRenewals.set(generation, renewal);
+  return renewal;
 }
 
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    const sent = requestSessions.get(response.config);
+    if (sent && sent.generation !== readSession().generation) {
+      throw new CanceledError('La respuesta pertenece a una sesión anterior.');
+    }
+    return response;
+  },
   async (error) => {
-    const originalRequest = error?.config;
-    const responseCode = error?.response?.data?.error;
+    const request = error?.config as SessionRequest | undefined;
+    const body = error?.response?.data;
+    const expiredAccess = body?.code === 'ACCESS_TOKEN_EXPIRED' ||
+      (body?.error === 'Token invalido o expirado' && body?.details === 'jwt expired');
+    if (error?.response?.status !== 401 || !expiredAccess ||
+        !request || request.authRetryGeneration !== undefined) throw error;
 
-    // Solo intentamos refresh en respuestas 401 y si no hemos reintentado ya
-    if (
-      error?.response?.status === 401 &&
-      responseCode !== 'META_API_ERROR' &&
-      originalRequest &&
-      !publicAuthRoutes.has(originalRequest.url) &&
-      !originalRequest._retry
-    ) {
-      originalRequest._retry = true;
+    const sent = requestSessions.get(request);
+    if (!sent) throw error;
+    const current = readSession();
+    if (sent.generation !== current.generation) throw error;
+    if (!current.refreshToken) {
+      clearExpiredSession();
+      throw error;
+    }
 
-      const refreshToken = localStorage.getItem('refreshToken');
-
-      if (!refreshToken) {
-        // No hay refresh token -> forzar logout
-        clearExpiredSession();
-        return Promise.reject(error);
-      }
-
-      if (isRefreshing) {
-        // Si ya se está refrescando, encolar la petición y resolverla cuando termine
-        return new Promise((resolve, reject) => {
-          subscribeTokenRefresh((token) => {
-            if (token) {
-              originalRequest.headers = originalRequest.headers || {};
-              originalRequest.headers['Authorization'] = `Bearer ${token}`;
-              resolve(api(originalRequest));
-            } else {
-              reject(error);
-            }
-          });
-        });
-      }
-
-      isRefreshing = true;
-
+    if (sent.accessToken === current.accessToken) {
       try {
-        const tokens = await authService.refreshToken(refreshToken);
-        if (localStorage.getItem('refreshToken') !== refreshToken) throw error;
-
-        // Guardar nuevos tokens
-        localStorage.setItem('accessToken', tokens.accessToken);
-        if (tokens.refreshToken) {
-          localStorage.setItem('refreshToken', tokens.refreshToken);
-        }
-
-        onRefreshed(tokens.accessToken);
-        isRefreshing = false;
-
-        // Reintentar la petición original con nuevo token
-        originalRequest.headers = originalRequest.headers || {};
-        originalRequest.headers['Authorization'] = `Bearer ${tokens.accessToken}`;
-        return api(originalRequest);
-      } catch (refreshError) {
-        isRefreshing = false;
-        onRefreshed(null);
-
-        if (localStorage.getItem('refreshToken') === refreshToken) clearExpiredSession();
-        return Promise.reject(refreshError);
+        await renewAccess(current.generation, current.refreshToken);
+      } catch (renewalError) {
+        if (axios.isAxiosError(renewalError) && renewalError.response?.status === 401 &&
+            readSession().generation === current.generation) clearExpiredSession();
+        throw renewalError;
       }
     }
 
-    return Promise.reject(error);
-  }
+    request.authRetryGeneration = current.generation;
+    return api(request);
+  },
 );

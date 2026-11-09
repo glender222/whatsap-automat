@@ -3,6 +3,7 @@ import { createHash, createHmac, randomInt, randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { test } from 'node:test';
 import { io, Socket } from 'socket.io-client';
+import jwt from 'jsonwebtoken';
 import { conversationMessageV1Schema, conversationV1Schema } from '@whatsap-automat/contracts';
 import { AutomatClient } from '../../../packages/sdk/src';
 import config from '../config/index';
@@ -54,6 +55,10 @@ test('real API isolates two companies through auth, signed ingress, inbox, socke
   }));
   const [owner, other] = await Promise.all(accounts.map((account) => api('/api/auth/register', 200, undefined, account)));
   assert.notEqual(owner.user.companyId, other.user.companyId);
+  const expiredAccess = jwt.sign({ userId: owner.user.id, companyId: owner.user.companyId },
+    config.jwt.secret, { expiresIn: -1 });
+  assert.equal((await api('/api/auth/me', 401, expiredAccess)).code, 'ACCESS_TOKEN_EXPIRED');
+  assert.equal((await api('/api/v1/workspaces/current', 401, expiredAccess)).code, 'ACCESS_TOKEN_EXPIRED');
   const [first, second] = await Promise.all([1, 2].map(() => api('/api/auth/login', 200, undefined, accounts[0])));
   assert.notEqual(first.refreshToken, second.refreshToken);
   const digest = (token: string) => `sha256:${createHash('sha256').update(token).digest('hex')}`;
