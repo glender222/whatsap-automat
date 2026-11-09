@@ -1,6 +1,44 @@
 import crypto from 'crypto';
 import { promises as fs } from 'fs';
 
+const mediaDownloadOrigins = new Set(['https://graph.facebook.com', 'https://lookaside.fbsbx.com']);
+const maxMediaDownloadBytes = 100_000_000;
+
+function mediaDownloadError(code: string, statusCode: number, message: string) {
+  return Object.assign(new Error(message), { code, statusCode });
+}
+
+function oversizedMediaError() {
+  return mediaDownloadError('META_MEDIA_TOO_LARGE', 413, 'El archivo supera el límite de descarga de WhatsApp.');
+}
+
+async function readMediaBytes(response: Response): Promise<Buffer> {
+  if (Number(response.headers.get('content-length')) > maxMediaDownloadBytes) {
+    await response.body?.cancel().catch(() => undefined);
+    throw oversizedMediaError();
+  }
+  const reader = response.body?.getReader();
+  if (!reader) return Buffer.alloc(0);
+
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  try {
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      length += chunk.value.byteLength;
+      if (length > maxMediaDownloadBytes) {
+        await reader.cancel().catch(() => undefined);
+        throw oversizedMediaError();
+      }
+      chunks.push(chunk.value);
+    }
+    return Buffer.concat(chunks, length);
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 export interface MetaCloudConfig {
   graphVersion: string;
   accessToken: string;
@@ -368,19 +406,25 @@ export class MetaCloudClient {
   }
 
   async downloadMedia(mediaId: string): Promise<MetaDownloadResult> {
-    const metadata = await this.request(`/${mediaId}`);
-    const url = metadata?.url;
-    if (!url || typeof url !== 'string') {
-      const error = new Error('Meta Cloud API no devolvio URL de media') as Error & { statusCode?: number };
-      error.statusCode = 404;
-      throw error;
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(mediaId)) {
+      throw mediaDownloadError('MEDIA_NOT_FOUND', 404, 'No se encontró el archivo asociado al mensaje.');
     }
+    const { url: downloadLocation, ...metadata } = await this.request(`/${mediaId}`, { redirect: 'error' });
+    if (typeof downloadLocation !== 'string' || !downloadLocation) {
+      throw mediaDownloadError('MEDIA_NOT_FOUND', 404, 'Meta Cloud API no devolvió una URL de media.');
+    }
+    const url = URL.canParse(downloadLocation) ? new URL(downloadLocation) : null;
+    if (!url || !mediaDownloadOrigins.has(url.origin) || url.username || url.password) {
+      throw mediaDownloadError('META_MEDIA_URL_UNTRUSTED', 502, 'Meta devolvió una ubicación de archivo no permitida.');
+    }
+    if (Number(metadata.file_size) > maxMediaDownloadBytes) throw oversizedMediaError();
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.config.requestTimeoutMs || 20000);
     try {
-      const response = await fetch(url, {
+      const response = await (this.fetchGraph ?? fetch)(url, {
         method: 'GET',
+        redirect: 'error',
         signal: controller.signal,
         headers: {
           Authorization: `Bearer ${this.config.accessToken}`,
@@ -419,12 +463,12 @@ export class MetaCloudClient {
         throw error;
       }
 
-      const bytes = Buffer.from(await response.arrayBuffer());
+      const bytes = await readMediaBytes(response);
       return {
         mediaId,
         mimeType: (metadata?.mime_type as string | undefined) || response.headers.get('content-type'),
         sha256: (metadata?.sha256 as string | undefined) || null,
-        fileSize: typeof metadata?.file_size === 'number' ? metadata.file_size : bytes.length,
+        fileSize: bytes.length,
         bytes,
         raw: metadata,
       };

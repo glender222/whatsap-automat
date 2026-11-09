@@ -37,6 +37,64 @@ function createMetaClient(): MetaCloudClient {
   });
 }
 
+describe('Meta media download trust boundary', () => {
+  const clientConfig = {
+    graphVersion: 'v25.0', accessToken: 'fixture-only-token', phoneNumberId: '1234567',
+  };
+
+  test('rejects untrusted media URLs without sending the bearer token to them', async () => {
+    for (const url of [
+      'http://lookaside.fbsbx.com/whatsapp/file',
+      'https://lookaside.fbsbx.com.example.invalid/whatsapp/file',
+      'https://user@lookaside.fbsbx.com/whatsapp/file',
+      'https://lookaside.fbsbx.com:8443/whatsapp/file',
+      'http://127.0.0.1/private',
+    ]) {
+      const requests: string[] = [];
+      const client = new MetaCloudClient(clientConfig, async (input) => {
+        requests.push(String(input));
+        return Response.json({ url });
+      });
+      await assert.rejects(client.downloadMedia('12345'), { code: 'META_MEDIA_URL_UNTRUSTED' });
+      assert.deepEqual(requests, ['https://graph.facebook.com/v25.0/12345']);
+    }
+  });
+
+  test('downloads from the Meta origin without following redirects or returning its signed URL', async () => {
+    const media = Buffer.from('fixture bytes');
+    const location = 'https://lookaside.fbsbx.com/whatsapp/file?hash=temporary';
+    let requests = 0;
+    const client = new MetaCloudClient(clientConfig, async (input, request) => {
+      assert.equal(request?.redirect, 'error');
+      assert.equal(new Headers(request?.headers).get('authorization'), 'Bearer fixture-only-token');
+      if (requests++ === 0) return Response.json({ url: location, file_size: media.length });
+      assert.equal(String(input), location);
+      return new Response(media, { headers: { 'Content-Type': 'image/png' } });
+    });
+    const downloaded = await client.downloadMedia('12345');
+    assert.equal(requests, 2);
+    assert.deepEqual(downloaded.bytes, media);
+    assert.equal(downloaded.fileSize, media.length);
+    assert.equal(downloaded.mimeType, 'image/png');
+    assert.equal('url' in downloaded.raw, false);
+  });
+
+  test('cancels a media body exceeding the byte limit even without a content length', async () => {
+    const chunk = new Uint8Array(1_000_000);
+    let cancelled = false;
+    let requests = 0;
+    const client = new MetaCloudClient(clientConfig, async () => {
+      if (requests++ === 0) return Response.json({ url: 'https://lookaside.fbsbx.com/whatsapp/file' });
+      return new Response(new ReadableStream<Uint8Array>({
+        pull: (controller) => controller.enqueue(chunk),
+        cancel: () => { cancelled = true; },
+      }));
+    });
+    await assert.rejects(client.downloadMedia('12345'), { code: 'META_MEDIA_TOO_LARGE' });
+    assert.equal(cancelled, true);
+  });
+});
+
 function createRouteService(
   handleMetaWebhook = mock.fn(async () => ({ processed: 1, results: [] }))
 ): WhatsAppService {
