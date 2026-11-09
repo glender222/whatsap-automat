@@ -98,4 +98,12 @@ Las rutas usan el prefijo `/api/v1/marketplace`.
 | `POST /extensions/{id}/rate` | Usuario autenticado | Crea o reemplaza la puntuación del usuario en su empresa. |
 | `GET /extensions/{id}/ratings` | Usuario autenticado | Reseñas y puntuaciones de su empresa. |
 
-El registro comienza vacío. Las publicaciones y reseñas residen en memoria del proceso y se pierden al reiniciar. Las publicaciones comunitarias aparecen sin verificar. Si el editor incluye una URL de descarga, debe alojar el archivo por separado en HTTPS. El servidor usa los bytes enviados para comprobar o calcular el hash del archivo y conserva los metadatos en el catálogo. La instalación de extensiones desde este catálogo requiere integración con el runtime.
+La migración `034_marketplace_catalog.sql` crea el catálogo y las reseñas en PostgreSQL. Los nombres e identificadores se reservan en la transacción que publica la extensión. Cada usuario puede mantener una puntuación por extensión y empresa. PostgreSQL actualiza los totales públicos en la misma transacción y restringe el acceso a las reseñas detalladas por empresa mediante RLS. `GET /health` devuelve `503` si el catálogo no puede consultar su almacenamiento.
+
+El registro empieza vacío y las publicaciones comunitarias aparecen sin verificar. El editor aloja por separado los archivos de descarga en HTTPS. El servidor usa los bytes enviados para comprobar o calcular el hash y guarda los metadatos en PostgreSQL. La instalación de extensiones desde este catálogo requiere integración con el runtime.
+
+Para ejecutar las pruebas de PostgreSQL, usa una base aislada con las migraciones aplicadas y un rol sin `SUPERUSER` ni `BYPASSRLS`. Las pruebas crean empresas y publicaciones en esa base. Configura `MARKETPLACE_TEST_DATABASE_URL` y ejecuta desde `WhatsaapWeb-JS`:
+
+```bash
+node --import tsx --test src/test/marketplace-registry.test.ts src/test/marketplace-postgres.test.ts
+```

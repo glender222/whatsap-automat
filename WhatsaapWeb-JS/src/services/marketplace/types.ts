@@ -29,3 +29,9 @@ export interface ExtensionValidationReport {
   readonly manifest?: ExtensionManifest;
   readonly checksumVerified?: boolean;
 }
+
+export class MarketplaceError extends Error {
+  constructor(readonly statusCode: number, message: string, readonly errors?: string[]) {
+    super(message);
+  }
+}

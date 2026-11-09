@@ -1,15 +1,13 @@
-import { Router, Request, Response } from 'express';
-import {
-  marketplaceSearchQuerySchema,
-  extensionRatingScoreSchema,
-} from '@whatsap-automat/contracts';
+import { Router, Request, Response, NextFunction } from 'express';
+import { marketplaceSearchQuerySchema } from '@whatsap-automat/contracts';
 import { requireJwt } from '../middleware/jwtAuth';
 import { tenantContext } from '../middleware/tenantContext';
 import { MarketplaceRegistry } from '../services/marketplace/MarketplaceRegistry';
+import { MarketplaceError } from '../services/marketplace/types';
 
 function resolveActor(req: Request, res: Response) {
   const context = req.tenantContext;
-  if (context?.userId) {
+  if (context?.userId && Number.isSafeInteger(context.userId) && Number.isSafeInteger(context.tenantId)) {
     return { tenantId: context.tenantId, userId: context.userId, role: context.role };
   }
   res.status(403).json({
@@ -22,11 +20,11 @@ function resolveActor(req: Request, res: Response) {
 
 function readArchive(value: unknown): Buffer | undefined {
   if (value === undefined || value === null || value === '') return undefined;
-  if (typeof value !== 'string') throw new Error('tarballBase64 must be a base64 string.');
+  if (typeof value !== 'string') throw new MarketplaceError(400, 'tarballBase64 must be a base64 string.');
   const archive = Buffer.from(value, 'base64');
   const canonical = archive.toString('base64');
   if (!archive.length || (value !== canonical && value !== canonical.replace(/=+$/, ''))) {
-    throw new Error('tarballBase64 must contain a valid base64 archive.');
+    throw new MarketplaceError(400, 'tarballBase64 must contain a valid base64 archive.');
   }
   return archive;
 }
@@ -37,33 +35,29 @@ export function createMarketplaceRoutes(registry?: MarketplaceRegistry): Router 
   const authenticatedTenant = [requireJwt, tenantContext({ allowSandbox: false })];
 
   // GET /api/v1/marketplace/extensions - Catalog search & listing
-  router.get('/extensions', (req: Request, res: Response) => {
-    try {
-      const query = marketplaceSearchQuerySchema.parse(req.query);
-      const result = service.listExtensions(query);
-      return res.json({
-        success: true,
-        data: result.items,
-        pagination: {
-          total: result.total,
-          limit: query.limit,
-          offset: query.offset,
-        },
-      });
-    } catch (err: any) {
+  router.get('/extensions', async (req: Request, res: Response) => {
+    const parsed = marketplaceSearchQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
       return res.status(400).json({
         type: 'https://whatsap-automat.internal/errors/INVALID_QUERY',
         title: 'Invalid Marketplace Query',
         status: 400,
-        detail: err.message,
+        detail: parsed.error.message,
       });
     }
+    const query = parsed.data;
+    const result = await service.listExtensions(query);
+    return res.json({
+      success: true,
+      data: result.items,
+      pagination: { total: result.total, limit: query.limit, offset: query.offset },
+    });
   });
 
   // GET /api/v1/marketplace/extensions/:id - Detail view
-  router.get('/extensions/:id', (req: Request, res: Response) => {
+  router.get('/extensions/:id', async (req: Request, res: Response) => {
     const extId = String(req.params.id);
-    const listing = service.getExtension(extId);
+    const listing = await service.getExtension(extId);
     if (!listing) {
       return res.status(404).json({
         type: 'https://whatsap-automat.internal/errors/EXTENSION_NOT_FOUND',
@@ -117,8 +111,9 @@ export function createMarketplaceRoutes(registry?: MarketplaceRegistry): Router 
         success: true,
         data: registered,
       });
-    } catch (err: any) {
-      const status = err.statusCode || 400;
+    } catch (err) {
+      if (!(err instanceof MarketplaceError)) throw err;
+      const status = err.statusCode;
       return res.status(status).json({
         type: 'https://whatsap-automat.internal/errors/EXTENSION_REGISTRATION_FAILED',
         title: 'Extension Registration Failed',
@@ -130,27 +125,27 @@ export function createMarketplaceRoutes(registry?: MarketplaceRegistry): Router 
   });
 
   // POST /api/v1/marketplace/extensions/:id/rate - Submit rating
-  router.post('/extensions/:id/rate', ...authenticatedTenant, (req: Request, res: Response) => {
+  router.post('/extensions/:id/rate', ...authenticatedTenant, async (req: Request, res: Response) => {
     const actor = resolveActor(req, res);
     if (!actor) return;
     try {
       const { score, review } = req.body || {};
-      const validatedScore = extensionRatingScoreSchema.parse(score);
-
-      const result = service.submitRating({
+      const result = await service.submitRating({
         extensionId: String(req.params.id),
         tenantId: String(actor.tenantId),
         userId: String(actor.userId),
-        score: validatedScore,
+        score,
         review,
       });
 
+      res.set('Cache-Control', 'private, no-store');
       return res.status(200).json({
         success: true,
         data: result,
       });
-    } catch (err: any) {
-      const status = err.statusCode || 400;
+    } catch (err) {
+      if (!(err instanceof MarketplaceError)) throw err;
+      const status = err.statusCode;
       return res.status(status).json({
         type: 'https://whatsap-automat.internal/errors/RATING_SUBMISSION_FAILED',
         title: 'Rating Submission Failed',
@@ -161,10 +156,10 @@ export function createMarketplaceRoutes(registry?: MarketplaceRegistry): Router 
   });
 
   // GET /api/v1/marketplace/extensions/:id/ratings - List ratings for the authenticated tenant
-  router.get('/extensions/:id/ratings', ...authenticatedTenant, (req: Request, res: Response) => {
+  router.get('/extensions/:id/ratings', ...authenticatedTenant, async (req: Request, res: Response) => {
     const actor = resolveActor(req, res);
     if (!actor) return;
-    const ratings = service.getRatings(String(req.params.id), String(actor.tenantId));
+    const ratings = await service.getRatings(String(req.params.id), String(actor.tenantId));
     res.set('Cache-Control', 'private, no-store');
     return res.json({
       success: true,
@@ -191,11 +186,26 @@ export function createMarketplaceRoutes(registry?: MarketplaceRegistry): Router 
   });
 
   // GET /api/v1/marketplace/health - Health check
-  router.get('/health', (_req: Request, res: Response) => {
+  router.get('/health', async (_req: Request, res: Response) => {
+    try {
+      await service.checkStorage();
+    } catch {
+      return res.status(503).json({ status: 'unavailable', service: 'marketplace-registry' });
+    }
     return res.json({
       status: 'ok',
       service: 'marketplace-registry',
       timestamp: new Date().toISOString(),
+    });
+  });
+
+  router.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
+    const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
+    console.error('Marketplace request failed', { code });
+    return res.status(500).json({
+      type: 'https://whatsap-automat.internal/errors/MARKETPLACE_FAILED',
+      title: 'Marketplace Request Failed',
+      status: 500,
     });
   });
 
