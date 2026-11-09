@@ -346,7 +346,7 @@ describe('Runtime IA - revision semantica de handoff humano', () => {
   test('si una decision final es debil, el agente reevalua y puede ejecutar handoff.create', async () => {
     const { AgentToolRuntimeLoop } = await import('../modules/ai/application/AgentToolRuntimeLoop');
     const { AgentToolRegistry } = await import('../modules/ai/application/AgentToolRegistry');
-    const { getAiProviderFactory } = await import('../modules/ai/infra/provider/AiProviderFactory');
+    const { getAiProviderFactory } = require('../modules/ai/infra/provider/AiProviderFactory') as typeof import('../modules/ai/infra/provider/AiProviderFactory');
 
     const factory = getAiProviderFactory() as any;
     const originalCreate = factory.create;

@@ -160,7 +160,7 @@ test('router intenta otro agente compatible si el sugerido no tiene scope de cat
 test('orchestrator ejecuta el loop con el agente seleccionado por el router', async () => {
   const { AiRuntimeOrchestrator } = await import('../modules/ai/application/AiRuntimeOrchestrator');
   const { AgentToolRegistry } = await import('../modules/ai/application/AgentToolRegistry');
-  const { getAiProviderFactory } = await import('../modules/ai/infra/provider/AiProviderFactory');
+  const { getAiProviderFactory } = require('../modules/ai/infra/provider/AiProviderFactory') as typeof import('../modules/ai/infra/provider/AiProviderFactory');
   const selectedAgent = makeAgent(20, 'operations', {
     provider: 'openai',
     moduleAccess: { catalog: true },
@@ -344,7 +344,7 @@ test('orchestrator no promete handoff cuando el agente dirigido no esta disponib
 test('orchestrator descarta un final handoff del loop sin ticket persistido', async () => {
   const { AiRuntimeOrchestrator } = await import('../modules/ai/application/AiRuntimeOrchestrator');
   const { AgentToolRegistry } = await import('../modules/ai/application/AgentToolRegistry');
-  const { getAiProviderFactory } = await import('../modules/ai/infra/provider/AiProviderFactory');
+  const { getAiProviderFactory } = require('../modules/ai/infra/provider/AiProviderFactory') as typeof import('../modules/ai/infra/provider/AiProviderFactory');
   const selectedAgent = makeAgent(40, 'support', { provider: 'openai' });
   const stages: string[] = [];
   const factory = getAiProviderFactory() as unknown as { create: (provider: string) => unknown };
