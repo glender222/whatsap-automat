@@ -37,7 +37,7 @@ Recorrido principal:
 
 - Node.js 20 o superior y npm.
 - PostgreSQL accesible desde el backend.
-- Para enviar videos por Meta Cloud, instala `ffmpeg` y `ffprobe` en el `PATH` o configura `FFMPEG_PATH` y `FFPROBE_PATH` con sus rutas.
+- Para enviar videos por Meta Cloud, instala `ffmpeg` y `ffprobe` en el `PATH` o configura `FFMPEG_PATH` y `FFPROBE_PATH` con sus rutas. El video final debe pesar como máximo 16 000 000 bytes. [Límites de archivos de WhatsApp](https://whatsappbusiness.com/blog/media-messages-via-app/)
 - `cloudflared` en el `PATH`, en `.tools/cloudflared/cloudflared`, o indicado con `CLOUDFLARED_BIN`.
 - Una app de Meta Developers con el producto WhatsApp configurado.
 - Una API key de OpenAI para `AI_PROVIDER=openai`, o una configuración OpenCode alternativa.

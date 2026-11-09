@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { randomInt } from 'node:crypto';
 import { once } from 'node:events';
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { createServer, request as httpRequest, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -397,5 +397,57 @@ test('legacy HTTP routes never send or persist free-form Meta text and preserve 
     await assertCleanUploadDir();
     assert.deepEqual(await counts(), after);
     assert.deepEqual(await counts(tenantB), beforeB);
+
+    failVideoSend = false;
+    const overLimit = 16_000_001;
+    const paddedMp4 = Buffer.alloc(overLimit);
+    compatibleMp4.copy(paddedMp4);
+    paddedMp4.writeUInt32BE(overLimit - compatibleMp4.length, compatibleMp4.length);
+    paddedMp4.write('free', compatibleMp4.length + 4);
+    const oversizedStart = attempts.length;
+    const oversized = await send(chat, declaredMp4(paddedMp4));
+    assert.equal(oversized.status, 413);
+    assert.equal(oversized.body.error, 'META_VIDEO_TOO_LARGE');
+    await assertCleanUploadDir();
+
+    // Run real FFmpeg, then pad its MP4 with a free atom so the test exercises
+    // the output limit independently of the incoming WebM size.
+    const paddingEncoder = join(sourceDir, 'pad-converted-mp4');
+    await writeFile(paddingEncoder, `#!/usr/bin/env node
+const fs = require('node:fs');
+const { spawnSync } = require('node:child_process');
+const args = process.argv.slice(2);
+const result = spawnSync('ffmpeg', args, { stdio: 'inherit' });
+if (result.status !== 0) process.exit(result.status || 1);
+const file = args.at(-1);
+const size = fs.statSync(file).size;
+const padding = Buffer.alloc(8);
+padding.writeUInt32BE(${overLimit} - size);
+padding.write('free', 4);
+fs.appendFileSync(file, padding);
+fs.truncateSync(file, ${overLimit});
+`, { mode: 0o700 });
+    const previousEncoder = process.env.FFMPEG_PATH;
+    try {
+      process.env.FFMPEG_PATH = paddingEncoder;
+      const convertedOversize = await send(mediaRoute, video({ chatId: phone }));
+      assert.equal(convertedOversize.status, 413);
+      assert.equal(convertedOversize.body.error, 'META_VIDEO_TOO_LARGE');
+    } finally {
+      if (previousEncoder === undefined) delete process.env.FFMPEG_PATH;
+      else process.env.FFMPEG_PATH = previousEncoder;
+    }
+    await assertCleanUploadDir();
+    assert.equal(attempts.length, oversizedStart);
+    assert.deepEqual(await counts(), after);
+
+    const document = new Uint8Array(overLimit);
+    document.set(Buffer.from('%PDF-1.4'));
+    const documentResponse = await send('/api/media/send-document',
+      multipart({ chatId: phone }, 'application/pdf', 'oversize-video-limit.pdf', document));
+    assert.equal(documentResponse.status, 200);
+    assert.equal(attempts[oversizedStart].media?.bytes.length, overLimit);
+    assert.equal(attempts[oversizedStart + 1].type, 'document');
+    await assertCleanUploadDir();
   });
 });

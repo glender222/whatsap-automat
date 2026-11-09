@@ -17,6 +17,8 @@ import { emitDashboard, emitToRoom } from '../sockets/socketEmitter';
 
 type Provider = 'webjs' | 'meta-cloud';
 
+const META_MAX_VIDEO_BYTES = 16_000_000;
+
 type MetaWebhookError = Error & {
   statusCode?: number;
   code?: string;
@@ -353,6 +355,13 @@ export class WhatsAppService {
         try {
           const mediaType = inferMetaMediaType(media.mimetype, options);
           const sendMedia = async (attachment: typeof media) => {
+            const size = mediaType === 'video' ? (await fs.stat(attachment.path)).size : attachment.size;
+            if (mediaType === 'video' && size > META_MAX_VIDEO_BYTES) {
+              throw Object.assign(new Error('El video final supera los 16 MB permitidos por WhatsApp.'), {
+                code: 'META_VIDEO_TOO_LARGE',
+                statusCode: 413,
+              });
+            }
             const upload = await metaClient.uploadMedia(attachment);
             const sent = await metaClient.sendMedia(chatId, upload.mediaId, mediaType, {
               caption: message || null,
@@ -368,7 +377,7 @@ export class WhatsAppService {
                 providerMediaId: upload.mediaId,
                 mimeType: attachment.mimetype || null,
                 filename: attachment.originalname || null,
-                sizeBytes: typeof attachment.size === 'number' ? attachment.size : null,
+                sizeBytes: typeof size === 'number' ? size : null,
                 caption: message || null,
                 metadata: { upload: upload.raw, send: sent.raw },
               },
