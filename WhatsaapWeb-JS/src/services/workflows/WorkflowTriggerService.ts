@@ -111,16 +111,18 @@ export class WorkflowTriggerService {
       }
 
       const { rows: [definition] } = await client.query(`
-        SELECT definition.workspace_id, revision.id AS revision_id
-        FROM workflow_definitions AS definition
-        JOIN workflow_revisions AS revision
-          ON revision.id = definition.published_revision_id
-         AND revision.tenant_id = definition.tenant_id AND revision.workflow_id = definition.id
-        WHERE definition.id = $1 AND definition.tenant_id = $2
-          AND definition.status = 'published' AND revision.status = 'published'
-        FOR SHARE OF definition
+        SELECT workspace_id, published_revision_id FROM workflow_definitions
+        WHERE id = $1 AND tenant_id = $2 AND status = 'published'
+        FOR SHARE
       `, [trigger.workflow_id, tenantId]);
-      if (!definition) throw new WorkflowNotPublishedError(trigger.workflow_id);
+      if (!definition?.published_revision_id) throw new WorkflowNotPublishedError(trigger.workflow_id);
+      // Read the revision in a new statement after acquiring the definition lock.
+      // A rollback may have changed the pointer while the locking statement waited.
+      const { rows: [revision] } = await client.query(`
+        SELECT id FROM workflow_revisions
+        WHERE id = $1 AND tenant_id = $2 AND workflow_id = $3 AND status = 'published'
+      `, [definition.published_revision_id, tenantId, trigger.workflow_id]);
+      if (!revision) throw new WorkflowNotPublishedError(trigger.workflow_id);
 
       const runId = `run_${crypto.randomUUID()}`;
       const providedCorrelation = headers['x-correlation-id'];
@@ -132,7 +134,7 @@ export class WorkflowTriggerService {
         status: 'accepted' as const,
         runId,
         workflowId: trigger.workflow_id,
-        revisionId: definition.revision_id,
+        revisionId: revision.id,
         idempotencyKey,
       };
 

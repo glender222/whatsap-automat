@@ -22,6 +22,7 @@ import { WorkflowRevisionService } from '../services/workflows/WorkflowRevisionS
 import { WorkflowTriggerService } from '../services/workflows/WorkflowTriggerService';
 import { validateWorkflowRevision } from '../services/workflows/validateWorkflowRevision';
 import { evaluateCondition } from '../services/temporal/workflows/evaluateCondition';
+import type { Queryable } from '../shared/UnitOfWorkPort';
 
 const jwt = require('jsonwebtoken') as {
   sign(payload: Record<string, unknown>, secret: string, options: { expiresIn: string }): string;
@@ -344,11 +345,41 @@ describe('Durable workflow HTTP, PostgreSQL and Temporal integration', {
     assert.equal(inFlight.revisionId, second);
 
     const submit = (id: string) => ingress.processInboundWebhook(trigger.endpointKey, trigger.token, {}, { id });
-    await Promise.all([
-      ...Array.from({ length: 20 }, (_, index) => submit(`before-${index}`)),
-      revisions.rollbackRevision(tenantB, workflow.workflowId, { targetRevisionId: first, reason: 'Concurrent rollback check' }),
-      ...Array.from({ length: 20 }, (_, index) => submit(`after-${index}`)),
-    ]);
+    const prepared = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    class HeldRollback extends TenantScopedUoW {
+      override run<T>(tenantId: unknown, work: (client: Queryable) => Promise<T>): Promise<T> {
+        return super.run(tenantId, async (client) => {
+          const result = await work(client);
+          prepared.resolve();
+          await release.promise;
+          return result;
+        });
+      }
+    }
+    const rollback = new WorkflowRevisionService(pool, new HeldRollback(pool))
+      .rollbackRevision(tenantB, workflow.workflowId, { targetRevisionId: first, reason: 'Concurrent rollback check' });
+    await Promise.race([prepared.promise, rollback.then(() => assert.fail('Rollback committed before the ingress arrived'))]);
+    const observer = await pool.connect();
+    const submissions = Promise.allSettled(Array.from({ length: 40 }, (_, index) => submit(`during-${index}`)));
+    try {
+      await until(async () => {
+        const { rows } = await observer.query(`
+          SELECT pid FROM pg_stat_activity
+          WHERE datname = current_database() AND wait_event_type = 'Lock'
+            AND query LIKE '%FROM workflow_definitions%' AND query LIKE '%FOR SHARE%'
+        `);
+        return rows.length ? true : undefined;
+      }, 'Ingress did not wait for the locked workflow definition.', 5000);
+    } finally {
+      release.resolve();
+      observer.release();
+      await rollback;
+    }
+    for (const result of await submissions) {
+      if (result.status === 'rejected') throw result.reason;
+      assert.equal(result.value.revisionId, first);
+    }
     const next = await submit('pinned-after-rollback');
     assert.equal(next.revisionId, first);
     const { rows } = await tenantWork.run(tenantB, (client) => client.query(`
