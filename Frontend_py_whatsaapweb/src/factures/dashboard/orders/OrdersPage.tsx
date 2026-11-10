@@ -22,8 +22,8 @@ function orderDate(value: string) {
   const date = new Date(value);
   return Number.isFinite(date.getTime()) ? date.toLocaleString('es', { dateStyle: 'medium', timeStyle: 'short' }) : 'Sin fecha';
 }
-function OrderStatus({ order }: { order: Order }) {
-  return <span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-semibold dark:bg-gray-800">
+function OrderStatus({ order, announce = false }: { order: Order; announce?: boolean }) {
+  return <span aria-live={announce ? 'polite' : undefined} className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-semibold dark:bg-gray-800">
     {order.reservationExpiredAt ? 'Reserva vencida' : order.reservationReleasePending ? 'Liberación pendiente' : orderStatus(order.status)}
   </span>;
 }
@@ -176,9 +176,10 @@ function OrderDetail({ id }: { id: number }) {
     });
     return () => request.abort();
   }, [attempt, id]);
+  const displayedId = order?.id;
   useEffect(() => {
-    if (order) heading.current?.focus();
-  }, [order]);
+    if (displayedId) heading.current?.focus();
+  }, [displayedId]);
   const expiresAt = order?.reservationExpiresAt;
   useEffect(() => {
     if (!expiresAt) return;
@@ -220,6 +221,7 @@ function OrderDetail({ id }: { id: number }) {
     try {
       const saved = await changeOrderStatus(order, action, reservationMinutes);
       setOrder(saved);
+      heading.current?.focus();
       setNotice({ message: 'Estado confirmado por el servidor · ' + orderStatus(saved.status) });
     } catch (cause) {
       setNotice({ message: orderError(cause, 'No pudimos confirmar la operación. Consulta el estado antes de repetirla.'), error: true });
@@ -248,7 +250,7 @@ function OrderDetail({ id }: { id: number }) {
               {order.reservationExpiresAt && <p className={subtext}>Reserva hasta <time dateTime={order.reservationExpiresAt}>{orderDate(order.reservationExpiresAt)}</time></p>}
               {order.reservationExpiredAt && <p className={subtext}>Disponibilidad liberada el <time dateTime={order.reservationExpiredAt}>{orderDate(order.reservationExpiredAt)}</time></p>}
             </div>
-            <OrderStatus order={order} />
+            <OrderStatus order={order} announce />
           </header>
           {state?.savedOrder === order.id && !notice && <p role="status" className="text-sm font-medium text-emerald-800 dark:text-emerald-300">Prepedido guardado.</p>}
           <section className={card + ' space-y-3'} aria-labelledby="order-items-title">
