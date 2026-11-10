@@ -32,6 +32,22 @@
     @apply inline-flex h-11 items-center justify-center gap-2 rounded-[10px] border border-[#D9E5DF] bg-white px-4 text-sm font-semibold text-[#10231C] transition hover:bg-[#EEF4F1] disabled:cursor-not-allowed disabled:opacity-60;
   }
 
+  .payment-workspace :is(.admin-control, .admin-textarea, .admin-button-secondary) {
+    @apply border-subtle bg-surface text-primary;
+  }
+
+  .payment-workspace :is(.admin-control, .admin-textarea)::placeholder {
+    @apply text-secondary;
+  }
+
+  .payment-workspace :is(.admin-control, .admin-textarea, .admin-button-secondary):focus-visible {
+    @apply outline outline-2 outline-offset-2 outline-teal-600 dark:outline-teal-300;
+  }
+
+  .payment-workspace .admin-button-secondary:hover {
+    @apply bg-canvas;
+  }
+
   .admin-icon-button {
     @apply inline-flex h-9 w-9 items-center justify-center rounded-[10px] border border-[#D9E5DF] bg-white text-[#5B6F66] transition hover:bg-[#EEF4F1] hover:text-[#128C7E] disabled:cursor-not-allowed disabled:opacity-50;
   }

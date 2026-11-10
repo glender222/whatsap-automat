@@ -19,6 +19,18 @@ npm run test:e2e -- e2e/theme.spec.ts
 
 Para usar Chrome instalado en el sistema se puede ejecutar `PLAYWRIGHT_CHANNEL=chrome npm run test:e2e -- e2e/theme.spec.ts`. Las pruebas de apariencia usan respuestas HTTP de prueba y dos sesiones de navegador.
 
+## UX-02. El regreso desde un pedido pierde la página
+
+- **Antes.** En escritorio como administrador y en móvil como operador, abrir un pedido de la segunda página y usar «Volver a pedidos» llevaba a la primera página y volvía a consultar el offset 0.
+- **Después.** El detalle lleva la página de origen en su URL. Chrome volvió a consultar el offset 20 y mostró el mismo pedido tras recargar el detalle. Ambos recorridos se hicieron con teclado. Escape cerró el diálogo de confirmación, devolvió el foco al botón y no envió una mutación.
+
+## UX-03. Pagos conserva superficies claras con el tema Oscuro
+
+- **Antes.** Al entrar desde Bandeja, el documento seguía en Oscuro pero Chrome calculaba un fondo blanco para Comprobantes manuales. Pagos y la conciliación usaban colores fijos.
+- **Después.** Las superficies, los textos y los controles de Pagos y conciliación usan los tokens de apariencia del espacio de trabajo. Chrome verificó el fondo de ambos paneles y del filtro de conciliación, además del color del título, al navegar con Oscuro y luego con Claro. La prueba usa respuestas HTTP de fixture y no consulta ni concilia pagos reales.
+
+Para reproducir UX-02 y UX-03, ejecutar `npm run test:e2e -- e2e/orders-navigation.spec.ts e2e/theme.spec.ts` desde el frontend.
+
 ## MSG-01. Conversaciones nuevas y recuperación de la bandeja
 
 - **Antes.** Chrome abrió dos bandejas vacías conectadas por Socket.IO. El backend confirmó los webhooks firmados y el historial HTTP devolvió el texto correcto por empresa. La prueba falló porque el mensaje nuevo de Alfa seguía ausente de su bandeja.

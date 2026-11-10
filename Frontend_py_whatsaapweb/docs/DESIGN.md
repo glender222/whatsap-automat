@@ -148,4 +148,6 @@ La navegación de escritorio y móvil conserva el mismo orden entre bandeja, res
 
 Cada conversación tiene un enlace directo con su identificador. Cambiar de conversación cancela la carga anterior y conserva el borrador local del hilo. La cola general se carga desde la API de conversaciones aunque las etiquetas estén fuera de servicio.
 
+El detalle de un pedido abierto desde el listado conserva la página de origen en la URL. «Volver a pedidos» abre esa página incluso después de recargar el detalle. Las superficies, diálogos y controles de validación de pagos y conciliación usan los colores del tema activo del espacio de trabajo.
+
 Campañas muestra el listado del servidor y permite preparar borradores. Segmentos solicita el recuento al backend. Auditoría y Salud del sistema muestran el error de consulta cuando el servicio no está disponible.

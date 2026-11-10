@@ -18,6 +18,13 @@ const actions: Record<OrderAction, { label: string; consequence: string }> = {
   cancelled: { label: 'Cancelar pedido', consequence: 'Al cancelar, el servidor liberará las reservas vigentes de este pedido.' },
 };
 
+function orderLocation(page: number, id?: number) {
+  const params = new URLSearchParams();
+  if (id !== undefined) params.set('pedido', String(id));
+  if (page > 1) params.set('pagina', String(page));
+  return params.size ? `${ordersPath}?${params}` : ordersPath;
+}
+
 function orderDate(value: string) {
   const date = new Date(value);
   return Number.isFinite(date.getTime()) ? date.toLocaleString('es', { dateStyle: 'medium', timeStyle: 'short' }) : 'Sin fecha';
@@ -73,7 +80,7 @@ function OrderList({ page }: { page: number }) {
         </button>}
       </header>
       {creating && <OrderDraftForm onClose={() => { restoreCreateFocus.current = true; setCreating(false); }} onSave={(order) => {
-        navigate(ordersPath + '?pedido=' + order.id, { state: { savedOrder: order.id } });
+        navigate(orderLocation(page, order.id), { state: { savedOrder: order.id } });
       }} />}
       {!current && <p role="status" className={subtext}>Cargando pedidos…</p>}
       {current?.error && <div className="space-y-2">
@@ -92,7 +99,7 @@ function OrderList({ page }: { page: number }) {
             <ul className="divide-y divide-gray-200 rounded-xl border border-gray-200 bg-white dark:divide-gray-700 dark:border-gray-700 dark:bg-gray-900">
               {rows.map((order) => (
                 <li key={order.id}>
-                  <Link to={ordersPath + '?pedido=' + order.id} className="flex flex-wrap items-start justify-between gap-2 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800">
+                  <Link to={orderLocation(page, order.id)} className="flex flex-wrap items-start justify-between gap-2 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800">
                     <div className="min-w-0">
                       <h3 className="break-words text-sm font-semibold">#{order.id} · {order.title}</h3>
                       <time dateTime={order.occurredAt} className={subtext}>{orderDate(order.occurredAt)}</time>
@@ -105,8 +112,8 @@ function OrderList({ page }: { page: number }) {
           ) : <p className={card + ' ' + subtext}>{total ? 'No hay pedidos en esta página.' : 'Todavía no hay pedidos registrados en esta empresa.'}</p>}
           {(page > 1 || offset + rows.length < total) && (
             <nav aria-label="Páginas de pedidos" className="flex flex-wrap gap-2">
-              {page > 1 && <Link to={ordersPath + '?pagina=' + (page - 1)} className={secondary}>Anterior</Link>}
-              {offset + rows.length < total && <Link to={ordersPath + '?pagina=' + (page + 1)} className={secondary}>Siguiente</Link>}
+              {page > 1 && <Link to={orderLocation(page - 1)} className={secondary}>Anterior</Link>}
+              {offset + rows.length < total && <Link to={orderLocation(page + 1)} className={secondary}>Siguiente</Link>}
             </nav>
           )}
         </div>
@@ -156,7 +163,7 @@ function OrderActionDialog({ order, action, onCancel, onConfirm }: {
   );
 }
 
-function OrderDetail({ id }: { id: number }) {
+function OrderDetail({ id, page }: { id: number; page: number }) {
   const { state } = useLocation();
   const [order, setOrder] = useState<Order>();
   const [loadError, setLoadError] = useState('');
@@ -234,7 +241,7 @@ function OrderDetail({ id }: { id: number }) {
 
   return (
     <div className="space-y-4">
-      <Link className={secondary} to={ordersPath}><ArrowLeft size={16} aria-hidden="true" /> Volver a pedidos</Link>
+      <Link className={secondary} to={orderLocation(page)}><ArrowLeft size={16} aria-hidden="true" /> Volver a pedidos</Link>
       {loadError && <div className="space-y-2"><OrderProblem message={loadError} />
         <button type="button" className={secondary} onClick={reload}>Volver a cargar</button></div>}
       {!order && !loadError && <p role="status" className={subtext}>Cargando pedido…</p>}
@@ -297,9 +304,9 @@ export default function OrdersPage() {
   const page = Math.min(Math.floor(Number.MAX_SAFE_INTEGER / orderPageSize), positiveInt(params.get('pagina')) ?? 1);
   return (
     <section className="mx-auto max-w-5xl p-4 sm:p-6" aria-label="Pedidos comerciales">
-      {id ? <OrderDetail key={id} id={id} />
+      {id ? <OrderDetail key={id} id={id} page={page} />
         : rawId !== null ? <div className="space-y-3"><OrderProblem message="El identificador de pedido no es válido." />
-          <Link className={secondary} to={ordersPath}>Volver a pedidos</Link></div>
+          <Link className={secondary} to={orderLocation(page)}>Volver a pedidos</Link></div>
           : <OrderList page={page} />}
     </section>
   );

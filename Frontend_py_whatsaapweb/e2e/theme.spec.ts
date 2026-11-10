@@ -79,3 +79,37 @@ test('follows system color only in Sistema and synchronizes preferences between 
   await page.emulateMedia({ colorScheme: 'dark' });
   await expect(root).not.toHaveClass(/\bdark\b/);
 });
+
+test('payment and reconciliation surfaces follow the workspace theme', async ({ page }) => {
+  await page.route(/\/api\/payments(?:\?|$)/, (route) => route.fulfill({ json: {
+    success: true, data: { rows: [], total: 0, limit: 50, offset: 0 },
+  } }));
+  await page.route(/\/api\/payments\/mercadopago-reconciliations(?:\?|$)/, (route) => route.fulfill({ json: {
+    success: true, data: { rows: [], nextBeforeOrderId: null, canReconcile: false },
+  } }));
+  const navigation = page.getByRole('navigation', { name: 'Espacio de trabajo' });
+  const payments = page.getByRole('region', { name: 'Comprobantes manuales' });
+  const reconciliation = page.getByRole('region', { name: 'Conciliación Mercado Pago' });
+  const paymentLink = navigation.getByRole('link', { name: 'Validación de pagos' });
+  const configLink = navigation.getByRole('link', { name: 'Configuración' });
+
+  await page.goto(inbox);
+  await paymentLink.click();
+  await reconciliation.getByRole('button', { name: 'Ver registros' }).click();
+  const orderFilter = reconciliation.getByRole('textbox', { name: /pedido/i });
+  await expect(orderFilter).toBeVisible();
+  await expect(page.locator('html')).toHaveClass(/\bdark\b/);
+  for (const surface of [payments, reconciliation, orderFilter]) {
+    await expect(surface).toHaveCSS('background-color', 'rgb(19, 27, 46)');
+  }
+  await expect(reconciliation.getByRole('heading')).toHaveCSS('color', 'rgb(248, 250, 252)');
+
+  await configLink.click();
+  await page.getByRole('combobox', { name: 'Tema' }).selectOption('Claro');
+  await paymentLink.click();
+  await reconciliation.getByRole('button', { name: 'Ver registros' }).click();
+  for (const surface of [payments, reconciliation, orderFilter]) {
+    await expect(surface).toHaveCSS('background-color', 'rgb(255, 255, 255)');
+  }
+  await expect(reconciliation.getByRole('heading')).toHaveCSS('color', 'rgb(15, 23, 42)');
+});
