@@ -178,3 +178,110 @@ test('delivery receipts update an open conversation without affecting another co
     await Promise.all(contexts.map((context) => context.close()));
   }
 });
+
+test('an active tag preserves live previews across a delayed snapshot and reconnect', async ({ browser, request }) => {
+  const companies = provisionCompanies();
+  const contexts = await Promise.all(companies.map(() => browser.newContext()));
+  const contact = '12025550145';
+  const untagged = '12025550146';
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  const receive = (company: Company, from: string, body: string, id = 'wamid.' + randomUUID()) =>
+    postWebhook(request, company, { messages: [{ id, from, timestamp, type: 'text', text: { body } }] });
+
+  try {
+    const originalId = 'wamid.' + randomUUID();
+    const workspaces = await Promise.all(companies.map(async (company, index) => {
+      const headers = { authorization: 'Bearer ' + company.auth.accessToken };
+      await receive(company, contact, `Mensaje inicial ${index}`, originalId);
+      const tag = await request.post(backend + '/api/tags', { headers, data: { name: 'Soporte' } });
+      expect(tag.status()).toBe(200);
+      const { data } = await tag.json();
+      const assigned = await request.post(`${backend}/api/tags/${data.id}/chats`, { headers, data: { chatId: contact } });
+      expect(assigned.status()).toBe(200);
+      const context = contexts[index];
+      await context.addInitScript((auth) => localStorage.setItem('auth', JSON.stringify(auth)), company.auth);
+      const page = await context.newPage();
+      let online = true;
+      let closeSocket: (() => Promise<void>) | undefined;
+      if (index === 0) {
+        await page.routeWebSocket(/\/socket\.io\//, async (socket) => {
+          if (!online) return socket.close({ code: 1001 });
+          socket.connectToServer();
+          closeSocket = () => socket.close({ code: 1001 });
+        });
+      }
+      const connected = Promise.withResolvers<void>();
+      page.on('websocket', (socket) => socket.on('framereceived', ({ payload }) => {
+        if (typeof payload === 'string' && payload.startsWith('40{')) connected.resolve();
+      }));
+      await page.goto('/gestion-web/inicio');
+      const filter = page.getByRole('combobox', { name: 'Etiqueta' });
+      await filter.selectOption({ label: 'Soporte' });
+      await expect(page.getByText(`Mensaje inicial ${index}`, { exact: true })).toBeVisible();
+      await connected.promise;
+      return {
+        page, filter, headers, tagUrl: `${backend}/api/tags/${data.id}/chats/full`,
+        async disconnect() { online = false; await context.setOffline(true); await closeSocket?.(); },
+        async reconnect() { online = true; await context.setOffline(false); },
+      };
+    }));
+
+    const [alpha, bravo] = workspaces;
+    const foreignTag = await request.get(alpha.tagUrl, { headers: bravo.headers });
+    expect(foreignTag.status()).toBe(404);
+    const captured = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    await alpha.page.route(alpha.tagUrl, async (route) => {
+      const snapshot = await route.fetch();
+      const { data } = await snapshot.json();
+      expect(data.map((chat: { lastMessagePreview: string }) => chat.lastMessagePreview)).toEqual(['Mensaje inicial 0']);
+      captured.resolve();
+      await release.promise;
+      await route.fulfill({ response: snapshot });
+    }, { times: 1 });
+    const liveText = 'Mensaje de Alfa durante la consulta';
+    const refresh = alpha.page.waitForResponse(alpha.tagUrl);
+    try {
+      await receive(companies[0], untagged, 'Conversación sin etiqueta');
+      await captured.promise;
+      await receive(companies[0], contact, liveText);
+      await expect(alpha.page.getByText(liveText, { exact: true })).toBeVisible();
+    } finally {
+      release.resolve();
+    }
+    expect(await (await refresh).finished()).toBeNull();
+    await alpha.page.evaluate(() => new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    }));
+    await expect(alpha.page.getByText(liveText, { exact: true })).toBeVisible();
+    await expect(alpha.page.getByText('Mensaje inicial 0', { exact: true })).toHaveCount(0);
+    await expect(alpha.page.getByText('Conversación sin etiqueta', { exact: true })).toHaveCount(0);
+    await expect(bravo.page.getByText(liveText, { exact: true })).toHaveCount(0);
+    await expect(bravo.page.getByText('Mensaje inicial 1', { exact: true })).toBeVisible();
+
+    await alpha.disconnect();
+    const missed = 'Mensaje de Alfa con la bandeja desconectada';
+    await receive(companies[0], contact, missed);
+    await expect(alpha.page.getByText(missed, { exact: true })).toHaveCount(0);
+    await alpha.reconnect();
+    await expect(alpha.page.getByText(missed, { exact: true })).toBeVisible();
+    await expect(alpha.filter.locator('option:checked')).toHaveText('Soporte');
+    await expect(alpha.page.getByText('Conversación sin etiqueta', { exact: true })).toHaveCount(0);
+    await expect(bravo.page.getByText(missed, { exact: true })).toHaveCount(0);
+
+    const late = {
+      id: 'wamid.' + randomUUID(), from: contact, timestamp: String(Number(timestamp) - 25 * 60 * 60),
+      type: 'text', text: { body: 'Mensaje recibido fuera de orden' },
+    };
+    await postWebhook(request, companies[0], { messages: [late] });
+    await expect(alpha.page.getByLabel('4 sin leer', { exact: true })).toBeVisible();
+    await expect(alpha.page.getByText(missed, { exact: true })).toBeVisible();
+    await postWebhook(request, companies[0], { messages: [late] });
+    const persisted = await request.get(alpha.tagUrl, { headers: alpha.headers });
+    expect(persisted.status()).toBe(200);
+    expect((await persisted.json()).data).toMatchObject([{ lastMessagePreview: missed, unreadCount: 4 }]);
+    await expect(bravo.page.getByLabel('1 sin leer', { exact: true })).toBeVisible();
+  } finally {
+    await Promise.all(contexts.map((context) => context.close()));
+  }
+});

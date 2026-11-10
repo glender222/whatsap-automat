@@ -68,6 +68,7 @@ test('legacy HTTP routes never send or persist free-form Meta text and preserve 
   const { default: createWhatsAppRoutes } = await import('../routes/whatsappRoutes');
   const { default: createCompanyRoutes } = await import('../routes/companyRoutes');
   const { default: WhatsApp } = await import('../services/whatsappService');
+  const { MetaInboxStore } = await import('../services/whatsapp/meta/MetaInboxStore');
   const { cleanRejectedUpload } = require('../middleware/legacyHumanSend');
   const createChatRoutes = require('../routes/chatRoutes');
   const createMediaRoutes = require('../routes/mediaRoutes');
@@ -779,5 +780,36 @@ fs.truncateSync(file, ${overLimit});
     origin = await appFor(colliding);
     assert.equal((await settings(unboundTenant)).body.data.status.accountStatus, 'missing_config');
     assert.equal((await settings(tenantA)).body.data.status.configured, true);
+  });
+
+  await t.test('a late inbound message cannot rewind the preview or close a live service window', async () => {
+    const sender = '12025550146';
+    const now = Math.floor(Date.now() / 1000);
+    const old = now - 25 * 60 * 60;
+    const record = (companyId: number, timestamp: number, id: string, body: string) =>
+      new MetaInboxStore({ companyId }).persistInboundMessage({
+        message: { id, from: sender, type: 'text', timestamp: String(timestamp), text: { body } },
+      });
+
+    await record(tenantA, now, 'wamid.recent', 'Recent Alfa');
+    await record(tenantB, now, 'wamid.recent', 'Recent Bravo');
+    await record(tenantA, old, 'wamid.late', 'Older Alfa');
+    assert.equal((await record(tenantA, old, 'wamid.late', 'Duplicate')).duplicate, true);
+
+    const inbox = new MetaInboxStore({ companyId: tenantA });
+    const [chat] = (await inbox.getChats()).filter(({ id }) => id === sender);
+    assert.equal(chat.lastMessagePreview, 'Recent Alfa');
+    assert.equal(chat.lastMessageTimestamp, now);
+    assert.equal(chat.unreadCount, 2);
+    assert.equal(new Date(String(chat.serviceWindowExpiresAt)).getTime(), (now + 24 * 60 * 60) * 1000);
+    const messages = await inbox.getMessages(sender);
+    assert.deepEqual(messages.map(({ body }) => body).sort(), ['Older Alfa', 'Recent Alfa']);
+    const window = await inbox.getServiceWindowStatus(sender);
+    assert.equal(window.hasActiveSession, true);
+    assert.equal(new Date(String(window.lastCustomerMessageAt)).getTime(), now * 1000);
+    const other = (await new MetaInboxStore({ companyId: tenantB }).getChats()).find(({ id }) => id === sender);
+    assert.ok(other);
+    assert.equal(other.lastMessagePreview, 'Recent Bravo');
+    assert.equal(other.unreadCount, 1);
   });
 });

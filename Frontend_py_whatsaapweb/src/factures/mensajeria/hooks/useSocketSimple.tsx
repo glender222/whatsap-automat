@@ -134,13 +134,15 @@ export const useSocketSimple = ({
         if (index === -1) return prevChats;
 
         const existing = prevChats[index];
-        if ((msg.timestamp || 0) < (existing.lastMessageTimestamp || 0)) return prevChats;
+        const older = msg.timestamp < existing.lastMessageTimestamp;
+        const unreadCount = selectedChat === msg.chatId ? 0
+          : msg.fromMe ? (older ? existing.unreadCount : 0) : existing.unreadCount + 1;
         const next = [...prevChats];
         next[index] = {
           ...existing,
-          lastMessageTimestamp: msg.timestamp,
-          lastMessagePreview: preview ?? existing.lastMessagePreview,
-          unreadCount: msg.fromMe || selectedChat === msg.chatId ? 0 : (existing.unreadCount || 0) + 1,
+          lastMessageTimestamp: older ? existing.lastMessageTimestamp : msg.timestamp,
+          lastMessagePreview: older ? existing.lastMessagePreview : preview ?? existing.lastMessagePreview,
+          unreadCount,
         };
         return sortChatsByActivity(next);
       });

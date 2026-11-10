@@ -62,6 +62,14 @@ Las pruebas de Studio y despacho acotado pasaron 18 casos con PostgreSQL y un pr
 - **Cambio.** Tras confirmar un avance de estado en PostgreSQL, el backend avisa únicamente a la sala de la empresa y conversación. La bandeja actualiza el historial sin ocultarlo. La reconciliación conserva las llegadas recibidas mientras esa petición estaba pendiente, aunque compartan la marca de tiempo de un mensaje de la respuesta HTTP.
 - **Después.** En dos empresas con el mismo contacto e identificador de proveedor, Alfa pasó de «Enviado» a «Entregado» y «Leído». Bravo conservó «Enviado» y recibió cero avisos de Alfa. Se verificó que «Leído» no retrocede ante un recibo tardío y que el mensaje simultáneo permanece en el historial después de completar la petición retrasada.
 
+## MSG-04. Filtro de etiquetas y webhooks fuera de orden
+
+- **Antes.** En el filtro «Soporte», una respuesta HTTP retenida reemplazaba una vista previa que Socket.IO acababa de actualizar en el mismo segundo. Una prueba independiente contra PostgreSQL mostró que un mensaje llegado 25 horas tarde también reemplazaba la vista previa persistida.
+- **Cambio.** HTTP determina qué filas pertenecen al filtro. Si devuelve la misma fila que había al iniciar la consulta, la bandeja conserva la actualización que llegó en el intervalo. La persistencia conserva la fecha más reciente del cliente y su ventana de atención. Un mensaje más antiguo se incorpora al historial y al contador de no leídos sin reemplazar la vista previa del mensaje más reciente.
+- **Después.** Chrome mantuvo «Soporte» al reconectar Alfa, mostró el mensaje recibido sin conexión y ocultó la conversación sin etiqueta. La consulta del identificador de la etiqueta de Alfa devolvió `404` para Bravo. El mensaje tardío y su duplicado dejaron cuatro no leídos en Alfa y uno en Bravo. PostgreSQL confirmó dos mensajes únicos en el historial de la prueba aislada, la vista previa reciente y la ventana activa.
+
+Para reproducirlo con el entorno de MSG-01, ejecutar `npm run test:e2e -- e2e/inbox.integration.spec.ts -g 'active tag'`. La prueba SQL está incluida en `legacy-meta-send-postgres.test.ts`.
+
 ## IA-01. Evaluación de ejecución por revisión y empresa
 
 - El evaluador interno carga una revisión inmutable y una suite guardada bajo RLS. Verifica las afirmaciones y el presupuesto del conjunto antes de llamar al proveedor. La ejecución reclama un UUID persistido y guarda las huellas de la revisión y de la suite, los resultados de las afirmaciones y las referencias de consumo. El resumen omite el texto de entrada y salida.
@@ -85,7 +93,7 @@ Para reproducirlo, aplicar la migración 056 en la base local de pruebas y ejecu
 
 | Recorrido | Evidencia pendiente |
 | --- | --- |
-| Bandeja en tiempo real | Filtro por etiqueta. Extender la evidencia de navegador de MSG-01 y MSG-03. |
+| Bandeja en tiempo real | Filtro por etiqueta, reconexión y reorden de webhooks cubiertos en MSG-04. Ampliar la evidencia a paginación e historial en conversaciones grandes. |
 | Envío y recepción | Extender los casos de reorden y duplicados ya probados a la bandeja. Verificar timeout, reintento, historial paginado, adjuntos, ventana de atención y toma de control. Contar las llamadas al proveedor de prueba y comprobar persistencia e identidad. |
 | Harness IA | Borrador, validación, evaluación de ejecución, publicación y ejecución de una revisión inmutable. Comprobar permisos, límites, cancelación, recuperación y efectos concurrentes. |
 | Flujo operativo y navegación | Atención, pedido, pago, aprobación y conexión. Recorrer como administrador y operador, con teclado y diferentes tamaños de pantalla. |

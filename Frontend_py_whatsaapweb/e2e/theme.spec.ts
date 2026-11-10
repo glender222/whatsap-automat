@@ -21,8 +21,13 @@ test.beforeEach(async ({ context }) => {
 
 test('applies the theme before the React bundle loads', async ({ page }) => {
   await page.emulateMedia({ colorScheme: 'light' });
-  await page.route('**/src/main.tsx', (route) => route.abort());
+  let blockedEntrypoint = false;
+  await page.route((url) => url.pathname === '/src/main.tsx', (route) => {
+    blockedEntrypoint = true;
+    return route.abort();
+  });
   await page.goto(inbox);
+  expect(blockedEntrypoint).toBe(true);
   await expect(page.locator('html')).toHaveClass(/\bdark\b/);
   await expect(page.locator('html')).toHaveCSS('color-scheme', 'dark');
   await expect(page.locator('#root')).toBeEmpty();

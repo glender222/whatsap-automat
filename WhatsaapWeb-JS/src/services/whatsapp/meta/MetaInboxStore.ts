@@ -393,11 +393,17 @@ export class MetaInboxStore {
        DO UPDATE SET
          contact_id = COALESCE(EXCLUDED.contact_id, conversations.contact_id),
          title = COALESCE(EXCLUDED.title, conversations.title),
-         last_message_at = GREATEST(COALESCE(conversations.last_message_at, EXCLUDED.last_message_at), EXCLUDED.last_message_at),
-         last_customer_message_at = COALESCE(EXCLUDED.last_customer_message_at, conversations.last_customer_message_at),
-         service_window_expires_at = COALESCE(EXCLUDED.service_window_expires_at, conversations.service_window_expires_at),
-         last_message_preview = COALESCE(EXCLUDED.last_message_preview, conversations.last_message_preview),
-         last_message_direction = COALESCE(EXCLUDED.last_message_direction, conversations.last_message_direction),
+         last_message_at = GREATEST(conversations.last_message_at, EXCLUDED.last_message_at),
+         last_customer_message_at = GREATEST(conversations.last_customer_message_at, EXCLUDED.last_customer_message_at),
+         service_window_expires_at = GREATEST(conversations.service_window_expires_at, EXCLUDED.service_window_expires_at),
+         last_message_preview = CASE
+           WHEN EXCLUDED.last_message_at < conversations.last_message_at THEN conversations.last_message_preview
+           ELSE COALESCE(EXCLUDED.last_message_preview, conversations.last_message_preview)
+         END,
+         last_message_direction = CASE
+           WHEN EXCLUDED.last_message_at < conversations.last_message_at THEN conversations.last_message_direction
+           ELSE EXCLUDED.last_message_direction
+         END,
          unread_count = conversations.unread_count + CASE WHEN EXCLUDED.last_message_direction = 'inbound' THEN 1 ELSE 0 END,
          status = 'open',
          updated_at = NOW()
