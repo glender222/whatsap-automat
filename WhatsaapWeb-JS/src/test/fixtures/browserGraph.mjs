@@ -19,6 +19,8 @@ assert.equal(process.env.WHATSAPP_PROVIDER, 'meta-cloud');
 
 const attempts = new Map();
 const media = new Map();
+const connectionStates = new Map();
+const connectionChecks = new Map();
 const fixtureFile = Buffer.from('Archivo QA');
 function json(res, status, data) {
   res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(data));
@@ -30,12 +32,34 @@ const server = createServer(async (req, res) => {
   if (req.method === 'GET' && url.pathname === '/attempts') {
     return json(res, 200, attempts.get(url.searchParams.get('line')) ?? []);
   }
+  const controlledLine = /^\/connection-fixture\/([0-9]+)$/.exec(url.pathname)?.[1];
+  if (controlledLine && req.method === 'GET') {
+    return json(res, 200, { state: connectionStates.get(controlledLine) ?? 'authorized',
+      checks: connectionChecks.get(controlledLine) ?? 0 });
+  }
+  if (controlledLine && req.method === 'POST') {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    try {
+      const { state } = JSON.parse(Buffer.concat(chunks).toString());
+      if (!['authorized', 'unauthorized', 'unavailable'].includes(state)) return json(res, 400, {});
+      connectionStates.set(controlledLine, state);
+      return json(res, 200, { state });
+    } catch { return json(res, 400, {}); }
+  }
 
   const match = /^\/v\d+\.\d+\/([0-9]+)\/(media|messages)$/.exec(url.pathname);
   if (req.headers.authorization !== 'Bearer synthetic-local-token') {
     return json(res, 401, { error: { code: 190, message: 'Unexpected fixture credential' } });
   }
   const mediaId = /^\/v\d+\.\d+\/([0-9]+)$/.exec(url.pathname)?.[1];
+  if (req.method === 'GET' && mediaId && url.searchParams.get('fields') === 'id') {
+    connectionChecks.set(mediaId, (connectionChecks.get(mediaId) ?? 0) + 1);
+    const state = connectionStates.get(mediaId);
+    if (state === 'unauthorized') return json(res, 401, { error: { code: 190, message: 'Fixture authorization expired' } });
+    if (state === 'unavailable') return json(res, 503, { error: { code: 2, message: 'Fixture temporarily unavailable' } });
+    return json(res, 200, { id: mediaId });
+  }
   if (req.method === 'GET' && mediaId && media.get(mediaId) === url.searchParams.get('phone_number_id')) {
     return json(res, 200, { url: `https://graph.facebook.com/fixture-content/${mediaId}`,
       mime_type: 'text/plain', file_size: fixtureFile.length });

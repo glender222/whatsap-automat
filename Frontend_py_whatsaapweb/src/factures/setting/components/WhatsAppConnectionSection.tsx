@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, type FormEvent } from 'react';
 import { WhatsAppService } from '../services/whatsappService';
 import { CompanyService, type CompanyOverview, type WhatsAppConnectionPayload } from '../services/companyService';
+import MetaConnectionActions from './MetaConnectionActions';
 
 interface WhatsAppConnectionSectionProps {
   numeroAfiliado: string | null;
@@ -41,6 +42,7 @@ const WhatsAppConnectionSection: React.FC<WhatsAppConnectionSectionProps> = ({
     webhookVerifyToken: '',
   });
   const [saving, setSaving] = useState(false);
+  const [managingConnection, setManagingConnection] = useState(false);
   const submitting = useRef(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -62,6 +64,10 @@ const WhatsAppConnectionSection: React.FC<WhatsAppConnectionSectionProps> = ({
     : 'Pendiente';
 
   useEffect(() => {
+    if (whatsapp?.accountStatus === 'disconnected') {
+      setSaveMessage(null);
+      setSaveError(null);
+    }
     setForm((current) => ({
       ...current,
       phoneNumberId: whatsapp?.phoneNumberId || '',
@@ -70,7 +76,7 @@ const WhatsAppConnectionSection: React.FC<WhatsAppConnectionSectionProps> = ({
       graphVersion: whatsapp?.graphVersion || 'v25.0',
       accessToken: '',
     }));
-  }, [whatsapp?.phoneNumberId, whatsapp?.wabaId, whatsapp?.displayPhoneNumber, whatsapp?.graphVersion]);
+  }, [whatsapp?.phoneNumberId, whatsapp?.wabaId, whatsapp?.displayPhoneNumber, whatsapp?.graphVersion, whatsapp?.accountStatus, whatsapp?.tokenConfiguredAt]);
 
   const updateField = (field: keyof WhatsAppConnectionPayload, value: string) => {
     setSaveMessage(null);
@@ -80,7 +86,7 @@ const WhatsAppConnectionSection: React.FC<WhatsAppConnectionSectionProps> = ({
 
   const handleSaveConnection = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (submitting.current || loadingOverview || !isMetaCloud || !canManageConnection || !form.phoneNumberId.trim()) return;
+    if (submitting.current || managingConnection || loadingOverview || !isMetaCloud || !canManageConnection || !form.phoneNumberId.trim()) return;
     submitting.current = true;
     setSaving(true);
     setSaveMessage(null);
@@ -205,6 +211,17 @@ const WhatsAppConnectionSection: React.FC<WhatsAppConnectionSectionProps> = ({
         </div>
       )}
 
+      {isMetaCloud && companyOverview && <MetaConnectionActions
+        key={companyOverview.company.id}
+        companyId={companyOverview.company.id}
+        phoneNumberId={whatsapp?.phoneNumberId || null}
+        version={`${whatsapp?.tokenConfiguredAt}/${whatsapp?.accountStatus}/${whatsapp?.graphVersion}`}
+        canManage={Boolean(canManageConnection)}
+        disabled={saving || Boolean(loadingOverview)}
+        onBusyChange={setManagingConnection}
+        onChanged={onConnectionSaved}
+      />}
+
       {isMetaCloud && canManageConnection && (
         <form onSubmit={handleSaveConnection} aria-labelledby="whatsapp-meta-settings" className="mt-5 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
           <div className="mb-3">
@@ -216,7 +233,7 @@ const WhatsAppConnectionSection: React.FC<WhatsAppConnectionSectionProps> = ({
             </p>
           </div>
 
-          <div className="grid gap-3 md:grid-cols-2">
+          <fieldset disabled={saving || managingConnection || loadingOverview} className="grid gap-3 md:grid-cols-2">
             <label className="block">
               <span className="text-xs font-medium text-gray-600 dark:text-gray-400">Id. número de teléfono</span>
               <input
@@ -262,6 +279,7 @@ const WhatsAppConnectionSection: React.FC<WhatsAppConnectionSectionProps> = ({
               <input
                 type="password"
                 autoComplete="off"
+                required={!whatsapp.tokenConfigured}
                 value={form.accessToken || ''}
                 onChange={(event) => updateField('accessToken', event.target.value)}
                 className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
@@ -286,7 +304,7 @@ const WhatsAppConnectionSection: React.FC<WhatsAppConnectionSectionProps> = ({
                 placeholder="Opcional"
               />
             </label>
-          </div>
+          </fieldset>
 
           <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0 text-xs text-gray-500 dark:text-gray-400">
@@ -294,7 +312,7 @@ const WhatsAppConnectionSection: React.FC<WhatsAppConnectionSectionProps> = ({
             </div>
             <button
               type="submit"
-              disabled={saving || loadingOverview || !form.phoneNumberId.trim()}
+              disabled={saving || managingConnection || loadingOverview || !form.phoneNumberId.trim()}
               className="min-h-11 rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {saving ? 'Guardando...' : 'Guardar conexión'}

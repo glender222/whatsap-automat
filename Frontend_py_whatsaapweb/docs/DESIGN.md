@@ -62,7 +62,11 @@ La UI debe soportar dos realidades:
 - `webjs` legacy puede mostrar QR si el backend lo envia.
 - `meta-cloud` no debe mostrar QR; debe mostrar configuracion, numero conectado, webhook y errores accionables.
 
-Nunca pedir ni mostrar tokens de Meta en la UI final de usuario. La configuracion sensible pertenece al backend.
+Solo un administrador puede introducir una credencial de Meta en el formulario de conexión. El campo es de contraseña, no persiste en el navegador y se limpia al guardar, desconectar o cambiar de empresa. El servidor cifra la credencial y nunca la devuelve completa.
+
+La configuración distingue los datos guardados del diagnóstico de acceso. «Comprobar conexión» consulta la línea en Meta sin enviar mensajes y presenta la última comprobación y una acción de recuperación ante credenciales revocadas o indisponibilidad del proveedor. El diagnóstico y la conexión pertenecen a la empresa activa. Los empleados pueden consultar su estado, pero no guardar credenciales, ejecutar comprobaciones ni desconectar.
+
+«Desconectar WhatsApp» abre un diálogo que explica la eliminación de la credencial y la necesidad de volver a autorizar. El foco empieza en Cancelar; Escape devuelve el foco al botón de origen. Solo una respuesta confirmada muestra la desconexión como exitosa. Guardar, comprobar y desconectar no se ejecutan simultáneamente desde la pantalla.
 
 ## Reportes Y Sprint 5
 

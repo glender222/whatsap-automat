@@ -1,4 +1,5 @@
 import { api } from '../../../shared/axios/http';
+import { isAxiosError } from 'axios';
 
 export interface CompanyOverview {
   company: {
@@ -66,6 +67,29 @@ export interface WhatsAppConnectionPayload {
   webhookVerifyToken?: string;
 }
 
+export interface ConnectionHealth {
+  configured: boolean;
+  authorized: boolean;
+  lastErrorCode: string | null;
+  lastCheckedAt: string | null;
+}
+
+export interface MetaConnectionDiagnostic {
+  id: string;
+  tenantId: string;
+  channel: string;
+  externalAccountId: string;
+  health: ConnectionHealth;
+}
+
+function isHealth(value: unknown): value is ConnectionHealth {
+  if (!value || typeof value !== 'object') return false;
+  const health = value as Partial<ConnectionHealth>;
+  return typeof health.configured === 'boolean' && typeof health.authorized === 'boolean' &&
+    (health.lastErrorCode === null || typeof health.lastErrorCode === 'string') &&
+    (health.lastCheckedAt === null || typeof health.lastCheckedAt === 'string');
+}
+
 export class CompanyService {
   static async getOverview(): Promise<CompanyOverview> {
     const { data } = await api.get('/company/me');
@@ -85,14 +109,54 @@ export class CompanyService {
   }
 
   static async saveWhatsAppConnection(payload: WhatsAppConnectionPayload): Promise<WhatsAppCompanyConnection> {
-    const { data } = await api.post('/company/whatsapp/connection', payload);
+    const messages: Record<string, string> = {
+      META_PHONE_ACCESS_NOT_VERIFIED: 'La credencial no acredita acceso a esta línea. Revisa el ID, el token y sus permisos.',
+      META_CONNECTION_INVALID: 'Ingresa un ID de línea y una versión de Graph válidos.',
+      META_PHONE_VERIFICATION_UNAVAILABLE: 'Meta no está disponible para verificar la línea. Vuelve a intentar.',
+    };
+    const { data } = await api.post('/company/whatsapp/connection', payload).catch((cause: unknown) => {
+      const response = isAxiosError<{ error?: unknown }>(cause) ? cause.response : undefined;
+      const code = response?.data?.error;
+      const message = typeof code === 'string' && Object.hasOwn(messages, code) ? messages[code]
+        : response?.status === 403 ? 'Solo un administrador puede guardar la conexión.'
+          : 'No pudimos confirmar el guardado. Actualiza la conexión antes de volver a intentar.';
+      throw new Error(message);
+    });
     if (data?.success !== true || data.data?.provider !== 'meta-cloud' || data.data.phoneNumberId !== payload.phoneNumberId) {
       throw new Error('El servidor no confirmó los datos de conexión guardados.');
     }
     return data.data;
   }
 
-  static async disconnectWhatsAppConnection(): Promise<void> {
-    await api.delete('/company/whatsapp/connection');
+  static async disconnectWhatsAppConnection(signal?: AbortSignal): Promise<void> {
+    const { data } = await api.delete('/company/whatsapp/connection', { signal });
+    if (data?.success !== true) throw new Error('El servidor no confirmó la desconexión.');
+  }
+
+  static async getConnectionDiagnostic(companyId: number, phoneNumberId: string, signal: AbortSignal): Promise<MetaConnectionDiagnostic | null> {
+    let after: string | undefined;
+    const cursors = new Set<string>();
+    do {
+      const { data, headers } = await api.get<MetaConnectionDiagnostic[]>('/v1/channel-connections', {
+        params: { limit: 100, after }, signal,
+      });
+      if (!Array.isArray(data) || data.some((entry) => !entry || entry.tenantId !== String(companyId) ||
+          typeof entry.id !== 'string' || typeof entry.externalAccountId !== 'string' || !isHealth(entry.health))) {
+        throw new Error('El servidor no confirmó las conexiones de esta empresa.');
+      }
+      const connection = data.find((entry) => entry.channel === 'whatsapp-cloud' && entry.externalAccountId === phoneNumberId);
+      if (connection) return connection;
+      const cursor = headers['x-next-cursor'];
+      after = typeof cursor === 'string' && cursor ? decodeURIComponent(cursor) : undefined;
+      if (after && cursors.has(after)) throw new Error('El servidor repitió una página de conexiones.');
+      if (after) cursors.add(after);
+    } while (after);
+    return null;
+  }
+
+  static async checkConnection(id: string, signal: AbortSignal): Promise<ConnectionHealth> {
+    const { data } = await api.post(`/v1/channel-connections/${encodeURIComponent(id)}/validate`, {}, { signal });
+    if (!isHealth(data)) throw new Error('El servidor no confirmó el diagnóstico de la conexión.');
+    return data;
   }
 }
