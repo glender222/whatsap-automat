@@ -1,7 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { JwtRequest, requireJwt } from '../middleware/jwtAuth';
 import { resolveTenantContext, tenantContext } from '../middleware/tenantContext';
-import { getCurrentWorkspace } from '../services/workspaces/WorkspaceQueryService';
 import {
   ByokService,
   QuotaManager,
@@ -336,15 +335,10 @@ export default function createAiRoutes(options: AiRoutesOptions = {}): Router {
     try {
       const tenantId = resolveTenantId(req);
       const actor = resolveTenantContext(req);
-      const workspace = actor.userId ? await getCurrentWorkspace(tenantId, actor.userId, actor.role) : null;
-      if (!workspace?.capabilities.includes('approvals.review')) {
-        res.status(403).json({ success: false, error: 'POLICY_DENIED', message: 'Approval access requires an authorized reviewer' });
-        return;
-      }
       const limit = req.query.limit ? Number(req.query.limit) : 50;
       const offset = req.query.offset ? Number(req.query.offset) : 0;
 
-      const approvals = await hitl.listPendingApprovals(tenantId, { limit, offset });
+      const approvals = await hitl.listReviewerApprovals(tenantId, String(actor.userId), actor.role, { limit, offset });
       res.setHeader('Cache-Control', 'private, no-store');
       res.status(200).json({ success: true, data: approvals });
     } catch (err: any) {

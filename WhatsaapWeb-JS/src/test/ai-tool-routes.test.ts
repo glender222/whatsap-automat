@@ -29,6 +29,12 @@ function createMockUow() {
 
   const mockClient: Queryable = {
     async query(sql: string, params: any[] = []): Promise<any> {
+      if (sql.includes('JOIN memberships m')) {
+        const rows = params[0] === 1 && params[1] === 42
+          ? [{ tenant_name: 'Fixture', id: 1, name: 'Principal', slug: 'default', role: 'owner', user_role: 'ADMIN' }]
+          : [];
+        return { rowCount: rows.length, rows };
+      }
       // 1. SELECT conversation state
       if (sql.includes('FROM conversations')) {
         const convId = String(params[0]);
@@ -465,7 +471,7 @@ describe('PR-F5-02: AI ToolBroker Express Routes Integration (/api/v1/ai/tools &
     });
 
     test('lists pending approvals for tenant', async () => {
-      const token = createValidToken(1, 'supervisor');
+      const token = createValidToken(1, 'ADMIN');
 
       // Create an approval first
       await hitlService.createApprovalRequest({
@@ -486,7 +492,7 @@ describe('PR-F5-02: AI ToolBroker Express Routes Integration (/api/v1/ai/tools &
     });
 
     test('processes approval decision with CAS expectedVersion', async () => {
-      const token = createValidToken(1, 'supervisor');
+      const token = createValidToken(1, 'ADMIN');
 
       const app = await hitlService.createApprovalRequest({
         tenantId: 1,
@@ -494,7 +500,7 @@ describe('PR-F5-02: AI ToolBroker Express Routes Integration (/api/v1/ai/tools &
         toolName: 'create_invoice',
         effectKey: 'eff_test_02',
         proposedActionHash: 'hash02',
-        risk: 'financial',
+        risk: 'write',
         inputPayload: { amount: 999 },
       });
 

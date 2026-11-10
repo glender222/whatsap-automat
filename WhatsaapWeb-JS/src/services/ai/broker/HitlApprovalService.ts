@@ -132,20 +132,33 @@ export class HitlApprovalService {
     tenantId: number,
     options: { limit?: number; offset?: number; risk?: string } = {}
   ): Promise<ApprovalRequestV1[]> {
+    return this.uow.run(tenantId, (client) => this.listPendingInScope(client, tenantId, options));
+  }
+
+  async listReviewerApprovals(
+    tenantId: number, actorId: string, sessionRole: string | undefined,
+    options: { limit?: number; offset?: number } = {},
+  ): Promise<ApprovalRequestV1[]> {
+    return this.uow.run(tenantId, async (client) => {
+      await this.requireReviewer(client, tenantId, actorId, sessionRole);
+      return this.listPendingInScope(client, tenantId, options);
+    });
+  }
+
+  private async listPendingInScope(
+    client: Queryable, tenantId: number, options: { limit?: number; offset?: number; risk?: string },
+  ): Promise<ApprovalRequestV1[]> {
     const limit = Math.min(Math.max(1, options.limit || 50), 100);
     const offset = Math.max(0, options.offset || 0);
-
-    return this.uow.run(tenantId, async (client) => {
-      const res = await client.query(
-        `SELECT * FROM approval_requests
-         WHERE tenant_id = $1 AND status = 'pending' AND expires_at > NOW()
-           AND ($4::text IS NULL OR risk = $4)
-         ORDER BY created_at DESC, id DESC
-         LIMIT $2 OFFSET $3`,
-        [tenantId, limit, offset, options.risk ?? null]
-      );
-      return res.rows.map((r) => this.mapRowToContract(r));
-    });
+    const res = await client.query(
+      `SELECT * FROM approval_requests
+       WHERE tenant_id = $1 AND status = 'pending' AND expires_at > NOW()
+         AND ($4::text IS NULL OR risk = $4)
+       ORDER BY created_at DESC, id DESC
+       LIMIT $2 OFFSET $3`,
+      [tenantId, limit, offset, options.risk ?? null]
+    );
+    return res.rows.map((r) => this.mapRowToContract(r));
   }
 
   async getApprovalById(tenantId: number, approvalId: string): Promise<ApprovalRequestV1 | null> {
@@ -181,11 +194,7 @@ export class HitlApprovalService {
   }): Promise<ApprovalDecisionResultV1> {
     const { password, sessionRole, ...decision } = params;
     const result = await this.uow.run(params.tenantId, async (client) => {
-      const actorId = toPositiveInt(params.actorId);
-      const workspace = actorId && await readCurrentWorkspace(client, params.tenantId, actorId, sessionRole, true);
-      if (!actorId || !workspace || !workspace.capabilities.includes('approvals.review')) {
-        throw new ApprovalReviewError(403, 'POLICY_DENIED', 'Approval decisions require an active administrator membership');
-      }
+      const actorId = await this.requireReviewer(client, params.tenantId, params.actorId, sessionRole);
       const { rows: [approval] } = await client.query(
         'SELECT risk FROM approval_requests WHERE tenant_id = $1 AND id = $2', [params.tenantId, params.approvalId],
       );
@@ -200,6 +209,15 @@ export class HitlApprovalService {
     // The transaction must commit rejected password attempts so another replica observes them.
     if (result instanceof ApprovalReviewError) throw result;
     return result;
+  }
+
+  private async requireReviewer(client: Queryable, tenantId: number, identity: string, sessionRole: string | undefined): Promise<number> {
+    const actorId = toPositiveInt(identity);
+    const workspace = actorId && await readCurrentWorkspace(client, tenantId, actorId, sessionRole, true);
+    if (!actorId || !workspace || !workspace.capabilities.includes('approvals.review')) {
+      throw new ApprovalReviewError(403, 'POLICY_DENIED', 'Approval access requires an active administrator membership');
+    }
+    return actorId;
   }
 
   private async verifyReviewerPassword(client: Queryable, tenantId: number, actorId: number, reason: string | undefined, password: unknown) {
