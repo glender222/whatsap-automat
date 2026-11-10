@@ -69,10 +69,10 @@ async function loopback(t: TestContext) {
   const adapter = new MercadoPagoOrdersAdapter(async (url, request) => {
     assert.equal(url.origin, 'https://api.mercadopago.com');
     assert.ok(url.pathname === '/v1/orders' || url.pathname === `/v1/orders/${remoteId}`);
-    assert.equal(url.search, '');
+    if (request.method !== 'GET' || url.pathname !== '/v1/orders') assert.equal(url.search, '');
     assert.equal(request.redirect, 'error');
     assert.ok(request.signal instanceof AbortSignal);
-    return fetch(`http://127.0.0.1:${address.port}${url.pathname}`, request);
+    return fetch(`http://127.0.0.1:${address.port}${url.pathname}${url.search}`, request);
   }, async (scope) => {
     assert.deepEqual(scope, { companyId, gatewayId: intent.gatewayId, gatewayRevision: intent.gatewayRevision });
     return credential;
@@ -232,4 +232,92 @@ test('ends a timed-out loopback create with one uncertain POST', { timeout: 8000
   assert.deepEqual(await fixture.adapter.create(createInput), { kind: 'uncertain', reason: 'transport' });
   assert.equal(fixture.requests.length, 1);
   assert.equal(fixture.requests[0].key, intent.id);
+});
+
+
+const searchPaging = { total: '1', total_pages: '1', offset: '0', limit: '2' };
+
+test('discovers a candidate using the claim window and requires the individual order response for evidence', async (t) => {
+  const fixture = await loopback(t);
+  fixture.setTime(deadline + 300_000);
+  // The documented search record can omit the country. The individual response must prove it.
+  const { country_code, ...searchRow } = responseOrder();
+  fixture.respond((response) => sendJson(response, 200, { data: [searchRow], paging: searchPaging }));
+
+  const candidate = await fixture.adapter.search(createInput);
+  assert.deepEqual(candidate, { kind: 'candidate', orderId: remoteId });
+  const [search] = fixture.requests;
+  assert.equal(search.method, 'GET');
+  assert.equal(search.key, undefined);
+  assert.equal(search.body, null);
+  const url = new URL(search.path, fixture.origin);
+  assert.equal(url.pathname, '/v1/orders');
+  assert.deepEqual(Object.fromEntries(url.searchParams), {
+    begin_date: new Date(now - 15_000).toISOString(),
+    end_date: new Date(deadline).toISOString(),
+    external_reference: intent.externalReference,
+    type: 'online', page: '1', page_size: '2',
+  });
+
+  assert.equal(candidate.kind, 'candidate');
+  if (candidate.kind !== 'candidate') return;
+  fixture.respond((response) => sendJson(response, 200, responseOrder({ country_code: undefined })));
+  assert.deepEqual(await fixture.adapter.lookup({ ...lookupInput, orderId: candidate.orderId }), {
+    kind: 'uncertain', reason: 'response', status: 200,
+  });
+  fixture.respond((response) => sendJson(response, 200, responseOrder({ country_code })));
+  assert.deepEqual(await fixture.adapter.lookup({ ...lookupInput, orderId: candidate.orderId }), {
+    kind: 'observed', orderId: remoteId, status: 'created', statusDetail: 'created', amountPaid: '0.00', payment: 'unpaid',
+  });
+  assert.deepEqual(fixture.requests.slice(1).map(({ method, path }) => [method, path]), [
+    ['GET', `/v1/orders/${remoteId}`], ['GET', `/v1/orders/${remoteId}`],
+  ]);
+});
+
+test('keeps a missing, partial, conflicting or out-of-window search inconclusive', async (t) => {
+  const fixture = await loopback(t);
+  fixture.setTime(now + 30_000);
+  const row = responseOrder();
+  for (const body of [
+    { data: [], paging: { ...searchPaging, total: '0', total_pages: '0' } },
+    { data: [row, row], paging: { ...searchPaging, total: '2' } },
+    { data: [row], paging: { ...searchPaging, total: '3', total_pages: '2' } },
+    { data: [row], paging: { ...searchPaging, offset: '2' } },
+    { data: [row], paging: { ...searchPaging, limit: '20' } },
+    { data: [row] },
+    { data: [responseOrder({ external_reference: randomUUID() })], paging: searchPaging },
+    { data: [responseOrder({ user_id: '4321' })], paging: searchPaging },
+    { data: [responseOrder({ total_amount: '0.73' })], paging: searchPaging },
+    { data: [responseOrder({ currency: 'ARS', country_code: 'ARG' })], paging: searchPaging },
+    { data: [responseOrder({ country_code: 'ARG' })], paging: searchPaging },
+    { data: [responseOrder({ processing_mode: 'automatic' })], paging: searchPaging },
+    { data: [responseOrder({ id: '../orders' })], paging: searchPaging },
+    { data: [responseOrder({ created_date: new Date(now - 16_000).toISOString() })], paging: searchPaging },
+    { data: [responseOrder({ created_date: new Date(now + 31_000).toISOString() })], paging: searchPaging },
+    { data: [row], paging: searchPaging, oversized: 'x'.repeat(140_000) },
+  ]) {
+    fixture.respond((response) => sendJson(response, 200, body));
+    assert.deepEqual(await fixture.adapter.search(createInput), { kind: 'uncertain', reason: 'response', status: 200 });
+  }
+  fixture.respond((response) => sendJson(response, 404, { data: [row], paging: searchPaging }));
+  assert.deepEqual(await fixture.adapter.search(createInput), { kind: 'uncertain', reason: 'response', status: 404 });
+  assert.ok(fixture.requests.every((request) => request.method === 'GET' && request.path.startsWith('/v1/orders?')));
+  const lastUrl = new URL(fixture.requests.at(-1)!.path, fixture.origin);
+  assert.equal(lastUrl.searchParams.get('end_date'), new Date(now + 30_000).toISOString());
+});
+
+test('search avoids provider traffic for an invalid plan or an unrelated credential', async (t) => {
+  const fixture = await loopback(t);
+  assert.deepEqual(await fixture.adapter.search({ ...createInput, plannedAt: now + 1 }), {
+    kind: 'not_sent', reason: 'invalid_window',
+  });
+  assert.deepEqual(await fixture.adapter.search({ ...createInput, validUntil: deadline + 1 }), {
+    kind: 'not_sent', reason: 'invalid_window',
+  });
+  assert.deepEqual(await fixture.adapter.search({
+    ...createInput, intent: { ...intent, reservationExpiresAt: null }, validUntil: now + 15 * 60_000 + 1,
+  }), { kind: 'not_sent', reason: 'invalid_window' });
+  fixture.setCredential({ companyId: companyId + 1 });
+  assert.deepEqual(await fixture.adapter.search(createInput), { kind: 'not_sent', reason: 'credential_unavailable' });
+  assert.deepEqual(fixture.requests, []);
 });

@@ -10,6 +10,9 @@ const requestTimeoutMs = 5_000;
 const dispatchWindowMs = 5_000;
 const expiryMarginMs = 15_000;
 const maxCheckoutWindowMs = 24 * 60 * 60 * 1000;
+const maxSearchWindowMs = 15 * 60 * 1000;
+const searchClockSkewMs = 15_000;
+const searchPageSize = 2;
 const maxResponseBytes = 128 * 1024;
 
 export function isMercadoPagoOrderId(value: unknown): value is string {
@@ -24,11 +27,12 @@ type GatewayScope = {
 type GatewayCredential = GatewayScope & { sellerId: string; accessToken: string };
 type OrdersTransport = (url: URL, request: RequestInit) => Promise<Response>;
 type OrdersContext = { companyId: number; intent: PaymentCheckoutIntent };
-type CreateInput = OrdersContext & { plannedAt: number; validUntil: number };
+type CheckoutPlan = OrdersContext & { plannedAt: number; validUntil: number };
 type LookupInput = OrdersContext & { orderId: string; validUntil: number };
 type NotSent = { kind: 'not_sent'; reason: 'invalid_snapshot' | 'invalid_window' | 'credential_unavailable' };
 type Uncertain = { kind: 'uncertain'; reason: 'transport' | 'response' | 'checkout_unverified'; status?: number; orderId?: string };
 type Rejected = { kind: 'rejected'; status: number; code: string };
+type Candidate = { kind: 'candidate'; orderId: string };
 type Created = { kind: 'created'; orderId: string; checkoutUrl: string; expiresAt: string };
 type PaymentObservation = 'unpaid' | 'pending' | 'failed' | 'partial' | 'paid_candidate' | 'reconciliation_required';
 type Observed = {
@@ -70,16 +74,27 @@ function validContext({ companyId, intent }: OrdersContext) {
   return total === amount;
 }
 
-function checkoutDuration(input: CreateInput, now: number): number | undefined {
+function checkoutDuration(input: CheckoutPlan, now: number): number | undefined {
   const { plannedAt, validUntil, intent } = input;
   if (!Number.isSafeInteger(plannedAt) || !Number.isSafeInteger(validUntil) ||
       plannedAt > now || now - plannedAt > dispatchWindowMs || validUntil - plannedAt > maxCheckoutWindowMs) return;
-  if (intent.reservationExpiresAt !== null) {
-    const deadline = Date.parse(intent.reservationExpiresAt);
-    if (!Number.isFinite(deadline) || validUntil > deadline) return;
-  }
+  if (!withinReservation(intent, validUntil)) return;
   const seconds = Math.floor((validUntil - plannedAt - expiryMarginMs) / 1000);
   return seconds > 0 ? seconds : undefined;
+}
+
+function withinReservation(intent: PaymentCheckoutIntent, validUntil: number): boolean {
+  return intent.reservationExpiresAt === null || validUntil <= Date.parse(intent.reservationExpiresAt);
+}
+
+function searchWindow({ intent, plannedAt, validUntil }: CheckoutPlan, now: number) {
+  if (!Number.isSafeInteger(plannedAt) || !Number.isSafeInteger(validUntil) || plannedAt <= searchClockSkewMs ||
+      plannedAt > now || validUntil <= plannedAt || validUntil - plannedAt > maxSearchWindowMs ||
+      !withinReservation(intent, validUntil)) return;
+  const start = new Date(plannedAt - searchClockSkewMs);
+  const end = new Date(Math.min(now, validUntil));
+  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) return;
+  return { start, end };
 }
 
 function durationMs(value: unknown): number | undefined {
@@ -91,12 +106,17 @@ function durationMs(value: unknown): number | undefined {
   return ms > 0 ? ms : undefined;
 }
 
-function providerExpiry(order: Record<string, unknown>): number | undefined {
+function providerCreatedAt(order: Record<string, unknown>): number | undefined {
   if (typeof order.created_date !== 'string' ||
       !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(order.created_date)) return;
   const created = Date.parse(order.created_date);
+  return Number.isFinite(created) ? created : undefined;
+}
+
+function providerExpiry(order: Record<string, unknown>): number | undefined {
+  const created = providerCreatedAt(order);
   const duration = durationMs(order.expiration_time);
-  return Number.isFinite(created) && duration !== undefined ? created + duration : undefined;
+  return created !== undefined && duration !== undefined ? created + duration : undefined;
 }
 
 function safeCheckoutUrl(value: unknown, orderId: string): string | undefined {
@@ -110,15 +130,43 @@ function safeCheckoutUrl(value: unknown, orderId: string): string | undefined {
   }
 }
 
-function matchedOrder(
-  value: unknown, context: OrdersContext, credential: GatewayCredential, expectedId?: string,
+function matchedOrderIdentity(
+  value: unknown, context: OrdersContext, credential: GatewayCredential,
 ): (Record<string, unknown> & { id: string }) | undefined {
   const order = record(value);
   if (!order || !isMercadoPagoOrderId(order.id) ||
-      (expectedId !== undefined && order.id !== expectedId) || order.type !== 'online' || order.processing_mode !== 'manual' ||
-      order.country_code !== 'PER' || order.currency !== 'PEN' || order.user_id !== credential.sellerId ||
-      order.external_reference !== context.intent.externalReference || cents(order.total_amount) !== cents(context.intent.amount)) return;
+      order.type !== 'online' || order.processing_mode !== 'manual' || order.currency !== 'PEN' ||
+      order.user_id !== credential.sellerId || order.external_reference !== context.intent.externalReference ||
+      cents(order.total_amount) !== cents(context.intent.amount)) return;
   return { ...order, id: order.id };
+}
+
+function matchedOrder(
+  value: unknown, context: OrdersContext, credential: GatewayCredential, expectedId?: string,
+) {
+  const order = matchedOrderIdentity(value, context, credential);
+  return order?.country_code === 'PER' && (expectedId === undefined || order.id === expectedId) ? order : undefined;
+}
+
+function isPagingValue(value: unknown, expected: number): boolean {
+  return value === expected || value === String(expected);
+}
+
+function uniqueCandidate(
+  body: unknown, input: CheckoutPlan, credential: GatewayCredential,
+  window: NonNullable<ReturnType<typeof searchWindow>>,
+): Candidate | undefined {
+  const result = record(body);
+  if (!Array.isArray(result?.data) || result.data.length !== 1) return;
+  const paging = record(result.paging);
+  if (!paging || !isPagingValue(paging.total, 1) || !isPagingValue(paging.total_pages, 1) ||
+      !isPagingValue(paging.offset, 0) || !isPagingValue(paging.limit, searchPageSize)) return;
+  // The search projection can omit country_code. Individual lookup requires it.
+  const order = matchedOrderIdentity(result.data[0], input, credential);
+  if (!order || (order.country_code !== undefined && order.country_code !== 'PER')) return;
+  const createdAt = providerCreatedAt(order);
+  if (createdAt === undefined || createdAt < window.start.getTime() || createdAt > window.end.getTime()) return;
+  return { kind: 'candidate', orderId: order.id };
 }
 
 function rejectedCode(status: number, body: unknown): string | undefined {
@@ -214,7 +262,7 @@ export class MercadoPagoOrdersAdapter {
     private readonly now = Date.now,
   ) {}
 
-  async create(input: CreateInput): Promise<Created | Rejected | Uncertain | NotSent> {
+  async create(input: CheckoutPlan): Promise<Created | Rejected | Uncertain | NotSent> {
     if (!validContext(input) || input.intent.state !== 'prepared') return { kind: 'not_sent', reason: 'invalid_snapshot' };
     const duration = checkoutDuration(input, this.now());
     if (!duration) return { kind: 'not_sent', reason: 'invalid_window' };
@@ -249,6 +297,29 @@ export class MercadoPagoOrdersAdapter {
       return { kind: 'uncertain', reason: 'checkout_unverified', orderId: order.id };
     }
     return { kind: 'created', orderId: order.id, checkoutUrl: url, expiresAt: new Date(expiry).toISOString() };
+  }
+
+  async search(input: CheckoutPlan): Promise<Candidate | Uncertain | NotSent> {
+    if (!validContext(input)) return { kind: 'not_sent', reason: 'invalid_snapshot' };
+    const window = searchWindow(input, this.now());
+    if (!window) return { kind: 'not_sent', reason: 'invalid_window' };
+    const credential = await this.credential(input);
+    if (!credential) return { kind: 'not_sent', reason: 'credential_unavailable' };
+
+    const url = new URL(ordersUrl);
+    url.search = new URLSearchParams({
+      begin_date: window.start.toISOString(),
+      end_date: window.end.toISOString(),
+      external_reference: input.intent.externalReference,
+      type: 'online',
+      page: '1',
+      page_size: String(searchPageSize),
+    }).toString();
+    const response = await this.request(url.href, credential, { method: 'GET' });
+    if (!response) return { kind: 'uncertain', reason: 'transport' };
+    const body = await boundedJson(response);
+    const candidate = response.status === 200 ? uniqueCandidate(body, input, credential, window) : undefined;
+    return candidate ?? { kind: 'uncertain', reason: 'response', status: response.status };
   }
 
   async lookup(input: LookupInput): Promise<Observed | Uncertain | NotSent> {
