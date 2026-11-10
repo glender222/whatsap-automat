@@ -75,6 +75,8 @@ test('the inbox shows new conversations and recovers missed messages within the 
     const [alpha, bravo] = pages;
     await alpha.getByText(bodies[0], { exact: true }).click();
     await expect(alpha).toHaveURL(new RegExp('chat=' + contact));
+    const openHistory = alpha.getByRole('region', { name: 'Historial de mensajes' });
+    await expect(openHistory.getByText(bodies[0], { exact: true })).toBeVisible();
     expect(closeSocket).toBeDefined();
     online = false;
     await contexts[0].setOffline(true);
