@@ -1,5 +1,5 @@
 import { isAxiosError } from 'axios';
-import { api } from '../../../shared/axios/http';
+import { api, type AuthRequestConfig } from '../../../shared/axios/http';
 
 export interface InboxActor { id: string; tenantId: string }
 
@@ -25,6 +25,32 @@ export interface CanonicalMessage {
   deliveryState: string;
   clientRequestId: string | null;
   causedBy?: { type: string };
+}
+
+export interface PublishedWhatsappSuggestion {
+  runId: string;
+  graphId: string;
+  version: number;
+  specHash: string;
+  inboundMessageId: string;
+  conversationId: string;
+  reply: string;
+  expiresAt: string;
+}
+
+export async function readPublishedWhatsappSuggestion(conversationId: string, signal: AbortSignal, sessionGeneration: number) {
+  const config: AuthRequestConfig = { params: { conversationId }, signal, sessionGeneration };
+  const { data } = await api.get<{ suggestion: PublishedWhatsappSuggestion | null }>('/v1/ai/whatsapp-suggestions', config);
+  const suggestion = data?.suggestion;
+  if (suggestion === null) return null;
+  if (!suggestion || suggestion.conversationId !== conversationId ||
+      !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(suggestion.runId) ||
+      !/^[1-9][0-9]{0,18}$/.test(suggestion.inboundMessageId) || !/^[A-Za-z0-9_-]{1,128}$/.test(suggestion.graphId) ||
+      !Number.isSafeInteger(suggestion.version) || suggestion.version < 1 || !/^[0-9a-f]{64}$/.test(suggestion.specHash) ||
+      typeof suggestion.reply !== 'string' || !suggestion.reply.trim() || !Number.isFinite(Date.parse(suggestion.expiresAt))) {
+    throw new Error('El servidor no confirmó la sugerencia para esta conversación.');
+  }
+  return Date.parse(suggestion.expiresAt) > Date.now() ? suggestion : null;
 }
 
 interface SendIntent {

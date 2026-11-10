@@ -31,8 +31,14 @@ async function main() {
     const send = process.argv.includes('--send');
     const studio = process.argv.includes('--studio');
     const studioProvider = studio && process.env.STUDIO_PROVIDER_FIXTURE === '1';
-    if (send || studio) {
-      const provider = new URL((send ? process.env.PRODUCT_GRAPH_FIXTURE_URL : process.env.STUDIO_FIXTURE_URL) ?? '');
+    const publishedWhatsapp = process.argv.includes('--published-whatsapp');
+    assert.ok(!publishedWhatsapp || studioProvider);
+    const fixtureUrls = [
+      ...(send || publishedWhatsapp ? [process.env.PRODUCT_GRAPH_FIXTURE_URL] : []),
+      ...(studio ? [process.env.STUDIO_FIXTURE_URL] : []),
+    ];
+    for (const value of fixtureUrls) {
+      const provider = new URL(value ?? '');
       assert.equal(provider.protocol, 'http:');
       assert.equal(provider.hostname, '127.0.0.1');
       const health = await fetch(provider.origin + '/health', { signal: AbortSignal.timeout(3000) });
@@ -44,7 +50,7 @@ async function main() {
       const phoneNumberId = String(firstLine + index);
       await store.upsertConnection(data.user.companyId, {
         phoneNumberId, status: 'configured',
-        ...(send && { accessToken: 'synthetic-local-token', graphVersion: 'v25.0' }),
+        ...((send || publishedWhatsapp) && { accessToken: 'synthetic-local-token', graphVersion: 'v25.0' }),
       });
       if (studio && !studioProvider) {
         await tenantScopedUoW.run(data.user.companyId, (db) => db.query(`
@@ -58,6 +64,10 @@ async function main() {
         const { tenantAiDispatchPolicy } = await import('../../services/ai/gateway/TenantAiDispatchPolicy');
         await tenantAiDispatchPolicy.transition(data.user.companyId, 'draining');
         await tenantAiDispatchPolicy.transition(data.user.companyId, 'strict');
+      }
+      if (publishedWhatsapp) {
+        const { AgentRepositoryPg } = await import('../../modules/ai/infra/db/AgentRepositoryPg');
+        await new AgentRepositoryPg(pool).setAutomatorMode(data.user.companyId, 'mixed');
       }
       if (outboundId) {
         await new MetaInboxStore({ companyId: data.user.companyId }).persistOutbound({

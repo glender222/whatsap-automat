@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
 import { expect, test } from '@playwright/test';
 import { provisionCompanies } from './fixtures/provisionCompanies';
 
@@ -126,7 +126,7 @@ test('two workspaces evaluate, publish and execute only their verified revision'
 if (process.env.STUDIO_PROVIDER_FIXTURE === '1') {
   test('provider mode requires a company credential and runs its published revision from Studio', async ({ browser, request }) => {
     test.setTimeout(60_000);
-    const companies = provisionCompanies('--studio');
+    const companies = provisionCompanies('--studio', '--published-whatsapp', '--outbound');
     const graphId = 'qa-provider-' + randomUUID();
     const apiPath = `${backend}/api/v1/agent-graphs`;
     const pagePath = `/dashboard/ia/estudio/grafos/${graphId}`;
@@ -195,6 +195,76 @@ if (process.env.STUDIO_PROVIDER_FIXTURE === '1') {
       await expect(alpha.panel.getByText(/Caso \d · Aprobado/)).toHaveCount(2);
       await alpha.panel.getByRole('button', { name: 'Publicar para proveedor' }).press('Enter');
       await expect(alpha.panel.getByText('Revisión activa para proveedor · 1')).toBeVisible();
+      const bindingUrl = `${backend}/api/v1/ai/whatsapp-binding`;
+      const whatsapp = alpha.panel.getByRole('region', { name: 'Revisión para WhatsApp' });
+      await expect(whatsapp.getByText('Sin revisión vinculada.', { exact: true })).toBeVisible();
+      const contact = '12025550145';
+      const notifications: Record<string, unknown>[][] = [[], []];
+      const inboxes = await Promise.all(contexts.map(async (context, index) => {
+        const page = await context.newPage();
+        page.on('websocket', (socket) => socket.on('framereceived', ({ payload }) => {
+          if (typeof payload !== 'string' || !payload.startsWith('42["agent:suggestion",')) return;
+          const [, notification] = JSON.parse(payload.slice(2));
+          notifications[index].push(notification);
+        }));
+        const initial = page.waitForResponse((response) => response.url().includes('/whatsapp-suggestions?conversationId='));
+        await page.goto('/gestion-web/inicio?chat=' + contact);
+        await expect(page.getByRole('region', { name: 'Historial de mensajes' })).toBeVisible();
+        expect(await (await initial).json()).toEqual({ suggestion: null });
+        return page;
+      }));
+      const bind = whatsapp.getByRole('button', { name: 'Vincular a WhatsApp' });
+      await expect(bind).toBeEnabled();
+      await bind.press('Enter');
+      await expect(whatsapp.getByRole('status').filter({ hasText: `${graphId} · 1 · Sugerencias` })).toBeVisible();
+      const inboundId = 'wamid.' + randomUUID();
+      const texts = ['Consulta publicada de Alfa', 'Consulta sin vinculación de Bravo'];
+      for (const [index, company] of companies.entries()) {
+        const payload = JSON.stringify({ entry: [{ changes: [{ field: 'messages', value: {
+          metadata: { phone_number_id: company.phoneNumberId },
+          messages: [{ id: inboundId, from: contact, timestamp: String(Math.floor(Date.now() / 1000)),
+            type: 'text', text: { body: texts[index] } }],
+        } }] }] });
+        const signature = createHmac('sha256', process.env.META_APP_SECRET!).update(payload).digest('hex');
+        const accepted = await request.post(backend + '/api/webhooks/meta/whatsapp', {
+          headers: { 'content-type': 'application/json', 'x-hub-signature-256': 'sha256=' + signature },
+          data: payload,
+        });
+        expect(accepted.status()).toBe(200);
+      }
+      const suggestion = 'Resultado de prueba: ' + texts[0];
+      await expect(inboxes[0].getByText(suggestion, { exact: true })).toBeVisible();
+      await expect(inboxes[0].getByText('Sugerencia de la revisión publicada 1', { exact: true })).toBeVisible();
+      await expect.poll(() => notifications[0].length).toBe(1);
+      expect(notifications[0][0]).toMatchObject({ origin: { kind: 'published_graph', graphId, version: 1 } });
+      expect(notifications[0][0]).not.toHaveProperty('reply');
+      await expect(inboxes[1].getByRole('region', { name: 'Historial de mensajes' }).getByText(texts[1], { exact: true })).toBeVisible();
+      await expect(inboxes[1].getByText(suggestion, { exact: true })).toHaveCount(0);
+      expect(notifications[1]).toHaveLength(0);
+      await inboxes[0].reload();
+      await expect(inboxes[0].getByText(suggestion, { exact: true })).toBeVisible();
+      await inboxes[0].getByRole('button', { name: 'Aceptar y editar' }).press('Enter');
+      await expect(inboxes[0].getByRole('textbox', { name: 'Mensaje', exact: true })).toHaveValue(suggestion);
+      const attempts = await request.get(`${process.env.PRODUCT_GRAPH_FIXTURE_URL}/attempts?line=${companies[0].phoneNumberId}`);
+      expect(await attempts.json()).toEqual([]);
+
+      const observed = await request.get(bindingUrl, { headers: alpha.headers });
+      expect(observed.status()).toBe(200);
+      const { binding } = await observed.json();
+      const externalUpdate = await request.put(bindingUrl, {
+        headers: alpha.headers, data: { graphId, version: binding.version, specHash: binding.specHash,
+          mode: 'auto', expectedRevision: binding.revision },
+      });
+      expect(externalUpdate.status()).toBe(200);
+      await whatsapp.getByRole('button', { name: 'Desvincular de WhatsApp' }).press('Enter');
+      await expect(whatsapp.getByRole('alert')).toContainText('La vinculación o la publicación cambió.');
+      await whatsapp.getByRole('button', { name: 'Volver a intentar' }).press('Enter');
+      await expect(whatsapp.getByRole('status').filter({ hasText: `${graphId} · 1 · Respuestas automáticas` })).toBeVisible();
+      const bravoBinding = await request.get(bindingUrl, { headers: bravo.headers });
+      expect(await bravoBinding.json()).toEqual({ binding: null });
+      await whatsapp.getByRole('button', { name: 'Desvincular de WhatsApp' }).press('Enter');
+      await expect(whatsapp.getByText('Sin revisión vinculada.', { exact: true })).toBeVisible();
+
       await alpha.panel.getByRole('textbox', { name: 'Entrada para la revisión publicada' }).fill('Publicación Alfa');
       await alpha.panel.getByRole('button', { name: 'Ejecutar revisión publicada' }).press('Enter');
       await expect(alpha.panel.getByText('Resultado de prueba: Publicación Alfa')).toBeVisible();

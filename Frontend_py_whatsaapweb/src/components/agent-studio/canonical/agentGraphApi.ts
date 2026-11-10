@@ -146,6 +146,9 @@ export function graphProblem(cause: unknown, fallback: string): GraphProblem {
   if (status === 409 && cause.config?.url?.endsWith('/execute')) {
     return { message: 'La ejecución entró en conflicto con un intento anterior o con un cambio de revisión activa. Actualiza el estado de Studio.', fields };
   }
+  if (status === 409 && cause.config?.url?.endsWith('/whatsapp-binding')) {
+    return { message: 'La vinculación o la publicación cambió. Vuelve a consultar el estado.', fields };
+  }
   if (status === 409) return { message: 'Ya existe un grafo con este identificador. Abre el existente o elige otro.', fields };
   return { message: fallback, fields };
 }
@@ -339,4 +342,62 @@ export async function executeStudioRevision(draft: GraphDraft, attempt: { attemp
     throw new Error(messages[data.execution.status] ?? 'La ejecución no devolvió texto utilizable.');
   }
   return data.execution.output.text;
+}
+
+export type StudioWhatsappBindingMode = 'suggest' | 'auto';
+
+interface StudioWhatsappBinding {
+  graphId: string;
+  version: number;
+  specHash: string;
+  mode: StudioWhatsappBindingMode;
+  revision: string;
+  boundBy: number;
+  boundAt: string;
+}
+
+export interface StudioWhatsappBindingSnapshot {
+  binding: StudioWhatsappBinding | null;
+}
+
+const whatsappBindingEndpoint = '/v1/ai/whatsapp-binding';
+
+function confirmBinding(snapshot: StudioWhatsappBindingSnapshot | undefined): StudioWhatsappBindingSnapshot {
+  const binding = snapshot?.binding;
+  if (binding === null) return { binding };
+  if (!binding || typeof binding.graphId !== 'string' || !new RegExp('^' + graphIdPattern + '$').test(binding.graphId) ||
+      !Number.isSafeInteger(binding.version) || binding.version < 1 || !/^[0-9a-f]{64}$/.test(binding.specHash) ||
+      !['suggest', 'auto'].includes(binding.mode) || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(binding.revision) ||
+      !Number.isSafeInteger(binding.boundBy) || binding.boundBy < 1 || !Number.isFinite(Date.parse(binding.boundAt))) {
+    throw new Error('El servidor no confirmó la revisión vinculada a WhatsApp.');
+  }
+  return { binding };
+}
+
+export async function readStudioWhatsappBinding(request: StudioRequest) {
+  const config: AuthRequestConfig = request;
+  const { data } = await api.get<StudioWhatsappBindingSnapshot>(whatsappBindingEndpoint, config);
+  return confirmBinding(data);
+}
+
+export async function bindStudioWhatsapp(draft: GraphDraft, mode: StudioWhatsappBindingMode,
+  current: StudioWhatsappBindingSnapshot, request: StudioRequest) {
+  const config: AuthRequestConfig = request;
+  const { graphId, version, specHash } = draft;
+  const { data } = await api.put<StudioWhatsappBindingSnapshot>(whatsappBindingEndpoint, {
+    graphId, version, specHash, mode, expectedRevision: current.binding?.revision ?? null,
+  }, config);
+  const snapshot = confirmBinding(data);
+  if (snapshot.binding?.graphId !== graphId || snapshot.binding.version !== version ||
+      snapshot.binding.specHash !== specHash || snapshot.binding.mode !== mode) {
+    throw new Error('El servidor no confirmó la vinculación seleccionada.');
+  }
+  return snapshot;
+}
+
+export async function unbindStudioWhatsapp(current: StudioWhatsappBindingSnapshot, request: StudioRequest): Promise<StudioWhatsappBindingSnapshot> {
+  const config: AuthRequestConfig = { ...request, data: { expectedRevision: current.binding?.revision ?? null } };
+  const { status } = await api.delete(whatsappBindingEndpoint, config);
+  if (status !== 204) throw new Error('El servidor no confirmó la desvinculación de WhatsApp.');
+  return { binding: null };
 }

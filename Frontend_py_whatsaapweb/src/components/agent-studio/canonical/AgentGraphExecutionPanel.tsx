@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { readSession } from '../../../shared/auth/session';
 import GraphProblemNotice from './GraphProblemNotice';
+import AgentGraphWhatsappBinding from './AgentGraphWhatsappBinding';
 import {
   cancelStudioEvaluation, executeStudioRevision, graphProblem, publishStudioRevision, readStudioExecution,
   saveStudioOpenAiCredential, saveStudioSuite, studioEvaluation,
@@ -298,6 +299,7 @@ export default function AgentGraphExecutionPanel({ draft }: { draft: GraphDraft 
           </button>
         </div>}
         {active && <p role="status" className="text-sm font-medium">{verification ? 'Revisión activa en verificación' : 'Revisión activa para proveedor'} · {active.version}</p>}
+        {mode === 'provider' && <AgentGraphWhatsappBinding draft={draft} active={active ?? null} sessionGeneration={sessionGeneration} />}
         {active?.version === draft.version && <form className="space-y-2" onSubmit={execute}>
           {pendingExecution && !controlsBusy && <div id="published-execution-recovery" className="space-y-1 text-sm text-secondary">
             <p role="status">Hay una ejecución sin confirmar.</p>

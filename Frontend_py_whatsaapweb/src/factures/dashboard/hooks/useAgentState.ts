@@ -59,7 +59,8 @@ export function useAgentState() {
   useEffect(() => {
     const socket = SocketService.getInstance().connect();
 
-    const onSuggestion = (payload: PendingSuggestion) => {
+    const onSuggestion = (payload: PendingSuggestion & { origin?: { kind?: string } }) => {
+      if (payload?.origin?.kind === 'published_graph') return;
       setPendingSuggestion(payload);
     };
     const onAutoReply = (payload: { chatId: string; reply: string; confidence: number }) => {
