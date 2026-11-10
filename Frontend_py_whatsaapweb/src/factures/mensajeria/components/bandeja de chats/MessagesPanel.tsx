@@ -555,7 +555,8 @@ const MessagesPanel: React.FC<MessagesPanelProps> = ({
                 {timeline.map((item) => item.type === 'activity' ? (
                     <AgentActivityRow key={`activity-${item.turn.id}`} turn={item.turn} />
                   ) : (
-                  <div key={item.messageItem.id} data-history-message tabIndex={-1} className={`mb-2 flex ${item.messageItem.fromMe ? 'justify-end' : 'justify-start'}`}>
+                  <div key={item.messageItem.historyId ? `history-${item.messageItem.historyId}` : item.messageItem.id}
+                    data-history-message tabIndex={-1} className={`mb-2 flex ${item.messageItem.fromMe ? 'justify-end' : 'justify-start'}`}>
                     <div
                       className={`rounded-xl px-3 py-2 max-w-xs ${
                         item.messageItem.fromMe ? 'bg-green-100 dark:bg-green-900/40 text-right' : 'bg-white dark:bg-gray-800 text-left'

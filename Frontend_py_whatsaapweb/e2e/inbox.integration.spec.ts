@@ -298,6 +298,7 @@ test('history loads messages from the same second without losing position or cro
   const historyPath = `/api/chats/${contact}/messages`;
   const headers = (company: Company) => ({ authorization: 'Bearer ' + company.auth.accessToken });
   let online = true;
+  let pendingIdentity = true;
   let closeSocket: (() => Promise<void>) | undefined;
   try {
     const pages = await Promise.all(companies.map(async (company, index) => {
@@ -311,6 +312,17 @@ test('history loads messages from the same second without losing position or cro
       await context.addInitScript((auth) => localStorage.setItem('auth', JSON.stringify(auth)), company.auth);
       const page = await context.newPage();
       if (index === 0) {
+        // Simulate the identity transition of a stored outbound send when its provider ID is assigned.
+        await page.route((url) => url.pathname === historyPath && !url.searchParams.has('cursor'), async (route) => {
+          const response = await route.fetch();
+          const envelope = await response.json();
+          const data = envelope.data.map((message: { id: string; body: string; historyId?: string }) => {
+            if (message.body !== 'Alfa historial 49') return message;
+            expect(message.historyId).toMatch(/^\d+$/);
+            return { ...message, id: pendingIdentity ? message.historyId : message.id };
+          });
+          await route.fulfill({ response, json: { ...envelope, data } });
+        });
         await page.routeWebSocket(/\/socket\.io\//, async (socket) => {
           if (!online) return socket.close({ code: 1001 });
           socket.connectToServer();
@@ -372,10 +384,12 @@ test('history loads messages from the same second without losing position or cro
       id: 'wamid.' + randomUUID(), from: contact, timestamp, type: 'text', text: { body: missed },
     }] });
     await expect(alphaHistory.getByText(missed, { exact: true })).toHaveCount(0);
+    pendingIdentity = false;
     online = true;
     await contexts[0].setOffline(false);
     await expect(alphaHistory.getByText(missed, { exact: true })).toBeAttached();
     await expect(alphaHistory.locator('[data-history-message]')).toHaveCount(54);
+    await expect(alphaHistory.getByText('Alfa historial 49', { exact: true })).toHaveCount(1);
     await expect(alphaHistory.getByText('Alfa historial 1', { exact: true })).toBeAttached();
     await expect(bravoHistory.getByText(missed, { exact: true })).toHaveCount(0);
   } finally {

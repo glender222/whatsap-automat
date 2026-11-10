@@ -178,6 +178,7 @@ export class MetaInboxStore {
   private formatHistory(rows: Awaited<ReturnType<MetaInboxStore['readHistory']>>, chatId: string) {
     return rows.reverse().map((row) => ({
       id: row.provider_message_id || String(row.id),
+      historyId: String(row.id),
       body: row.body,
       fromMe: row.direction === 'outbound',
       timestamp: toUnixSeconds(row.occurred_at),

@@ -847,5 +847,17 @@ fs.truncateSync(file, ${overLimit});
     assert.equal((await read(tenantA, '&cursor=2147483648')).status, 400);
     assert.equal((await read(tenantA, `&cursor=${first.body.nextCursor}&before=${timestamp}`)).status, 400);
     assert.deepEqual((await read(tenantA, '&before=' + timestamp)).body, { success: true, data: [], total: 0 });
+
+    const { historyId } = first.body.data[1];
+    assert.match(historyId, /^\d+$/);
+    const setProviderId = (id: string | null) => uow.run(tenantA, (client) => client.query(
+      'UPDATE messages SET provider_message_id = $3 WHERE company_id = $1 AND id = $2', [tenantA, historyId, id],
+    ));
+    await setProviderId(null);
+    assert.equal((await read(tenantA, '')).body.data[1].id, historyId);
+    await setProviderId('wamid.page-confirmed');
+    const confirmed = (await read(tenantA, '')).body.data[1];
+    assert.equal(confirmed.id, 'wamid.page-confirmed');
+    assert.equal(confirmed.historyId, historyId);
   });
 });

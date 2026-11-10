@@ -57,6 +57,7 @@ export type MessageStatus = 'pending' | 'sent' | 'delivered' | 'read' | 'played'
 /** Un mensaje de WhatsApp */
 export interface WhatsAppMessage {
   id: string;
+  historyId?: string;
   status?: string;
   body: string;
   fromMe: boolean;

@@ -8,6 +8,20 @@ import { getMessagesByChat } from '../services/messageService';
 
 const pageSize = 50;
 
+function historyIdentities(messages: WhatsAppMessage[]) {
+  const external = new Set<string>();
+  const stored = new Set<string>();
+  for (const message of messages) {
+    external.add(message.id);
+    if (message.historyId) stored.add(message.historyId);
+  }
+  return { external, stored };
+}
+
+function hasHistoryMessage(identities: ReturnType<typeof historyIdentities>, message: WhatsAppMessage) {
+  return identities.external.has(message.id) || Boolean(message.historyId && identities.stored.has(message.historyId));
+}
+
 export function useMessagesManagement() {
   const store = useStore();
   const [messages, setMessages] = useAtom(messagesAtom);
@@ -15,7 +29,7 @@ export function useMessagesManagement() {
   const [loadingMessages, setLoadingMessages] = useAtom(loadingMessagesAtom);
   const setChats = useSetAtom(chatsAtom);
   const selectedChatRef = useRef(selectedChat);
-  const loadedHistory = useRef<{ chatId: string; ids: Set<string> } | null>(null);
+  const loadedHistory = useRef<{ chatId: string; identities: ReturnType<typeof historyIdentities> } | null>(null);
   const historyRequest = useRef<{ chatId: string; arrivals: Set<string> } | null>(null);
   const [messageError, setMessageError] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
@@ -45,8 +59,8 @@ export function useMessagesManagement() {
       if (controller.signal.aborted) return;
       page.cursor = nextCursor;
       setMessages((current) => {
-        const ids = new Set(current.map((message) => message.id));
-        return [...history.filter((message) => !ids.has(message.id)), ...current];
+        const identities = historyIdentities(current);
+        return [...history.filter((message) => !hasHistoryMessage(identities, message)), ...current];
       });
       setOlder({ available: Boolean(nextCursor), loading: false, requested: true, error: '' });
     } catch {
@@ -106,14 +120,14 @@ export function useMessagesManagement() {
     getMessagesByChat(selectedChat, pageSize, controller.signal)
       .then(({ messages: history, nextCursor }) => {
         if (!isCurrent()) return;
-        const ids = new Set(history.map((message) => message.id));
+        const identities = historyIdentities(history);
         const current = store.get(messagesAtom);
         // Retain older pages only if the refreshed head overlaps the visible history.
         // After a long disconnect, restart from the fresh page to avoid a hidden gap.
         const previousHead = loadedHistory.current;
         const retainOlder = boundary.current?.paging && previousHead?.chatId === selectedChat &&
-          history.some((message) => previousHead.ids.has(message.id));
-        loadedHistory.current = { chatId: selectedChat, ids };
+          history.some((message) => hasHistoryMessage(previousHead.identities, message));
+        loadedHistory.current = { chatId: selectedChat, identities };
         if (!retainOlder) resetOlder(nextCursor);
         const newest = Math.max(0, ...history.map((message) => normalizeMessageTimestamp(message.timestamp)));
         // A socket event received during this request can be newer than the snapshot
@@ -121,7 +135,7 @@ export function useMessagesManagement() {
         const previous: WhatsAppMessage[] = [];
         const arrivals: WhatsAppMessage[] = [];
         for (const message of current) {
-          if (message.chatId !== selectedChat || ids.has(message.id)) continue;
+          if (message.chatId !== selectedChat || hasHistoryMessage(identities, message)) continue;
           if (request.arrivals.has(message.id) || message.id.startsWith('temp-file-') ||
               normalizeMessageTimestamp(message.timestamp) > newest) arrivals.push(message);
           else if (retainOlder && !message.id.startsWith('temp-')) previous.push(message);
