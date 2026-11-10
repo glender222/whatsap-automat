@@ -38,6 +38,12 @@ Para reproducir UX-02 y UX-03, ejecutar `npm run test:e2e -- e2e/orders-navigati
 - **Antes.** Chrome recibió la respuesta de «Validados» y después la de «Con voucher». El filtro «Validados» seguía marcado, pero la tabla pasó a mostrar el comprobante pendiente.
 - **Después.** Cambiar el filtro cancela la consulta anterior. La tabla y el contador solo usan el resultado asociado a la consulta vigente. Si falla, «Volver a cargar pagos» repite el filtro activo. La regresión en `e2e/payment-filters.spec.ts` reproduce el orden invertido y comprueba la recuperación de un `503`.
 
+## UX-05. El borrador se pierde al volver de Pedidos
+
+- **Antes.** Chromium escribió un texto en la conversación de Alfa, abrió Pedidos con el teclado, esperó que la vista cargara y volvió por el historial. El cuadro de mensaje estaba vacío.
+- **Después.** El texto y la referencia exacta de un envío en curso viven en el estado de la sesión. El borrador reaparece al volver a la misma conversación. Al cambiar de cuenta a Bravo en otra pestaña, el mismo contacto y el mismo identificador de WhatsApp conservan el historial y el borrador de su propia sesión.
+- **Recibo durante la navegación.** Graph local perdió el acuse de un envío. El operador abrió Pedidos y, mientras estaba allí, llegó el recibo firmado. Al volver se mostró una sola copia del mensaje y se limpió el borrador correspondiente. Graph no recibió un nuevo POST. Pasaron los 14 recorridos de Chromium y el build web.
+
 ## MSG-01. Conversaciones nuevas y recuperación de la bandeja
 
 - **Antes.** Chrome abrió dos bandejas vacías conectadas por Socket.IO. El backend confirmó los webhooks firmados y el historial HTTP devolvió el texto correcto por empresa. La prueba falló porque el mensaje nuevo de Alfa seguía ausente de su bandeja.

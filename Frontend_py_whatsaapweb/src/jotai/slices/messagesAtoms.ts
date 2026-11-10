@@ -4,6 +4,9 @@ import type { WhatsAppChat, WhatsAppMessage } from '../../shared/types/wsp';
 // Chats - NO persiste en localStorage (siempre obtiene del backend)
 export const chatsAtom = atom<WhatsAppChat[]>([]);
 
+// The session's Provider keeps unsent text across routes and discards it on account changes.
+export const inboxDraftsAtom = atom<ReadonlyMap<string, string>>(new Map());
+
 // Mensajes del chat seleccionado - NO persiste en localStorage
 export const messagesAtom = atom<WhatsAppMessage[]>([]);
 

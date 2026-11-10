@@ -98,6 +98,39 @@ test('the inbox shows new conversations and recovers missed messages within the 
   }
 });
 
+test('the message draft survives visiting Orders and clears when the company changes', async ({ page, context, request }) => {
+  const [alpha, bravo] = provisionCompanies();
+  const contact = '12025550145';
+  const messageId = 'wamid.' + randomUUID();
+  for (const [company, body] of [[alpha, 'Mensaje de Alfa'], [bravo, 'Mensaje de Bravo']] as const) {
+    await postWebhook(request, company, { messages: [{ id: messageId, from: contact, type: 'text', text: { body } }] });
+  }
+  await page.addInitScript((auth) => localStorage.setItem('auth', JSON.stringify(auth)), alpha.auth);
+  const threadUrl = '/gestion-web/inicio?chat=' + contact;
+  const conversation = page.getByRole('region', { name: 'Conversación seleccionada' });
+  const history = conversation.getByRole('region', { name: 'Historial de mensajes' });
+  const draft = conversation.getByRole('textbox', { name: 'Mensaje', exact: true });
+  const navigation = page.getByRole('navigation', { name: 'Espacio de trabajo' });
+
+  await page.goto(threadUrl);
+  await expect(history.getByText('Mensaje de Alfa', { exact: true })).toBeVisible();
+  await draft.fill('Respuesta de Alfa en preparación');
+  await navigation.getByRole('link', { name: 'Pedidos', exact: true }).press('Enter');
+  await expect(page).toHaveURL('/dashboard/pedidos');
+  await expect(page.getByRole('region', { name: 'Pedidos comerciales' })).toBeVisible();
+  await expect(conversation).toHaveCount(0);
+  await page.goBack();
+  await expect(page).toHaveURL(threadUrl);
+  await expect(draft).toHaveValue('Respuesta de Alfa en preparación');
+
+  const otherTab = await context.newPage();
+  await otherTab.goto('/auth/login');
+  await otherTab.evaluate((auth) => localStorage.setItem('auth', JSON.stringify(auth)), bravo.auth);
+  await expect(history.getByText('Mensaje de Bravo', { exact: true })).toBeVisible();
+  await expect(history.getByText('Mensaje de Alfa', { exact: true })).toHaveCount(0);
+  await expect(draft).toHaveValue('');
+});
+
 test('delivery receipts update an open conversation without affecting another company', async ({ browser, request }) => {
   const companies = provisionCompanies('--outbound');
   const contexts = await Promise.all(companies.map(() => browser.newContext()));
@@ -535,6 +568,23 @@ test('the composer scopes ownership, retries, attachments and receipt recovery t
     expect(await attempts(companyB)).toEqual([]);
     await expect(bravo.getByRole('textbox', { name: 'Mensaje', exact: true })).toHaveValue('Borrador de Bravo');
     await expect(bravo.getByText(pending, { exact: true })).toHaveCount(0);
+
+    const pendingDuringOrders = 'Envío QA sin confirmación al abrir Pedidos';
+    await draft.fill(pendingDuringOrders);
+    await send.click();
+    await expect(alpha.getByText(/La entrega sigue sin confirmar/)).toBeVisible();
+    const beforeOrders = await attempts(companyA);
+    expect(beforeOrders).toHaveLength(beforeReconnect.length + 1);
+    const orderVisitAttempt = beforeOrders.at(-1)!;
+    await alpha.getByRole('navigation', { name: 'Espacio de trabajo' }).getByRole('link', { name: 'Pedidos', exact: true }).press('Enter');
+    await expect(alpha.getByRole('region', { name: 'Pedidos comerciales' })).toBeVisible();
+    await expect(draft).toHaveCount(0);
+    await postWebhook(request, companyA, { statuses: [{ ...signedStatus, id: orderVisitAttempt.id,
+      biz_opaque_callback_data: orderVisitAttempt.callback, timestamp: String(Math.floor(Date.now() / 1000)) }] });
+    await alpha.goBack();
+    await expect(history.getByText(pendingDuringOrders, { exact: true })).toHaveCount(1);
+    await expect(draft).toHaveValue('');
+    expect(await attempts(companyA)).toEqual(beforeOrders);
   } finally {
     await Promise.all(contexts.map((context) => context.close()));
   }

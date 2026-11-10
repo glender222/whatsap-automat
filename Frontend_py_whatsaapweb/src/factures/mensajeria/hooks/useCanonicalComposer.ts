@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type SetStateAction } from 'react';
+import { atom, useAtom, useAtomValue } from 'jotai';
 import {
   deliveryLabel, messageProblem, readCanonicalHistory, resolveCanonicalChat, sendCanonicalAttachment, sendCanonicalText,
   takeConversationControl, type AttachmentIntent, type CanonicalConversation, type CanonicalMessage,
@@ -11,6 +12,9 @@ type Pending = Pick<Intent, 'conversationId' | 'key' | 'version' | 'kind'> & { p
 type Snapshot = { scope: string; requestNumber: number; inboundId?: string; conversation: CanonicalConversation | null; unresolved: boolean };
 type RetryVerification = Pick<Snapshot, 'requestNumber' | 'inboundId'> & { key: string };
 type Notice = { tone: 'status' | 'error' | 'unknown'; message: string };
+// A later visit must still match a confirmed attempt to the text originally submitted.
+const composerAttemptsAtom = atom(() => ({ exactIntents: new Map<string, Intent>(), locks: new Set<string>() }));
+const composerBusyAtom = atom<Record<string, 'takeover' | 'send' | undefined>>({});
 // Keep the existing storage namespace so prior text attempts still reconcile.
 const storageKey = (scope: string, id: string) => 'inbox-pending-text/' + scope.split('/', 2).join('/') + '/' + id;
 const outcomeUncertain = 'La entrega sigue sin confirmar. Actualiza el estado para comprobar si llegó una confirmación de WhatsApp.';
@@ -55,15 +59,15 @@ export function useCanonicalComposer({
   const [notices, setNotices] = useState<Record<string, Notice>>({});
   const [proof, setProof] = useState<Record<string, string>>({});
   const [attachmentDrafts, setAttachmentDrafts] = useState<Record<string, SelectedAttachment | null>>({});
-  const [busy, setBusy] = useState<Record<string, 'takeover' | 'send' | undefined>>({});
+  const [busy, setBusy] = useAtom(composerBusyAtom);
   const [retryable, setRetryable] = useState<Record<string, RetryVerification | undefined>>({});
   const [serverUnresolved, setServerUnresolved] = useState<Record<string, boolean>>({});
   const [closedWindow, setClosedWindow] = useState<Record<string, number>>({});
-  const locks = useRef(new Set<string>());
-  const exactIntents = useRef(new Map<string, Intent>());
+  const { exactIntents, locks } = useAtomValue(composerAttemptsAtom);
   const savedIntents = useRef(new Map<string, Pending>());
   const attachmentUrls = useRef(new Set<string>());
   const [clock, setClock] = useState(Date.now);
+  const phase = busy[scope];
 
   const setAttachmentDraft = useCallback((update: SetStateAction<SelectedAttachment | null>) => {
     if (!scope) return;
@@ -128,7 +132,7 @@ export function useCanonicalComposer({
   }, [refreshHistory]);
 
   useEffect(() => {
-    if (!chatId || !actor || !scope) return;
+    if (!chatId || !actor || !scope || phase) return;
     const request = new AbortController();
     resolveCanonicalChat(chatId, conversationId, actor, request.signal)
       .then(async (conversation) => {
@@ -139,7 +143,7 @@ export function useCanonicalComposer({
           Boolean(item.clientRequestId) && item.deliveryState === 'unknown_delivery');
         setSnapshot({ scope, requestNumber, inboundId, conversation, unresolved });
         setLoadError(undefined);
-        if (!conversation || locks.current.has(scope)) return;
+        if (!conversation || locks.has(scope)) return;
         if (conversation.hasUnresolvedDelivery === false && !unresolved) {
           setServerUnresolved((previous) => previous[scope] ? { ...previous, [scope]: false } : previous);
         }
@@ -149,11 +153,11 @@ export function useCanonicalComposer({
           item.causedBy?.type === 'human' && item.clientRequestId === previous.key;
         const recorded = history.find(matchesAttempt) ??
           (await readCanonicalHistory(conversation, request.signal, previous.key)).find(matchesAttempt);
-        if (request.signal.aborted || locks.current.has(scope)) return;
+        if (request.signal.aborted || locks.has(scope)) return;
         if (recorded && ['provider_accepted', 'dispatched', 'delivered', 'read', 'failed'].includes(recorded.deliveryState)) {
-          const intent = exactIntents.current.get(scope);
+          const intent = exactIntents.get(scope);
           if (intent?.key === previous.key && recorded.deliveryState !== 'failed') acceptIntent(scope, chatId, intent);
-          exactIntents.current.delete(scope);
+          exactIntents.delete(scope);
           remember(scope, conversation.id, null);
           setRetryable((value) => ({ ...value, [scope]: undefined }));
           showNotice(scope, { tone: recorded.deliveryState === 'failed' ? 'error' : 'status',
@@ -164,9 +168,9 @@ export function useCanonicalComposer({
           showNotice(scope, { tone: 'unknown', message: outcomeUncertain });
         } else {
           remember(scope, conversation.id, previous);
-          const canRetry = !recorded && previous.phase === 'unconfirmed' && exactIntents.current.get(scope)?.key === previous.key;
+          const canRetry = !recorded && previous.phase === 'unconfirmed' && exactIntents.get(scope)?.key === previous.key;
           setRetryable((value) => ({ ...value, [scope]: canRetry ? { key: previous.key, requestNumber, inboundId } : undefined }));
-          if (!recorded && previous.kind === 'attachment' && !exactIntents.current.has(scope)) {
+          if (!recorded && previous.kind === 'attachment' && !exactIntents.has(scope)) {
             showNotice(scope, { tone: 'unknown',
               message: 'El archivo original ya no está en memoria. Actualiza el estado para confirmar este intento.' });
           }
@@ -179,7 +183,7 @@ export function useCanonicalComposer({
         }
       });
     return () => request.abort();
-  }, [acceptIntent, actor, chatId, conversationId, inboundId, remember, requestNumber, scope, showNotice]);
+  }, [acceptIntent, actor, chatId, conversationId, exactIntents, inboundId, locks, phase, remember, requestNumber, scope, showNotice]);
 
   const current = snapshot?.scope === scope ? snapshot : undefined;
   const fresh = current?.requestNumber === requestNumber && current?.inboundId === inboundId &&
@@ -194,7 +198,6 @@ export function useCanonicalComposer({
     return () => window.clearTimeout(timer);
   }, [expiresAt]);
 
-  const phase = busy[scope];
   const attempt = pending[scope];
   const unresolved = Boolean(attempt || current?.unresolved || serverUnresolved[scope]);
   const refreshDelivery = useCallback(() => {
@@ -216,9 +219,19 @@ export function useCanonicalComposer({
     !error && !phase && !current?.unresolved && !serverUnresolved[scope] &&
     (attempt.kind !== 'attachment' || (verifiedConversation && windowOpen && owns)));
 
+  function finishOperation() {
+    locks.delete(scope);
+    setBusy((value) => {
+      const remaining = { ...value };
+      delete remaining[scope];
+      return remaining;
+    });
+    refresh();
+  }
+
   async function takeover() {
-    if (!canTakeover || !conversation || !actor || locks.current.has(scope) || expiresAt <= Date.now()) return;
-    locks.current.add(scope);
+    if (!canTakeover || !conversation || !actor || locks.has(scope) || expiresAt <= Date.now()) return;
+    locks.add(scope);
     setBusy((value) => ({ ...value, [scope]: 'takeover' }));
     try {
       const claimed = await takeConversationControl(conversation, actor);
@@ -228,16 +241,14 @@ export function useCanonicalComposer({
     } catch (cause) {
       showNotice(scope, { tone: 'error', message: messageProblem(cause).message });
     } finally {
-      locks.current.delete(scope);
-      setBusy((value) => ({ ...value, [scope]: undefined }));
-      refresh();
+      finishOperation();
     }
   }
 
   async function execute(intent: Intent) {
-    if (!chatId || !scope || locks.current.has(scope)) return;
-    locks.current.add(scope);
-    exactIntents.current.set(scope, intent);
+    if (!chatId || !scope || locks.has(scope)) return;
+    locks.add(scope);
+    exactIntents.set(scope, intent);
     const meta = { conversationId: intent.conversationId, key: intent.key, version: intent.version, kind: intent.kind };
     remember(scope, intent.conversationId, { ...meta, phase: 'unconfirmed' });
     setRetryable((value) => ({ ...value, [scope]: undefined }));
@@ -250,7 +261,7 @@ export function useCanonicalComposer({
         return;
       }
       remember(scope, intent.conversationId, null);
-      exactIntents.current.delete(scope);
+      exactIntents.delete(scope);
       if (result.kind === 'accepted') acceptIntent(scope, chatId, intent);
       showNotice(scope, { tone: result.kind === 'accepted' ? 'status' : 'error',
         message: result.kind === 'accepted' ? deliveryLabel(result.deliveryState) ?? 'Aceptado por WhatsApp'
@@ -261,7 +272,7 @@ export function useCanonicalComposer({
         showNotice(scope, { tone: 'unknown', message: problem.message });
       } else {
         remember(scope, intent.conversationId, null);
-        exactIntents.current.delete(scope);
+        exactIntents.delete(scope);
         if (problem.reason === 'HUMAN_TAKEOVER_REQUIRED') setProof((value) => ({ ...value, [scope]: '' }));
         if (problem.reason === 'DELIVERY_UNRESOLVED') {
           setServerUnresolved((value) => ({ ...value, [scope]: true }));
@@ -272,9 +283,7 @@ export function useCanonicalComposer({
         showNotice(scope, { tone: problem.reason === 'DELIVERY_UNRESOLVED' ? 'unknown' : 'error', message: problem.message });
       }
     } finally {
-      locks.current.delete(scope);
-      setBusy((value) => ({ ...value, [scope]: undefined }));
-      refresh();
+      finishOperation();
     }
   }
 
@@ -284,7 +293,7 @@ export function useCanonicalComposer({
   }
 
   async function send(text: string) {
-    if (!canSend || !conversation || expiresAt <= Date.now() || !text.trim() || locks.current.has(scope)) return;
+    if (!canSend || !conversation || expiresAt <= Date.now() || !text.trim() || locks.has(scope)) return;
     if (text.length > 4096 || text.includes('\u0000') || /[\uD800-\uDFFF]/u.test(text)) {
       showNotice(scope, { tone: 'error', message: 'El mensaje debe tener hasta 4096 caracteres válidos.' });
       return;
@@ -294,7 +303,7 @@ export function useCanonicalComposer({
 
   async function sendAttachment(caption: string) {
     const draft = attachmentDrafts[scope];
-    if (!canSend || !conversation || expiresAt <= Date.now() || !draft || locks.current.has(scope)) return;
+    if (!canSend || !conversation || expiresAt <= Date.now() || !draft || locks.has(scope)) return;
     if (caption.length > 1024 || caption.includes('\u0000') || /[\uD800-\uDFFF]/u.test(caption)) {
       showNotice(scope, { tone: 'error', message: 'El pie del archivo admite hasta 1024 caracteres válidos.' });
       return;
@@ -305,7 +314,7 @@ export function useCanonicalComposer({
   }
 
   async function retryExact() {
-    const intent = exactIntents.current.get(scope);
+    const intent = exactIntents.get(scope);
     if (canRetryExact && intent && intent.key === attempt?.key &&
         (intent.kind !== 'attachment' || expiresAt > Date.now())) await execute(intent);
   }

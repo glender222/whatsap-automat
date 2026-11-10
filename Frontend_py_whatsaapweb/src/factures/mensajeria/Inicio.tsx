@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import type { SetStateAction } from 'react';
-import { useAtomValue, useSetAtom } from 'jotai';
+import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { useSearchParams } from 'react-router-dom';
 import { Inbox, X } from 'lucide-react';
 import ChatSidebar from './components/bandeja de chats/ChatSidebar';
@@ -8,7 +8,7 @@ import UserMediaPanel from './components/extras/UserMediaPanel';
 import ImageGalleryModal from './components/extras/ImageGalleryModal';
 import ChatContainer from './components/ChatContainer';
 import ConversationHeader from './components/MobileHeader';
-import { chatsAtom } from '../../jotai/slices/messagesAtoms';
+import { chatsAtom, inboxDraftsAtom } from '../../jotai/slices/messagesAtoms';
 import { userAtom } from '../../jotai/slices/authAtoms';
 import type { WhatsAppMessage } from '../../shared/types/wsp';
 import { useSocketSimple } from './hooks/useSocketSimple';
@@ -26,7 +26,7 @@ function formatNumeroAfiliado(chatId: string): string {
 }
 
 export default function Inicio() {
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [drafts, setDrafts] = useAtom(inboxDraftsAtom);
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedChat = searchParams.get('chat');
   const queue = useRef<HTMLDivElement>(null);
@@ -78,9 +78,14 @@ export default function Inicio() {
   const activeChat = chats.find((chat) => chat.id === selectedChat);
   const selectedName = activeChat?.name || formatNumeroAfiliado(selectedChat ?? '');
   const acceptDraft = useCallback((chatId: string, text: string) => {
-    setDrafts((current) => current[chatId] === text ? { ...current, [chatId]: '' } : current);
+    setDrafts((current) => {
+      if (current.get(chatId) !== text) return current;
+      const next = new Map(current);
+      next.delete(chatId);
+      return next;
+    });
     reloadChats();
-  }, [reloadChats]);
+  }, [reloadChats, setDrafts]);
   const latestInboundId = [...messages].reverse().find((message) => !message.fromMe)?.id;
   const composer = useCanonicalComposer({
     chatId: selectedChat, conversationId: activeChat?.conversationId, actor, inboundId: latestInboundId,
@@ -100,10 +105,13 @@ export default function Inicio() {
   function setDraft(update: SetStateAction<string>) {
     if (!selectedChat) return;
     setDrafts((current) => {
-      const oldDraft = current[selectedChat] || '';
+      const oldDraft = current.get(selectedChat) ?? '';
       const nextDraft = typeof update === 'function' ? update(oldDraft) : update;
       if (nextDraft === oldDraft) return current;
-      return { ...current, [selectedChat]: nextDraft };
+      const next = new Map(current);
+      if (nextDraft) next.set(selectedChat, nextDraft);
+      else next.delete(selectedChat);
+      return next;
     });
   }
 
@@ -176,7 +184,7 @@ export default function Inicio() {
               loadingMessages={loadingMessages}
               olderHistory={olderHistory}
               messages={messages}
-              message={drafts[selectedChat] || ''}
+              message={drafts.get(selectedChat) ?? ''}
               setMessage={setDraft}
               onImageClick={handleImageClick}
               composer={composer}
