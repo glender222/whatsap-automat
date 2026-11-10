@@ -2,7 +2,7 @@ import './fixtures/testEnv';
 import assert from 'node:assert/strict';
 import { randomInt } from 'node:crypto';
 import { once } from 'node:events';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -13,6 +13,7 @@ const databaseUrl = process.env.AGENT_DOMAINS_TEST_DATABASE_URL;
 
 test('agent domains, configurations and activity operate under forced tenant RLS', {
   skip: !databaseUrl && 'AGENT_DOMAINS_TEST_DATABASE_URL is required',
+  timeout: 90_000,
 }, async (t) => {
   const database = new URL(databaseUrl!);
   process.env.DB_HOST = database.hostname;
@@ -124,4 +125,90 @@ test('agent domains, configurations and activity operate under forced tenant RLS
   assert.equal((await request(`${domainPath}/metrics`, 200, b)).commands, 0);
   await request(`/${second.id}`, 200, a, 'DELETE');
   await request(`/${second.id}`, 404);
+
+  await t.test('knowledge downloads use tenant and agent storage and ignore user-controlled paths', async () => {
+    const knowledge = (agentId: number) => `/${agentId}/knowledge`;
+    async function upload(agentId: number, tenant: number, value: string, expected: number, role = 'ADMIN', title?: string) {
+      const form = new FormData();
+      form.append('file', new Blob([value], { type: 'text/plain' }), 'política.txt');
+      if (title) form.append('title', title);
+      const response = await fetch(base + knowledge(agentId) + '/upload', { method: 'POST',
+        headers: { Authorization: `Bearer ${token(tenant, role)}` }, body: form });
+      const json = await response.json();
+      assert.equal(response.status, expected, JSON.stringify(json));
+      return json.data;
+    }
+    const download = (agentId: number, sourceId: number, tenant = a) => fetch(base + knowledge(agentId) + `/${sourceId}/file`, {
+      headers: { Authorization: `Bearer ${token(tenant, 'EMPLEADO')}` },
+    });
+    const original = 'Tenant A content';
+    const confidential = 'Tenant B content';
+    const sourceA = await upload(agent.id, a, original, 200);
+    const sourceB = await upload(foreign.id, b, confidential, 200);
+    assert.equal(sourceA.content, original);
+    assert.equal(sourceA.metadata.file.originalName, 'política.txt');
+    assert.equal(sourceA.metadata.file.storagePath, undefined);
+    assert.equal(sourceA.metadata.file.storedName, undefined);
+    assert.equal(sourceA.url, `/api/agents${knowledge(agent.id)}/${sourceA.id}/file`);
+    const aDir = join(uploadDir, 'agent-knowledge', String(a), String(agent.id));
+    const bDir = join(uploadDir, 'agent-knowledge', String(b), String(foreign.id));
+    const [aName] = await readdir(aDir);
+    const [bName] = await readdir(bDir);
+    const aFile = join(aDir, aName);
+    const bFile = join(bDir, bName);
+    const own = await download(agent.id, sourceA.id);
+    assert.equal(own.status, 200);
+    assert.equal(own.headers.get('cache-control'), 'private, no-store');
+    assert.equal(await own.text(), original);
+    assert.equal((await download(foreign.id, sourceB.id)).status, 404);
+    assert.equal((await download(agent.id, sourceB.id)).status, 404);
+    await upload(foreign.id, a, 'foreign upload', 404);
+    await upload(agent.id, a, 'employee upload', 403, 'EMPLEADO');
+    await upload(agent.id, a, 'failed DB write', 500, 'ADMIN', 'x'.repeat(3000));
+    assert.deepEqual(await readdir(aDir), [aName]);
+    assert.deepEqual(await readdir(bDir), [bName]);
+
+    const forgedMetadata = { file: { originalName: 'forged.txt', storedName: bName, storagePath: bFile } };
+    const forged = await request(knowledge(agent.id), 200, a, 'POST', { title: 'Forged link', metadata: forgedMetadata });
+    assert.equal(forged.metadata.file, undefined);
+    assert.equal((await download(agent.id, forged.id)).status, 404);
+    const updated = await request(`${knowledge(agent.id)}/${sourceA.id}`, 200, a, 'PUT', { metadata: forgedMetadata });
+    assert.equal(updated.metadata.file.originalName, 'política.txt');
+    assert.equal(await (await download(agent.id, sourceA.id)).text(), original);
+
+    const rawFileMetadata = (sourceId: number, metadata: unknown) => uow.run(a, (db) => db.query(`
+      UPDATE agent_knowledge_sources SET metadata_json = $3::jsonb WHERE id = $1 AND agent_id = $2
+    `, [sourceId, agent.id, JSON.stringify(metadata)]));
+    await rawFileMetadata(forged.id, { file: { storedName: '../../' + bName, storagePath: bFile } });
+    assert.equal((await download(agent.id, forged.id)).status, 404);
+    const alias = 'b'.repeat(32);
+    await symlink(bFile, join(aDir, alias));
+    await rawFileMetadata(forged.id, { file: { storedName: alias } });
+    assert.equal((await download(agent.id, forged.id)).status, 404);
+    assert.equal(await readFile(bFile, 'utf8'), confidential);
+    await rm(join(aDir, alias));
+
+    const backup = aDir + '-backup';
+    await rename(aDir, backup);
+    await symlink(bDir, aDir);
+    try {
+      await rawFileMetadata(forged.id, { file: { storedName: bName } });
+      assert.equal((await download(agent.id, forged.id)).status, 404);
+      await upload(agent.id, a, 'symlinked directory', 500);
+      assert.deepEqual(await readdir(bDir), [bName]);
+      assert.equal(await readFile(bFile, 'utf8'), confidential);
+    } finally {
+      await rm(aDir);
+      await rename(backup, aDir);
+    }
+
+    const legacyName = 'c'.repeat(32);
+    const legacyPath = join(uploadDir, 'agent-knowledge', legacyName);
+    await writeFile(legacyPath, 'Unscoped historical file');
+    await rawFileMetadata(forged.id, { file: { storedName: legacyName, storagePath: legacyPath } });
+    assert.equal((await download(agent.id, forged.id)).status, 404);
+    assert.equal(await readFile(legacyPath, 'utf8'), 'Unscoped historical file');
+    assert.equal(await readFile(aFile, 'utf8'), original);
+    assert.equal(await (await download(agent.id, sourceA.id)).text(), original);
+  });
 });

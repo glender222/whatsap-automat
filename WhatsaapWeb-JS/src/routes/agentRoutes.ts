@@ -1,16 +1,16 @@
-import fs from 'fs';
-import path from 'path';
+import { pipeline } from 'node:stream/promises';
 import { NextFunction, Request, Response, Router } from 'express';
 import config from '../config/index';
 import { JwtRequest, resolveWhatsappCompanyId, toPositiveInt } from '../middleware/jwtAuth';
 import type { PaymentGatewayInput, PaymentGatewayProvider } from '../modules/ai/domain/paymentGateway.types';
-import AgentService from '../services/ai/AgentService';
+import AgentService, { agentKnowledgeDirectory } from '../services/ai/AgentService';
+import { removeTemporaryUpload } from '../shared/temporaryUpload';
 
 const multer = require('multer') as any;
 
 function toInt(value: unknown): number {
   const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed <= 0) throw new Error('ID invalido');
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) throw Object.assign(new Error('ID invalido'), { statusCode: 400 });
   return parsed;
 }
 
@@ -100,9 +100,16 @@ function gatewayId(value: unknown): number {
 
 export default function createAgentRoutes(service = new AgentService()): Router {
   const router = Router();
-  const knowledgeUploadDir = path.join(config.whatsapp.uploadDir, 'agent-knowledge');
-  fs.mkdirSync(knowledgeUploadDir, { recursive: true });
-  const upload = multer({ dest: knowledgeUploadDir, limits: { fileSize: config.multer.maxFileSize } });
+  const upload = multer({
+    defParamCharset: 'utf8',
+    storage: multer.diskStorage({
+      destination(req: JwtRequest, _file: unknown, callback: (error: Error | null, directory?: string) => void) {
+        agentKnowledgeDirectory(resolveWhatsappCompanyId(req), toInt(req.params.id), true)
+          .then((directory) => callback(null, directory), callback);
+      },
+    }),
+    limits: { fileSize: config.multer.maxFileSize, files: 1 },
+  }).single('file');
 
   router.get('/domains', async (req: JwtRequest, res: Response, next: NextFunction) => {
     try {
@@ -425,15 +432,22 @@ export default function createAgentRoutes(service = new AgentService()): Router 
     } catch (error) { next(error); }
   });
 
-  router.post('/:id/knowledge/upload', upload.single('file'), async (req: Request, res: Response, next: NextFunction) => {
-    const jwtReq = req as JwtRequest;
-    if (!requireAdmin(jwtReq, res)) return;
+  router.post('/:id/knowledge/upload', async (req: JwtRequest, res: Response, next: NextFunction) => {
+    if (!requireAdmin(req, res)) return;
     try {
-      const file = (req as Request & { file?: any }).file;
-      if (!file) return res.status(400).json({ success: false, error: 'Archivo requerido' });
-      const source = await service.createKnowledgeFromFile(resolveWhatsappCompanyId(jwtReq), toInt(req.params.id), file, req.body || {});
-      return res.status(200).json({ success: true, data: source });
+      await service.getAgent(resolveWhatsappCompanyId(req), toInt(req.params.id));
+      return upload(req, res, next);
     } catch (error) { return next(error); }
+  }, async (req: JwtRequest, res: Response, next: NextFunction) => {
+    const file = (req as Request & { file?: any }).file;
+    if (!file) return res.status(400).json({ success: false, error: 'Archivo requerido' });
+    try {
+      const source = await service.createKnowledgeFromFile(resolveWhatsappCompanyId(req), toInt(req.params.id), file, req.body || {});
+      return res.status(200).json({ success: true, data: source });
+    } catch (error) {
+      await removeTemporaryUpload(file.path);
+      return next(error);
+    }
   });
 
   router.put('/:id/knowledge/:sourceId', async (req: JwtRequest, res: Response, next: NextFunction) => {
@@ -455,8 +469,16 @@ export default function createAgentRoutes(service = new AgentService()): Router 
   router.get('/:id/knowledge/:sourceId/file', async (req: JwtRequest, res: Response, next: NextFunction) => {
     try {
       const file = await service.getKnowledgeFile(resolveWhatsappCompanyId(req), toInt(req.params.id), toInt(req.params.sourceId));
-      res.setHeader('Content-Type', file.mimeType);
-      return res.download(file.filePath, file.filename);
+      try {
+        res.attachment(file.filename);
+        res.setHeader('Content-Type', file.mimeType);
+        res.setHeader('Content-Length', file.size);
+        res.setHeader('Cache-Control', 'private, no-store');
+        res.setHeader('X-Content-Type-Options', 'nosniff');
+        await pipeline(file.handle.createReadStream(), res);
+      } finally {
+        await file.handle.close();
+      }
     } catch (error) { return next(error); }
   });
 

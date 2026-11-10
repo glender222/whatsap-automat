@@ -178,6 +178,8 @@ El runtime no inventa agentes ni catálogo. En una base limpia, prepara la demo 
 
 Para respuestas automáticas por WhatsApp, el agente destino debe estar activo y en modo `auto`. En modo `suggest`, la respuesta se envía al frontend para revisión humana. El handoff solo se comunica al cliente cuando existe un ticket persistido y reutiliza un ticket activo de la conversación.
 
+Los archivos de conocimiento se guardan bajo `agent-knowledge/<empresa>/<agente>/` en el directorio de uploads. La carpeta histórica compartida se conserva. Para recuperar uno de esos archivos, verifica su pertenencia y colócalo en el directorio de la empresa y el agente correspondiente usando su nombre de almacenamiento original.
+
 ## Ejecutar el backend
 
 Sin túnel:

@@ -1,4 +1,5 @@
 import fs from 'fs/promises';
+import { constants } from 'node:fs';
 import path from 'path';
 import pool from '../../config/database';
 import { queryInTenantScope } from '../../db/TenantScopedUoW';
@@ -46,6 +47,17 @@ type UploadedAgentFile = {
   filename: string;
 };
 
+const storedKnowledgeName = /^[a-f0-9]{32}$/;
+
+export async function agentKnowledgeDirectory(companyId: number, agentId: number, create = false): Promise<string> {
+  if (create) await fs.mkdir(config.whatsapp.uploadDir, { recursive: true });
+  const root = await fs.realpath(config.whatsapp.uploadDir);
+  const directory = path.join(root, 'agent-knowledge', String(companyId), String(agentId));
+  if (create) await fs.mkdir(directory, { recursive: true, mode: 0o700 });
+  if (await fs.realpath(directory) !== directory) throw new Error('Ruta de conocimiento no valida');
+  return directory;
+}
+
 function clampConfidence(value: unknown): number {
   const numberValue = Number(value);
   if (!Number.isFinite(numberValue)) return 0.5;
@@ -65,8 +77,13 @@ async function readTextPreview(file: UploadedAgentFile): Promise<string> {
   if (!isTextLike) {
     return `Archivo cargado: ${file.originalname}\nTipo: ${file.mimetype || 'desconocido'}\nTamano: ${file.size} bytes.`;
   }
-  const buffer = await fs.readFile(file.path);
-  return buffer.toString('utf8').slice(0, 200000);
+  const handle = await fs.open(file.path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const { buffer, bytesRead } = await handle.read(Buffer.alloc(200_000), 0, 200_000, 0);
+    return buffer.subarray(0, bytesRead).toString('utf8');
+  } finally {
+    await handle.close();
+  }
 }
 
 export class AgentService {
@@ -167,30 +184,23 @@ export class AgentService {
     input: any
   ): Promise<Record<string, unknown>> {
     await this.agentRepo.get(companyId, agentId);
+    const directory = await agentKnowledgeDirectory(companyId, agentId);
+    if (!storedKnowledgeName.test(file.filename) || path.resolve(file.path) !== path.join(directory, file.filename)) {
+      throw Object.assign(new Error('Archivo de conocimiento no valido'), { statusCode: 400 });
+    }
     const content = input?.content || await readTextPreview(file);
-    const metadata = {
-      ...(input?.metadata || {}),
-      file: {
-        originalName: file.originalname,
-        mimeType: file.mimetype || 'application/octet-stream',
-        size: file.size,
-        storagePath: path.resolve(file.path),
-        storedName: file.filename,
-      },
-    };
-    const created = await this.agentRepo.createKnowledge(companyId, agentId, {
+    return this.agentRepo.createKnowledge(companyId, agentId, {
       sourceType: 'document',
       title: String(input?.title || file.originalname || 'Documento').trim(),
       content,
-      url: null,
-      metadata,
+      metadata: input?.metadata,
       enabled: input?.enabled !== false,
+    }, {
+      originalName: file.originalname,
+      mimeType: file.mimetype || 'application/octet-stream',
+      size: file.size,
+      storedName: file.filename,
     });
-    const updateResult = await pool.query(
-      `UPDATE agent_knowledge_sources SET url = $1, updated_at = NOW() WHERE id = $2 RETURNING *`,
-      [`/api/agents/${agentId}/knowledge/${created.id}/file`, created.id]
-    );
-    return updateResult.rows[0];
   }
 
   async updateKnowledge(companyId: number, agentId: number, sourceId: number, input: any): Promise<Record<string, unknown>> {
@@ -201,32 +211,27 @@ export class AgentService {
     return this.agentRepo.deleteKnowledge(companyId, agentId, sourceId);
   }
 
-  async getKnowledgeFile(companyId: number, agentId: number, sourceId: number): Promise<{ filePath: string; filename: string; mimeType: string }> {
-    await this.agentRepo.get(companyId, agentId);
-    const result = await pool.query(
-      'SELECT * FROM agent_knowledge_sources WHERE id = $1 AND agent_id = $2',
-      [sourceId, agentId]
-    );
-    const source = result.rows[0];
-    const file = source?.metadata_json?.file;
-    if (!file?.storagePath) {
-      const error = new Error('El conocimiento no tiene archivo asociado') as Error & { statusCode?: number };
-      error.statusCode = 404;
+  async getKnowledgeFile(companyId: number, agentId: number, sourceId: number) {
+    const source = await this.agentRepo.getKnowledgeFileMetadata(companyId, agentId, sourceId);
+    const file = source?.file;
+    const missing = () => Object.assign(new Error('Archivo de conocimiento no encontrado'), { statusCode: 404 });
+    if (typeof file?.storedName !== 'string' || !storedKnowledgeName.test(file.storedName)) throw missing();
+    const handle = await agentKnowledgeDirectory(companyId, agentId).then((directory) => fs.open(
+      path.join(directory, file.storedName), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+    )).catch(() => { throw missing(); });
+    try {
+      const stat = await handle.stat();
+      if (!stat.isFile()) throw missing();
+      return {
+        handle,
+        size: stat.size,
+        filename: String(file.originalName || source.title || 'archivo').replace(/[/\\\u0000-\u001f\u007f]/g, '_'),
+        mimeType: /^[\w.+-]+\/[\w.+-]+$/.test(file.mimeType) ? file.mimeType : 'application/octet-stream',
+      };
+    } catch (error) {
+      await handle.close();
       throw error;
     }
-    const uploadRoot = path.resolve(config.whatsapp.uploadDir);
-    const filePath = path.resolve(String(file.storagePath));
-    if (!filePath.startsWith(uploadRoot)) {
-      const error = new Error('Ruta de archivo no valida') as Error & { statusCode?: number };
-      error.statusCode = 400;
-      throw error;
-    }
-    await fs.access(filePath);
-    return {
-      filePath,
-      filename: String(file.originalName || source.title || 'archivo'),
-      mimeType: String(file.mimeType || 'application/octet-stream'),
-    };
   }
 
   async getAutomatorMode(companyId: number): Promise<AutomatorMode> {

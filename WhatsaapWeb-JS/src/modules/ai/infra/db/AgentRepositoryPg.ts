@@ -229,7 +229,20 @@ function normalizeRules(row: Row | null): AgentRules {
   };
 }
 
+type ManagedKnowledgeFile = { originalName: string; mimeType: string; size: number; storedName: string };
+
+function knowledgeMetadata(value: unknown): Row {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const { file: _managedFile, ...metadata } = value as Row;
+  return metadata;
+}
+
 function normalizeKnowledge(row: Row): AgentKnowledgeSource {
+  const file = row.metadata_json?.file;
+  const metadata = knowledgeMetadata(row.metadata_json);
+  if (file && typeof file === 'object') {
+    metadata.file = { originalName: file.originalName, mimeType: file.mimeType, size: file.size };
+  }
   return {
     id: Number(row.id),
     agentId: Number(row.agent_id),
@@ -237,7 +250,7 @@ function normalizeKnowledge(row: Row): AgentKnowledgeSource {
     title: row.title,
     content: row.content,
     url: row.url,
-    metadata: row.metadata_json || {},
+    metadata,
     enabled: row.enabled,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -628,9 +641,11 @@ export class AgentRepositoryPg {
     });
   }
 
-  async createKnowledge(companyId: number, agentId: number, input: any): Promise<AgentKnowledgeSource> {
+  async createKnowledge(companyId: number, agentId: number, input: any, file?: ManagedKnowledgeFile): Promise<AgentKnowledgeSource> {
     return this.withMutation(companyId, async (repo) => {
       await repo.assertAgent(companyId, agentId);
+      const metadata = knowledgeMetadata(input?.metadata);
+      if (file) metadata.file = file;
       const result = await repo.pool.query(
         `INSERT INTO agent_knowledge_sources (
            agent_id, source_type, title, content, url, metadata_json, enabled
@@ -643,11 +658,28 @@ export class AgentRepositoryPg {
           String(input?.title || 'Conocimiento').trim(),
           input?.content || '',
           input?.url || null,
-          json(input?.metadata || {}),
+          json(metadata),
           input?.enabled !== false,
         ]
       );
-      return normalizeKnowledge(result.rows[0]);
+      const [source] = result.rows;
+      if (!file) return normalizeKnowledge(source);
+      const linked = await repo.pool.query(
+        `UPDATE agent_knowledge_sources SET url = $1 WHERE id = $2 AND agent_id = $3 RETURNING *`,
+        [`/api/agents/${agentId}/knowledge/${source.id}/file`, source.id, agentId],
+      );
+      return normalizeKnowledge(linked.rows[0]);
+    });
+  }
+
+  async getKnowledgeFileMetadata(companyId: number, agentId: number, sourceId: number) {
+    return this.withTenant(companyId, async (repo) => {
+      await repo.assertAgent(companyId, agentId);
+      const { rows: [source] } = await repo.pool.query(
+        `SELECT title, metadata_json->'file' AS file FROM agent_knowledge_sources WHERE id = $1 AND agent_id = $2`,
+        [sourceId, agentId],
+      );
+      return source;
     });
   }
 
@@ -660,6 +692,8 @@ export class AgentRepositoryPg {
       );
       const current = currentResult.rows[0];
       if (!current) throw Object.assign(new Error('Fuente de conocimiento no encontrada'), { statusCode: 404 });
+      const metadata = knowledgeMetadata(input?.metadata ?? current.metadata_json);
+      if (current.metadata_json?.file) metadata.file = current.metadata_json.file;
 
       const result = await repo.pool.query(
         `UPDATE agent_knowledge_sources
@@ -670,7 +704,7 @@ export class AgentRepositoryPg {
           input?.title ?? current.title,
           input?.content ?? current.content,
           input?.url ?? current.url,
-          json(input?.metadata || current.metadata_json || {}),
+          json(metadata),
           input?.enabled ?? current.enabled,
           sourceId,
           agentId,
