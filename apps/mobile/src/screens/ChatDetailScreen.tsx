@@ -13,11 +13,15 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import ArrowLeft from 'lucide-react-native/icons/arrow-left';
+import Paperclip from 'lucide-react-native/icons/paperclip';
 import Send from 'lucide-react-native/icons/send';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { apiClient, MobileApiError, type MobileChatOwnership, type MobileMessage, type MobileTextCommand } from '../services/apiClient';
+import { apiClient, MobileApiError, type MobileChatOwnership, type MobileMessage, type MobileSendCommand } from '../services/apiClient';
 import { isAttachmentId, safeAttachmentName } from '../services/attachmentData';
+import { canUseAttachmentCaption, MAX_ATTACHMENT_CAPTION_LENGTH, type OutboundAttachment } from '../services/outboundAttachment';
+import { pickAttachment } from '../services/pickAttachment';
 import { useSession } from '../services/sessionContext';
 import { useRefreshOnFocus } from '../services/useRefreshOnFocus';
 import { TakeoverButton } from '../components/TakeoverButton';
@@ -50,6 +54,11 @@ const sendRejectionLabels: Record<string, string> = {
   CONVERSATION_VERSION_CHANGED: 'La conversación cambió. Revisa su estado antes de volver a enviar.',
   HUMAN_TAKEOVER_REQUIRED: 'Toma el control de la conversación antes de enviar.',
   SERVICE_WINDOW_CLOSED: 'La ventana de atención cerró. Usa una plantilla aprobada desde el espacio web.',
+  ATTACHMENT_SIZE_INVALID: 'El adjunto está vacío o supera el tamaño permitido.',
+  ATTACHMENT_TYPE_UNSUPPORTED: 'El servidor no admite el formato del adjunto.',
+  ATTACHMENT_CAPTION_UNSUPPORTED: 'Los audios se envían sin pie de archivo.',
+  ATTACHMENT_REJECTED: 'WhatsApp rechazó el adjunto.',
+  ATTACHMENT_VIDEO_INVALID: 'No se pudo preparar el video para WhatsApp.',
 };
 
 const acceptedNotice = 'WhatsApp aceptó el mensaje.';
@@ -60,6 +69,9 @@ export function ChatDetailScreen({ route, navigation }: Props) {
   const [chat, setChat] = useState(route.params.chat);
   const [messages, setMessages] = useState<MobileMessage[]>([]);
   const [draft, setDraft] = useState('');
+  const [selectedAttachment, setSelectedAttachment] = useState<OutboundAttachment>();
+  const [picking, setPicking] = useState(false);
+  const [pickError, setPickError] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
@@ -76,6 +88,7 @@ export function ChatDetailScreen({ route, navigation }: Props) {
   const loadedHistoryId = useRef<string | null>(null);
   const olderCursor = useRef<string | null>(null);
   const sendInFlight = useRef(false);
+  const picker = useRef<AbortController | null>(null);
 
   const { id: chatId, conversationId, stateVersion, assignedUserId } = chat;
   const pending = pendingReplies.get(chatId);
@@ -145,6 +158,18 @@ export function ChatDetailScreen({ route, navigation }: Props) {
   }, [chatId, conversationId, isSessionActive, pendingKey, updateOwnership]);
   const refresh = useRefreshOnFocus(load);
 
+  const cancelPicker = useCallback(() => {
+    picker.current?.abort();
+    picker.current = null;
+    setPicking(false);
+  }, []);
+  useFocusEffect(useCallback(() => cancelPicker, [cancelPicker]));
+
+  const restoreDraft = useCallback((command: MobileSendCommand) => {
+    setDraft(command.text);
+    setSelectedAttachment('attachment' in command ? command.attachment : undefined);
+  }, []);
+
   useEffect(() => {
     if (!pending || sending) return;
     const status = messages.find((item) => item.clientRequestId === pending.key)?.status;
@@ -152,13 +177,14 @@ export function ChatDetailScreen({ route, navigation }: Props) {
     if (['dispatched', 'provider_accepted', 'delivered', 'read'].includes(status)) {
       forgetReply(chatId, pending);
       setDraft('');
+      setSelectedAttachment(undefined);
       setSendNotice(acceptedNotice);
     } else if (status === 'failed' || status === 'cancelled') {
       forgetReply(chatId, pending);
-      setDraft(pending.text);
+      restoreDraft(pending);
       setSendNotice(failedNotice);
     }
-  }, [chatId, forgetReply, messages, pending, sending]);
+  }, [chatId, forgetReply, messages, pending, restoreDraft, sending]);
 
   async function refreshChat() {
     setRefreshing(true);
@@ -212,32 +238,62 @@ export function ChatDetailScreen({ route, navigation }: Props) {
   const hasUnresolvedDelivery = serverDeliveryBlocked ?? messages.some(isUnresolvedReply);
   const ownsConversation = assignedUserId != null && String(assignedUserId) === session.userId;
   const canEdit = hasActiveSession === true && !loadError && !pending && !hasUnresolvedDelivery && !sending;
-  const canSend = canEdit && ownsConversation && conversationId != null && stateVersion != null && Boolean(draft.trim());
+  const hasControl = ownsConversation && conversationId != null && stateVersion != null;
+  const activeAttachment = pending && 'attachment' in pending ? pending.attachment : selectedAttachment;
+  const captionError = activeAttachment && (!canUseAttachmentCaption(activeAttachment.mimeType) && draft.trim()
+    ? 'Borra el texto para enviar este audio.'
+    : draft.trim().length > MAX_ATTACHMENT_CAPTION_LENGTH ? 'El pie del archivo admite hasta 1024 caracteres.' : '');
+  const canSend = canEdit && hasControl && !picking && !captionError && Boolean(draft.trim() || selectedAttachment);
+  const canPick = canEdit && hasControl && !picking;
 
-  async function send(command: MobileTextCommand) {
-    if (sendInFlight.current) return;
+  async function selectFile() {
+    if (!canPick || picker.current || !isSessionActive()) return;
+    const controller = new AbortController();
+    picker.current = controller;
+    setPicking(true);
+    setPickError('');
+    try {
+      const file = await pickAttachment(controller.signal);
+      if (file && picker.current === controller && isSessionActive()) setSelectedAttachment(file);
+    } catch (error) {
+      if (picker.current === controller && isSessionActive()) {
+        setPickError(error instanceof Error ? error.message : 'No se pudo leer el archivo seleccionado.');
+      }
+    } finally {
+      if (picker.current === controller) {
+        picker.current = null;
+        setPicking(false);
+      }
+    }
+  }
+
+  async function send(command: MobileSendCommand) {
+    if (sendInFlight.current || !isSessionActive()) return;
     sendInFlight.current = true;
     rememberReply(chatId, command);
     setSending(true);
     setSendNotice('');
     try {
       const outcome = await apiClient.sendMessage(command);
+      if (!isSessionActive()) return;
       if (outcome === 'accepted') {
         forgetReply(chatId, command);
         setDraft('');
+        setSelectedAttachment(undefined);
         setSendNotice(acceptedNotice);
         requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
       } else if (outcome === 'failed') {
         forgetReply(chatId, command);
-        setDraft(command.text);
+        restoreDraft(command);
         setSendNotice(failedNotice);
       }
     } catch (error) {
+      if (!isSessionActive()) return;
       if (error instanceof MobileApiError && error.status >= 400 && error.status < 500 && error.status !== 408) {
         const reason = error.metadata?.reasonCode;
         if (reason === 'DELIVERY_UNRESOLVED') setServerDeliveryBlocked(true);
         forgetReply(chatId, command);
-        setDraft(command.text);
+        restoreDraft(command);
         setSendNotice(typeof reason === 'string' && sendRejectionLabels[reason]
           ? sendRejectionLabels[reason]
           : 'El servidor rechazó el envío. Revisa la conversación antes de volver a intentarlo.');
@@ -251,7 +307,8 @@ export function ChatDetailScreen({ route, navigation }: Props) {
 
   function sendDraft() {
     if (!canSend || conversationId == null || stateVersion == null || sendInFlight.current) return;
-    void send({ conversationId, expectedVersion: stateVersion, key: uuid.v4(), text: draft.trim() });
+    const command = { conversationId, expectedVersion: stateVersion, key: uuid.v4(), text: draft.trim() };
+    void send(selectedAttachment ? { ...command, attachment: selectedAttachment } : command);
   }
 
   const title = chat.name?.trim() || chatId;
@@ -349,22 +406,46 @@ export function ChatDetailScreen({ route, navigation }: Props) {
           </View>
         ) : null}
         {sendNotice ? <Text accessibilityLiveRegion="polite" style={styles.notice}>{sendNotice}</Text> : null}
+        {pickError ? <Text accessibilityRole="alert" style={styles.notice}>{pickError}</Text> : null}
+        {captionError ? <Text accessibilityRole="alert" style={styles.notice}>{captionError}</Text> : null}
+        {picking ? (
+          <Pressable accessibilityRole="button" style={styles.loadOlder} onPress={cancelPicker}>
+            <Text style={styles.action}>Cancelar selección</Text>
+          </Pressable>
+        ) : null}
+        {activeAttachment ? (
+          <View style={styles.selectedFile}>
+            <View style={styles.fileDetails}>
+              <Text numberOfLines={2} style={styles.message}>{activeAttachment.filename}</Text>
+              <Text style={styles.secondary}>{Math.ceil(activeAttachment.bytes.byteLength / 1024)} KB</Text>
+            </View>
+            {canEdit && !picking ? (
+              <Pressable accessibilityRole="button" style={styles.removeFile} onPress={() => setSelectedAttachment(undefined)}>
+                <Text style={styles.action}>Quitar archivo</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
 
         <View style={styles.composer}>
+          <Pressable accessibilityRole="button" accessibilityLabel="Adjuntar archivo" accessibilityState={{ disabled: !canPick, busy: picking }}
+            style={[styles.pick, !canPick && styles.disabled]} disabled={!canPick} onPress={() => void selectFile()}>
+            {picking ? <ActivityIndicator color={colors.textPrimary} /> : <Paperclip size={18} color={colors.textPrimary} />}
+          </Pressable>
           <TextInput
             style={styles.input}
-            accessibilityLabel="Escribir mensaje"
-            placeholder={hasActiveSession === false ? 'Ventana de atención cerrada' : 'Escribe un mensaje'}
+            accessibilityLabel={activeAttachment ? 'Pie del archivo' : 'Escribir mensaje'}
+            placeholder={hasActiveSession === false ? 'Ventana de atención cerrada' : activeAttachment ? 'Pie del archivo (opcional)' : 'Escribe un mensaje'}
             placeholderTextColor={colors.textMuted}
             multiline
             editable={canEdit}
-            maxLength={4096}
+            maxLength={activeAttachment ? MAX_ATTACHMENT_CAPTION_LENGTH : 4096}
             value={pending?.text ?? draft}
             onChangeText={setDraft}
           />
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Enviar mensaje"
+            accessibilityLabel={activeAttachment ? 'Enviar adjunto' : 'Enviar mensaje'}
             accessibilityState={{ disabled: !canSend, busy: sending }}
             style={[styles.send, !canSend && styles.disabled]}
             disabled={!canSend}
@@ -397,6 +478,10 @@ const styles = StyleSheet.create({
   loadOlder: { minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   action: { color: colors.accent, fontWeight: '700' },
   composer: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, padding: 12, borderTopWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
+  selectedFile: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingVertical: 4, backgroundColor: colors.surface },
+  fileDetails: { flex: 1, gap: 2 },
+  removeFile: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 8 },
+  pick: { width: 44, height: 46, backgroundColor: colors.surfaceLight, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
   input: { flex: 1, color: colors.textPrimary, fontSize: 16, minHeight: 46, maxHeight: 120, paddingVertical: 10, paddingHorizontal: 14, backgroundColor: colors.background, borderColor: colors.border, borderWidth: 1, borderRadius: 12 },
   send: { width: 46, height: 46, backgroundColor: colors.primaryHover, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
   disabled: { opacity: 0.5 },

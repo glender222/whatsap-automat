@@ -1,6 +1,6 @@
 # Whatsap Automat móvil
 
-Cliente Expo para consultar la bandeja de WhatsApp, responder con texto durante la ventana de atención, tomar una conversación y revisar aprobaciones del espacio de trabajo.
+Cliente Expo para consultar la bandeja de WhatsApp, responder con texto o adjuntos durante la ventana de atención, tomar una conversación y revisar aprobaciones del espacio de trabajo.
 
 ## Desarrollo
 
@@ -28,6 +28,8 @@ Las credenciales nativas se guardan en Expo SecureStore. La vista web conserva l
 Cuando caduca el token de acceso, el cliente agrupa las renovaciones concurrentes y verifica la cuenta y el espacio de trabajo antes de repetir cada operación una sola vez. Si la renovación falla de forma temporal, la sesión sigue abierta. Cuando el servidor revoca la renovación o el usuario cierra sesión, se requiere iniciar sesión de nuevo.
 
 Para responder, el operador toma el control de la conversación y el servidor comprueba la versión y la ventana de atención. Si la entrega queda sin confirmar, el cliente pausa los envíos nuevos y permite reintentar la misma solicitud con su clave original mientras la sesión permanece abierta. El historial del servidor distingue los mensajes aceptados, fallidos y sin confirmar.
+
+El botón **Adjuntar archivo** admite imágenes PNG y JPEG de hasta 5 MB y los formatos compatibles de audio, video y documentos de hasta 10 MiB. El pie es opcional y admite hasta 1024 caracteres. Los audios se envían sin pie. El cliente conserva el archivo y el pie en memoria, sin crear una copia propia en caché. Salir de la cuenta descarta la selección y cualquier reintento local pendiente. La selección desde proveedores de archivos nativos requiere verificación en un dispositivo físico.
 
 La bandeja muestra **Aprobaciones** cuando el servidor concede `approvals.review`. Una decisión ordinaria requiere confirmación y usa la versión de la solicitud y una clave que se conserva durante la sesión para reintentar la misma decisión. Las solicitudes de riesgo alto, financiero, irreversible o sin verificar permanecen visibles con la decisión bloqueada hasta contar con los controles de verificación correspondientes.
 

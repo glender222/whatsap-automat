@@ -1,14 +1,14 @@
 import { createContext, useContext } from 'react';
 import type { AuthSession } from './authStorage';
-import type { MobileApprovalCommand, MobileTextCommand } from './apiClient';
+import type { MobileApprovalCommand, MobileSendCommand } from './apiClient';
 
 export const SessionContext = createContext<{
   session: AuthSession;
   signOut: () => void;
   isSessionActive: () => boolean;
-  pendingReplies: ReadonlyMap<string, MobileTextCommand>;
-  rememberReply: (chatId: string, command: MobileTextCommand) => void;
-  forgetReply: (chatId: string, command: MobileTextCommand) => void;
+  pendingReplies: ReadonlyMap<string, MobileSendCommand>;
+  rememberReply: (chatId: string, command: MobileSendCommand) => void;
+  forgetReply: (chatId: string, command: MobileSendCommand) => void;
   approvalAttempts: Map<string, MobileApprovalCommand>;
 } | null>(null);
 

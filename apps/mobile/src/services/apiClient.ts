@@ -3,6 +3,8 @@ import {
   downloadMimeType, isAttachmentId, isMatchingImage, isPreviewImage, MAX_ATTACHMENT_BYTES, parseAttachments,
   type AttachmentBytes, type MobileAttachment,
 } from './attachmentData';
+import type { OutboundAttachment } from './outboundAttachment';
+import { uploadBlob } from './uploadBlob';
 
 interface ApiEnvelope<T> {
   success: boolean;
@@ -63,6 +65,12 @@ export interface MobileTextCommand {
   key: string;
   text: string;
 }
+
+export interface MobileAttachmentCommand extends MobileTextCommand {
+  attachment: OutboundAttachment;
+}
+
+export type MobileSendCommand = MobileTextCommand | MobileAttachmentCommand;
 
 export type MobileSendOutcome = 'accepted' | 'failed' | 'unknown_delivery';
 
@@ -147,14 +155,14 @@ async function request<T>(
 ): Promise<T> {
   const headers = new Headers(init.headers);
   if (!headers.has('Accept')) headers.set('Accept', 'application/json, application/problem+json');
-  if (init.body) headers.set('Content-Type', 'application/json');
+  if (typeof init.body === 'string' && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
   if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`);
 
   const controller = new AbortController();
   const abort = () => controller.abort();
   if (init.signal?.aborted) abort();
   else init.signal?.addEventListener('abort', abort, { once: true });
-  const timeout = setTimeout(abort, read ? 30_000 : 15_000);
+  const timeout = setTimeout(abort, init.body instanceof FormData ? 120_000 : read ? 30_000 : 15_000);
   try {
     const response = await fetch(`${origin}/api${path}`, { ...init, headers, signal: controller.signal });
     if (response.ok && read) return await read(response);
@@ -433,13 +441,24 @@ export const apiClient = {
     return authenticated<void>(`/chats/${encodeURIComponent(chatId)}/read`, { method: 'POST' });
   },
 
-  async sendMessage(command: MobileTextCommand): Promise<MobileSendOutcome> {
+  async sendMessage(command: MobileSendCommand): Promise<MobileSendOutcome> {
     const { conversationId, expectedVersion, key, text } = command;
-    const result = await authenticated<{ accepted?: unknown; deliveryState?: unknown; providerMessageId?: unknown }>(
-      `/v1/conversations/${encodeURIComponent(conversationId)}/messages`, {
+    let path = `/v1/conversations/${encodeURIComponent(conversationId)}/messages`;
+    let body: string | FormData;
+    if ('attachment' in command) {
+      const { attachment } = command;
+      path += '/attachments';
+      body = new FormData();
+      body.append('expectedConversationVersion', String(expectedVersion));
+      if (text) body.append('message', text);
+      body.append('file', uploadBlob(attachment), attachment.filename);
+    } else {
+      body = JSON.stringify({ expectedConversationVersion: expectedVersion, message: { kind: 'text', text } });
+    }
+    const result = await authenticated<{ accepted?: unknown; deliveryState?: unknown; providerMessageId?: unknown }>(path, {
       method: 'POST',
       headers: { 'Idempotency-Key': key },
-      body: JSON.stringify({ expectedConversationVersion: expectedVersion, message: { kind: 'text', text } }),
+      body,
     }, 'canonical');
     if (result.deliveryState === 'failed' || result.deliveryState === 'cancelled') return 'failed';
     if (result.deliveryState === 'unknown_delivery') return 'unknown_delivery';

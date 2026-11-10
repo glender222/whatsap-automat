@@ -167,6 +167,36 @@ test('sends canonical text with a stable request key and never retries a transpo
   assert.equal(attempts, 2);
 });
 
+test('sends the same authenticated multipart command and bytes when retrying an attachment', async () => {
+  await authStorage.saveAuthSession(session);
+  let attempts = 0;
+  const attachment = { bytes: new Uint8Array([19, 0, 200]), filename: 'receipt.pdf', mimeType: 'application/pdf' };
+  const command = { conversationId: 8, expectedVersion: 3, key: 'mobile-attachment-1', text: 'Recibo', attachment };
+  globalThis.fetch = async (input, init) => {
+    attempts++;
+    assert.equal(input, `${session.apiUrl}/api/v1/conversations/8/messages/attachments`);
+    assert.equal(init?.method, 'POST');
+    const headers = new Headers(init?.headers);
+    assert.equal(headers.get('Authorization'), 'Bearer access-token');
+    assert.equal(headers.get('Idempotency-Key'), command.key);
+    assert.equal(headers.has('Content-Type'), false);
+    assert.ok(init?.body instanceof FormData);
+    assert.equal(init.body.get('expectedConversationVersion'), '3');
+    assert.equal(init.body.get('message'), command.text);
+    const file = init.body.get('file');
+    assert.ok(file instanceof File);
+    assert.equal(file.name, attachment.filename);
+    assert.equal(file.type, attachment.mimeType);
+    assert.deepEqual(new Uint8Array(await file.arrayBuffer()), attachment.bytes);
+    if (attempts === 1) throw new TypeError('connection interrupted');
+    return json(202, { accepted: false, providerMessageId: null, deliveryState: 'unknown_delivery' });
+  };
+  await assert.rejects(apiClient.sendMessage(command), TypeError);
+  assert.equal(attempts, 1);
+  assert.equal(await apiClient.sendMessage(command), 'unknown_delivery');
+  assert.equal(attempts, 2);
+});
+
 test('distinguishes an acknowledged rejection, unresolved delivery and a canonical conflict', async () => {
   await authStorage.saveAuthSession(session);
   const command = { conversationId: 8, expectedVersion: 3, key: 'mobile-request-1', text: 'Hola' };

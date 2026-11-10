@@ -4,7 +4,7 @@ import { DarkTheme, NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { apiClient, handleUnauthorized, type MobileApprovalCommand, type MobileTextCommand } from './src/services/apiClient';
+import { apiClient, handleUnauthorized, type MobileApprovalCommand, type MobileSendCommand } from './src/services/apiClient';
 import { authStorage, type AuthSession } from './src/services/authStorage';
 import { SessionContext } from './src/services/sessionContext';
 import { SignInScreen } from './src/screens/SignInScreen';
@@ -32,7 +32,7 @@ export default function App() {
   const [session, setSession] = useState<AuthSession | null | undefined>(undefined);
   const [storageError, setStorageError] = useState<'read' | 'clear' | null>(null);
   const [signInNotice, setSignInNotice] = useState('');
-  const [pendingReplies, setPendingReplies] = useState(() => new Map<string, MobileTextCommand>());
+  const [pendingReplies, setPendingReplies] = useState(() => new Map<string, MobileSendCommand>());
   const approvalAttempts = useRef(new Map<string, MobileApprovalCommand>());
   const currentSession = useRef<AuthSession | null>(null);
 
@@ -80,12 +80,12 @@ export default function App() {
     void clearSession(true);
   }
 
-  const rememberReply = useCallback((chatId: string, command: MobileTextCommand) => {
+  const rememberReply = useCallback((chatId: string, command: MobileSendCommand) => {
     if (!session || currentSession.current !== session) return;
     setPendingReplies((current) => new Map(current).set(chatId, command));
   }, [session]);
 
-  const forgetReply = useCallback((chatId: string, command: MobileTextCommand) => {
+  const forgetReply = useCallback((chatId: string, command: MobileSendCommand) => {
     setPendingReplies((current) => {
       if (current.get(chatId) !== command) return current;
       const next = new Map(current);
