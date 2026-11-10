@@ -16,3 +16,5 @@ La segunda empresa no tenía una segunda línea de Meta. El aislamiento de dos c
 Los avisos de Meta llegaron fuera de orden. La prueba de regresión reprodujo que un `sent` tardío bajaba de `delivered` a `sent` el estado visible de una plantilla. El backend ahora conserva el estado más avanzado y registra los recibos para auditoría. La corrección se verificó con la regresión de PostgreSQL, la suite de envíos canónicos y la del webhook firmado. Pasaron 20 pruebas entre las cuatro suites, sin omisiones, además de `npm run typecheck` y `npm run build`.
 
 Al terminar se retiró el callback temporal y se cerró el túnel. Graph confirmó que el callback ya no estaba registrado y que la app seguía suscrita a la cuenta de WhatsApp. Para repetir la prueba con otra URL, véase [Configuración manual exacta en Meta Developers](../../WhatsaapWeb-JS/README.md#configuración-manual-exacta-en-meta-developers).
+
+En una comprobación posterior, la consulta de inventario de líneas devolvió HTTP 401 y código Graph 190 con la credencial disponible. La prueba de dos líneas reales sigue pendiente. Esta comprobación fue de solo lectura.

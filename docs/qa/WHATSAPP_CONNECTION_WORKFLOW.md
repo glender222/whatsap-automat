@@ -6,12 +6,14 @@ Base de la reproducción: `dfb4a65`. Las pruebas usan PostgreSQL con RLS y un se
 
 1. Dos administradores podían guardar la conexión de sus empresas desde Configuración, pero la pantalla no ofrecía diagnóstico ni desconexión. El recorrido Chromium fallaba esperando «Comprobar conexión» después de guardar ambas conexiones.
 2. Un rechazo de la credencial por Meta aparecía como `Request failed with status code 403`, sin instrucciones de recuperación. La regresión exige explicar que deben revisarse la línea, el token y sus permisos.
+3. En la matriz completa, el aviso de desconexión seguía visible después de guardar la conexión nueva. El diagnóstico aún estaba cargando y el botón aceptaba pulsaciones solo cuando terminaba la consulta.
 
 ## Comportamiento corregido
 
 - El diagnóstico usa los contratos existentes de `/api/v1/channel-connections`: localiza la línea de la empresa activa, pagina si es necesario y rechaza respuestas de otra empresa. La comprobación consulta Meta desde el backend y muestra el resultado y la fecha.
 - Los administradores pueden desconectar mediante un diálogo con foco inicial en Cancelar y retorno de foco al cerrar con Escape. La UI solo confirma el éxito después de recibir la confirmación del servidor. Un error permite actualizar el estado y reintentar explícitamente.
 - La reconexión exige una credencial nueva cuando no existe una activa. Guardar, comprobar y desconectar se excluyen entre sí en la pantalla. El formulario limpia el secreto al guardar o desconectar.
+- Guardar una conexión invalida los avisos y las consultas del diagnóstico anterior. Guardar y desconectar están vinculados a la sesión que abrió la pantalla.
 - Los empleados pueden leer el estado; no reciben controles de administración. El servidor también rechaza sus operaciones de guardado, comprobación y desconexión.
 
 ## Cobertura
@@ -24,6 +26,7 @@ Base de la reproducción: `dfb4a65`. Las pruebas usan PostgreSQL con RLS y un se
 - Ausencia de cambios en la segunda empresa; un ID de conexión ajeno devuelve 404 aunque se envíe otro tenant por cabecera/cuerpo.
 - EMPLEADO recibe 403 en las tres operaciones administrativas, además de no ver sus controles en la UI.
 - Cambiar de empresa descarta el borrador de credencial y una respuesta tardía del resumen anterior no sustituye la empresa activa.
+- Un formulario obsoleto queda bloqueado antes de enviar un POST si cambia la sesión al confirmar. Tras reconectar, el aviso de desconexión desaparece y la prueba espera que termine el diagnóstico antes de usar el botón.
 - El fixture no recibe operaciones de envío de mensajes.
 
 Las pruebas existentes de `channel-connections-postgres.test.ts` añaden cifrado, FORCE RLS, paginación, diagnóstico sanitizado, comprobaciones superadas por una rotación y ausencia de llamadas Graph después de revocar.

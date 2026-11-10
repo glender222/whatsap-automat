@@ -15,8 +15,10 @@ function healthMessage(health: ConnectionHealth): string {
   }
 }
 
-export default function MetaConnectionActions({ companyId, phoneNumberId, version, canManage, disabled, onBusyChange, onChanged }: {
+export default function MetaConnectionActions({ companyId, sessionGeneration, connectionRevision, phoneNumberId, version, canManage, disabled, onBusyChange, onChanged }: {
   companyId: number;
+  sessionGeneration: number;
+  connectionRevision: number;
   phoneNumberId: string | null;
   version: string;
   canManage: boolean;
@@ -25,10 +27,11 @@ export default function MetaConnectionActions({ companyId, phoneNumberId, versio
   onChanged?: () => Promise<void> | void;
 }) {
   const [attempt, setAttempt] = useState(0);
-  const query = `${companyId}/${phoneNumberId}/${version}/${attempt}`;
+  const query = `${companyId}/${phoneNumberId}/${version}/${connectionRevision}/${attempt}`;
   const [response, setResponse] = useState<{ query: string; connection?: MetaConnectionDiagnostic | null; error?: string }>();
   const [working, setWorking] = useState<'check' | 'disconnect' | null>(null);
-  const [notice, setNotice] = useState<{ error: boolean; message: string }>();
+  const [operationNotice, setNotice] = useState<{ revision: number; error: boolean; message: string }>();
+  const notice = operationNotice?.revision === connectionRevision ? operationNotice : undefined;
   const [confirming, setConfirming] = useState(false);
   const operation = useRef<AbortController | null>(null);
   const dialog = useRef<HTMLDialogElement>(null);
@@ -79,17 +82,17 @@ export default function MetaConnectionActions({ companyId, phoneNumberId, versio
         const checked = await CompanyService.checkConnection(connection.id, controller.signal);
         if (!controller.signal.aborted) setResponse({ query, connection: { ...connection, health: checked } });
       } else {
-        await CompanyService.disconnectWhatsAppConnection(controller.signal);
+        await CompanyService.disconnectWhatsAppConnection(sessionGeneration, controller.signal);
         if (controller.signal.aborted) return;
         dialog.current?.close();
         setConfirming(false);
         requestAnimationFrame(() => heading.current?.focus());
-        setNotice({ error: false, message: 'Conexión desconectada para esta empresa.' });
+        setNotice({ revision: connectionRevision, error: false, message: 'Conexión desconectada para esta empresa.' });
         setAttempt((value) => value + 1);
         await onChanged?.();
       }
     } catch {
-      if (!controller.signal.aborted) setNotice({ error: true, message: kind === 'check'
+      if (!controller.signal.aborted) setNotice({ revision: connectionRevision, error: true, message: kind === 'check'
         ? 'No pudimos completar el diagnóstico. Actualiza el estado y vuelve a comprobar.'
         : 'No pudimos confirmar la desconexión. Actualiza la conexión antes de volver a intentar.' });
     } finally {

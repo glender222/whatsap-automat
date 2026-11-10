@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, type FormEvent } from 'react';
+import { readSession } from '../../../shared/auth/session';
 import { WhatsAppService } from '../services/whatsappService';
 import { CompanyService, type CompanyOverview, type WhatsAppConnectionPayload } from '../services/companyService';
 import MetaConnectionActions from './MetaConnectionActions';
@@ -31,6 +32,8 @@ const WhatsAppConnectionSection: React.FC<WhatsAppConnectionSectionProps> = ({
   onAfiliar,
   onDesafiliar
 }) => {
+  const [sessionGeneration] = useState(() => readSession().generation);
+  const [connectionRevision, setConnectionRevision] = useState(0);
   const [form, setForm] = useState<WhatsAppConnectionPayload>({
     phoneNumberId: '',
     accessToken: '',
@@ -102,9 +105,10 @@ const WhatsAppConnectionSection: React.FC<WhatsAppConnectionSectionProps> = ({
         appId: form.appId?.trim() || undefined,
         businessId: form.businessId?.trim() || undefined,
         webhookVerifyToken: form.webhookVerifyToken?.trim() || undefined,
-      });
+      }, sessionGeneration);
       if (saved.companyId !== companyOverview?.company.id) throw new Error('El servidor no confirmó el guardado para esta empresa.');
       setForm((current) => ({ ...current, accessToken: '' }));
+      setConnectionRevision((value) => value + 1);
       setSaveMessage('Datos de conexión guardados para esta empresa.');
       await onConnectionSaved?.();
     } catch (error) {
@@ -214,6 +218,8 @@ const WhatsAppConnectionSection: React.FC<WhatsAppConnectionSectionProps> = ({
       {isMetaCloud && companyOverview && <MetaConnectionActions
         key={companyOverview.company.id}
         companyId={companyOverview.company.id}
+        sessionGeneration={sessionGeneration}
+        connectionRevision={connectionRevision}
         phoneNumberId={whatsapp?.phoneNumberId || null}
         version={`${whatsapp?.tokenConfiguredAt}/${whatsapp?.accountStatus}/${whatsapp?.graphVersion}`}
         canManage={Boolean(canManageConnection)}

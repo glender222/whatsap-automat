@@ -1,4 +1,4 @@
-import { api } from '../../../shared/axios/http';
+import { api, type AuthRequestConfig } from '../../../shared/axios/http';
 import { isAxiosError } from 'axios';
 
 export interface CompanyOverview {
@@ -108,13 +108,14 @@ export class CompanyService {
     return data.data;
   }
 
-  static async saveWhatsAppConnection(payload: WhatsAppConnectionPayload): Promise<WhatsAppCompanyConnection> {
+  static async saveWhatsAppConnection(payload: WhatsAppConnectionPayload, sessionGeneration: number): Promise<WhatsAppCompanyConnection> {
     const messages: Record<string, string> = {
       META_PHONE_ACCESS_NOT_VERIFIED: 'La credencial no acredita acceso a esta línea. Revisa el ID, el token y sus permisos.',
       META_CONNECTION_INVALID: 'Ingresa un ID de línea y una versión de Graph válidos.',
       META_PHONE_VERIFICATION_UNAVAILABLE: 'Meta no está disponible para verificar la línea. Vuelve a intentar.',
     };
-    const { data } = await api.post('/company/whatsapp/connection', payload).catch((cause: unknown) => {
+    const config: AuthRequestConfig = { sessionGeneration };
+    const { data } = await api.post('/company/whatsapp/connection', payload, config).catch((cause: unknown) => {
       const response = isAxiosError<{ error?: unknown }>(cause) ? cause.response : undefined;
       const code = response?.data?.error;
       const message = typeof code === 'string' && Object.hasOwn(messages, code) ? messages[code]
@@ -128,8 +129,9 @@ export class CompanyService {
     return data.data;
   }
 
-  static async disconnectWhatsAppConnection(signal?: AbortSignal): Promise<void> {
-    const { data } = await api.delete('/company/whatsapp/connection', { signal });
+  static async disconnectWhatsAppConnection(sessionGeneration: number, signal: AbortSignal): Promise<void> {
+    const config: AuthRequestConfig = { sessionGeneration, signal };
+    const { data } = await api.delete('/company/whatsapp/connection', config);
     if (data?.success !== true) throw new Error('El servidor no confirmó la desconexión.');
   }
 

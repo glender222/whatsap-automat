@@ -40,10 +40,12 @@ test('WhatsApp setup, diagnostics, revocation and recovery remain scoped to each
     }));
 
     const checkA = a.getByRole('button', { name: 'Comprobar conexión', exact: true });
-    await expect(checkA).toBeVisible();
+    await expect(checkA).toBeEnabled();
     await checkA.press('Enter');
     await expect(a.getByRole('status').filter({ hasText: 'Acceso a la línea confirmado por Meta.' })).toBeVisible();
-    await b.getByRole('button', { name: 'Comprobar conexión', exact: true }).press('Enter');
+    const checkB = b.getByRole('button', { name: 'Comprobar conexión', exact: true });
+    await expect(checkB).toBeEnabled();
+    await checkB.press('Enter');
     await expect(b.getByRole('status').filter({ hasText: 'Acceso a la línea confirmado por Meta.' })).toBeVisible();
 
     const connections = await request.get(`${backend}/api/v1/channel-connections`, { headers: headers(alpha) });
@@ -104,6 +106,8 @@ test('WhatsApp setup, diagnostics, revocation and recovery remain scoped to each
     await a.getByLabel('Token permanente', { exact: true }).fill('synthetic-local-token');
     await a.getByRole('button', { name: 'Guardar conexión', exact: true }).press('Enter');
     await expect(a.getByRole('status').filter({ hasText: 'Datos de conexión guardados para esta empresa.' })).toBeVisible();
+    await expect(a.getByRole('status').filter({ hasText: 'Conexión desconectada para esta empresa.' })).toHaveCount(0);
+    await expect(checkA).toBeEnabled();
     await checkA.press('Enter');
     await expect(a.getByRole('status').filter({ hasText: 'Acceso a la línea confirmado por Meta.' })).toBeVisible();
 
@@ -186,6 +190,20 @@ test('switching companies discards credential drafts and ignores the previous ov
     await expect(page.getByRole('textbox', { name: 'Id. número de teléfono', exact: true })).toHaveValue(bravo.phoneNumberId);
     await expect(page.getByLabel('Token permanente', { exact: true })).toHaveValue('');
     expect(await page.evaluate(() => JSON.stringify(localStorage))).not.toContain('synthetic-draft-alpha');
+
+    const token = page.getByLabel('Token permanente', { exact: true });
+    let submissions = 0;
+    page.on('request', (request) => {
+      if (request.method() === 'POST' && request.url() === `${backend}/api/company/whatsapp/connection`) submissions += 1;
+    });
+    await token.fill('synthetic-local-token');
+    await token.evaluate((input, auth) => {
+      localStorage.setItem('auth', JSON.stringify(auth));
+      (input as HTMLInputElement).form?.requestSubmit();
+    }, alpha.auth);
+    await expect(page.getByRole('form', { name: 'Meta Cloud API', exact: true }).getByRole('alert'))
+      .toContainText('No pudimos confirmar el guardado.');
+    expect(submissions).toBe(0);
   } finally {
     release.resolve();
     await context.close();
