@@ -140,23 +140,23 @@ async function verifyPackage(
   if (hash.digest('hex') !== trust.artifact.sha256) {
     throw new PackageVerificationError('ARCHIVE_DIGEST_MISMATCH', 'Archive SHA-256 differs from the authorized release.');
   }
-  return { artifact: trust.artifact, keyId: key.keyId, trustExpiresAt: trust.expiresAt };
+  const verified = { artifact: trust.artifact, keyId: key.keyId, trustExpiresAt: trust.expiresAt };
+  return { verified, proof };
 }
 
-
-export function verifyLocalPackage(archivePath: string, proofPath: string, trustPath: string) {
-  return verifyPackage(archivePath, proofPath, trustPath);
+export async function verifyLocalPackage(archivePath: string, proofPath: string, trustPath: string) {
+  return (await verifyPackage(archivePath, proofPath, trustPath)).verified;
 }
 
 export async function loadVerifiedArchive(archivePath: string, proofPath: string, trustPath: string) {
   let bytes = Buffer.alloc(0);
   let offset = 0;
-  const verified = await verifyPackage(archivePath, proofPath, trustPath, (sizeBytes) => {
+  const { verified, proof } = await verifyPackage(archivePath, proofPath, trustPath, (sizeBytes) => {
     bytes = Buffer.alloc(sizeBytes);
     return (chunk) => {
       // The verifier checks the exact length before it returns this snapshot.
       if (offset < bytes.length) offset += chunk.copy(bytes, offset);
     };
   });
-  return { verified, bytes };
+  return { verified, proof, bytes };
 }

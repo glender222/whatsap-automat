@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash, generateKeyPairSync, sign } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import { gzipSync } from 'node:zlib';
 import { inspectLocalPackage } from '../src/utils/packageInspection';
 import { packageSigningBytes } from '../src/utils/packageProof';
+import { stageLocalPackage } from '../src/utils/packageStage';
 import { createUStarHeader } from '../src/utils/tar';
 
 const manifest = {
@@ -61,13 +62,13 @@ function fixture(t: TestContext) {
     }));
     return artifact;
   }
-  const check = (command = 'inspect') => cli(command, archive, '--proof', proof, '--trust', trust, '--json');
+  const check = (command = 'inspect', ...args: string[]) => cli(command, archive, '--proof', proof, '--trust', trust, '--json', ...args);
   const inspect = () => inspectLocalPackage(archive, proof, trust);
-  return { root, archive, cli, authorize, check, inspect, keyId, expiresAt };
+  return { root, archive, proof, trust, cli, authorize, check, inspect, keyId, expiresAt };
 }
 
 test('automat inspect checks the signed snapshot emitted by automat pack and keeps it inert', (t) => {
-  const { root, archive, cli, authorize, check, keyId, expiresAt } = fixture(t);
+  const { root, archive, proof, trust, cli, authorize, check, keyId, expiresAt } = fixture(t);
   const src = join(root, 'src');
   const longDirectory = `${'a'.repeat(56)}/${'é'.repeat(49)}`;
   const entrypoint = `${longDirectory}/${'ñ'.repeat(48)}.mjs`;
@@ -92,6 +93,34 @@ test('automat inspect checks the signed snapshot emitted by automat pack and kee
     manifest: { type: 'ui', entrypoint, entrypointHtml: 'index.html' },
   });
   assert.deepEqual(readdirSync(root), originalFiles);
+
+  if (process.getuid) {
+    const out = join(root, 'staging');
+    mkdirSync(out, { mode: 0o700 });
+    const staged = check('stage', '--out', out);
+    assert.equal(staged.status, 0, staged.stderr || staged.stdout);
+    const result = JSON.parse(staged.stdout);
+    assert.equal(result.staged, true);
+    assert.deepEqual(result.artifact, artifact);
+    assert.equal(statSync(result.directory).mode & 0o777, 0o700);
+    assert.deepEqual(readdirSync(result.directory).sort(), ['inspection.json', 'package.proof.json', 'package.tgz']);
+    for (const name of readdirSync(result.directory)) {
+      assert.equal(statSync(join(result.directory, name)).mode & 0o777, 0o600);
+    }
+    const stagedArchive = join(result.directory, 'package.tgz');
+    const stagedProof = join(result.directory, 'package.proof.json');
+    assert.deepEqual(readFileSync(stagedArchive), bytes);
+    assert.deepEqual(JSON.parse(readFileSync(stagedProof, 'utf8')), JSON.parse(readFileSync(proof, 'utf8')));
+    assert.deepEqual(JSON.parse(readFileSync(join(result.directory, 'inspection.json'), 'utf8')), {
+      format: 'automat-extension-stage-v1', staged: true,
+      artifact, keyId, trustExpiresAt: expiresAt,
+      archive: { entries: 4, expandedBytes: 5120 },
+      manifest: { type: 'ui', entrypoint, entrypointHtml: 'index.html' },
+    });
+    const verified = cli('verify', stagedArchive, '--proof', stagedProof, '--trust', trust, '--json');
+    assert.equal(verified.status, 0, verified.stderr || verified.stdout);
+    assert.deepEqual(JSON.parse(verified.stdout).artifact, artifact);
+  }
 
   const tampered = Buffer.from(bytes);
   tampered[0] ^= 1;
@@ -156,4 +185,102 @@ test('automat inspect rejects incompatible tar or manifest metadata even with a 
   const verified = check('verify');
   assert.equal(verified.status, 0, verified.stderr);
   assert.equal(JSON.parse(verified.stdout).verified, true);
+});
+
+
+function stageFixtureArchive(manifestContent = manifest): Buffer {
+  return gzipSync(Buffer.concat([
+    entry('manifest.json', JSON.stringify(manifestContent)),
+    entry('dist/index.js', 'throw new Error("Package code must remain inert.");'),
+    entry('index.html', '<html></html>'),
+    Buffer.alloc(1024),
+  ]));
+}
+
+test('automat stage rejects unsupported destinations and invalid releases before writing', { skip: !process.getuid }, (t) => {
+  const { root, archive, proof, trust, authorize, check } = fixture(t);
+  const bytes = stageFixtureArchive();
+  authorize(bytes);
+  const out = join(root, 'staging');
+  mkdirSync(out, { mode: 0o700 });
+  function rejects(code: string, ...args: string[]) {
+    const result = check('stage', ...args);
+    assert.equal(result.status, 1, result.stderr || result.stdout);
+    const body = JSON.parse(result.stdout);
+    assert.equal(body.staged, false);
+    assert.equal(body.code, code);
+    assert.deepEqual(readdirSync(out), []);
+  }
+
+  rejects('STAGE_USAGE');
+  rejects('STAGE_ROOT_INVALID', '--out', join(root, 'missing-directory'));
+  const outputLink = join(root, 'staging-link');
+  symlinkSync(out, outputLink);
+  rejects('STAGE_ROOT_INVALID', '--out', outputLink);
+  chmodSync(out, 0o777);
+  rejects('STAGE_ROOT_INVALID', '--out', out);
+  chmodSync(out, 0o700);
+
+  const invalidProof = JSON.parse(readFileSync(proof, 'utf8'));
+  invalidProof.signature = Buffer.alloc(64).toString('base64');
+  writeFileSync(proof, JSON.stringify(invalidProof));
+  rejects('SIGNATURE_INVALID', '--out', out);
+  authorize(bytes);
+  const revokedTrust = JSON.parse(readFileSync(trust, 'utf8'));
+  revokedTrust.keys[0].status = 'revoked';
+  writeFileSync(trust, JSON.stringify(revokedTrust));
+  rejects('PUBLISHER_KEY_REVOKED', '--out', out);
+  authorize(bytes);
+  const altered = Buffer.from(bytes);
+  altered[0] ^= 1;
+  writeFileSync(archive, altered);
+  rejects('ARCHIVE_DIGEST_MISMATCH', '--out', out);
+  authorize(stageFixtureArchive({ ...manifest, version: '2.0.0' }));
+  rejects('MANIFEST_RELEASE_MISMATCH', '--out', out);
+});
+
+test('local staging retains the inspected snapshot if the source archive and proof paths change', { skip: !process.getuid }, async (t) => {
+  const { root, archive, proof, trust, authorize, cli } = fixture(t);
+  const original = stageFixtureArchive();
+  const artifact = authorize(original);
+  const originalProof = JSON.parse(readFileSync(proof, 'utf8'));
+  const out = join(root, 'staging');
+  mkdirSync(out, { mode: 0o700 });
+
+  const fileOps = require('node:fs') as typeof import('node:fs');
+  const mkdirTemp = fileOps.mkdtempSync;
+  let replaced = false;
+  t.mock.method(fileOps, 'mkdtempSync', (prefix: string) => {
+    if (prefix.startsWith(out)) {
+      writeFileSync(archive, 'Different local bytes');
+      writeFileSync(proof, 'Different proof');
+      replaced = true;
+    }
+    return mkdirTemp(prefix);
+  });
+  const staged = await stageLocalPackage(archive, proof, trust, out);
+  assert.equal(replaced, true);
+  assert.deepEqual(staged.artifact, artifact);
+  assert.deepEqual(readFileSync(join(staged.directory, 'package.tgz')), original);
+  assert.deepEqual(JSON.parse(readFileSync(join(staged.directory, 'package.proof.json'), 'utf8')), originalProof);
+  const reverified = cli('verify', join(staged.directory, 'package.tgz'), '--proof',
+    join(staged.directory, 'package.proof.json'), '--trust', trust, '--json');
+  assert.equal(reverified.status, 0, reverified.stderr || reverified.stdout);
+});
+
+test('local staging removes incomplete output after an ordinary write failure', { skip: !process.getuid }, async (t) => {
+  const { root, archive, proof, trust, authorize } = fixture(t);
+  authorize(stageFixtureArchive());
+  const out = join(root, 'staging');
+  mkdirSync(out, { mode: 0o700 });
+  const fileOps = require('node:fs') as typeof import('node:fs');
+  const sync = fileOps.fsyncSync;
+  let calls = 0;
+  t.mock.method(fileOps, 'fsyncSync', (fd: number) => {
+    if (++calls === 2) throw new Error('Fixture write failure');
+    return sync(fd);
+  });
+  await assert.rejects(stageLocalPackage(archive, proof, trust, out), { code: 'STAGE_WRITE_FAILED' });
+  assert.equal(calls, 2);
+  assert.deepEqual(readdirSync(out), []);
 });

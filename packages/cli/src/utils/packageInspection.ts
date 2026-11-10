@@ -159,8 +159,8 @@ function resolveEntrypoint(name: string, files: ReadonlySet<string>): string {
   return file;
 }
 
-export async function inspectLocalPackage(archivePath: string, proofPath: string, trustPath: string) {
-  const { verified, bytes } = await loadVerifiedArchive(archivePath, proofPath, trustPath);
+export async function loadInspectedArchive(archivePath: string, proofPath: string, trustPath: string) {
+  const { verified, proof, bytes } = await loadVerifiedArchive(archivePath, proofPath, trustPath);
   const { manifest: data, files, expandedBytes } = readTar(bytes);
   const manifest = readManifest(data);
   if ((manifest.id ?? manifest.name) !== verified.artifact.extensionId || manifest.version !== verified.artifact.version) {
@@ -169,9 +169,14 @@ export async function inspectLocalPackage(archivePath: string, proofPath: string
   const entrypoint = resolveEntrypoint(manifest.entrypoint, files);
   const entrypointHtml = manifest.ui?.entrypointHtml === undefined
     ? undefined : resolveEntrypoint(manifest.ui.entrypointHtml, files);
-  return {
+  const inspection = {
     ...verified,
     archive: { entries: files.size, expandedBytes },
     manifest: { type: manifest.type, entrypoint, entrypointHtml },
   };
+  return { inspection, proof, bytes };
+}
+
+export async function inspectLocalPackage(archivePath: string, proofPath: string, trustPath: string) {
+  return (await loadInspectedArchive(archivePath, proofPath, trustPath)).inspection;
 }

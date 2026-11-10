@@ -25,6 +25,10 @@ automat verify extension.tgz --proof extension.proof.json --trust release-trust.
 # Inspect the contents of the same signed archive before staging
 automat inspect extension.tgz --proof extension.proof.json --trust release-trust.json --json
 
+# Stage an inspected release in an existing private or owner-managed directory
+mkdir -m 700 ./staging
+automat stage extension.tgz --proof extension.proof.json --trust release-trust.json --out ./staging --json
+
 # System environment diagnostics
 automat doctor
 ```
@@ -100,6 +104,26 @@ checks, and name entrypoints included in the archive. Build the extension before
 if the manifest points to generated files.
 
 Inspection is an offline format and identity check. It keeps the archive inert and creates
-no staging files. Installation permissions and executable isolation remain separate gates.
-A future staging workflow must consume the same verified snapshot because the local path can
-change after inspection.
+no staging files.
+
+## Local staging
+
+`automat stage` verifies and inspects the archive before creating a new staging directory.
+It writes the exact archive snapshot used by inspection and the verified detached proof.
+The command accepts an existing POSIX output directory owned by the invoking user without
+group or world write access. It rejects a symbolic link as the output directory. Each
+successful invocation returns the path of a new directory with mode `0700`.
+
+- `package.tgz` contains the verified archive bytes.
+- `package.proof.json` contains the validated proof fields in normalized JSON.
+- `inspection.json` records the signed release identity and inspection results using
+  `automat-extension-stage-v1`. It appears only after the other files have been written.
+
+Files use mode `0600`. An interrupted stage may leave an incomplete directory. Use the
+receipt to identify completed staging. Authenticate the archive with the detached proof
+and fresh administrator authorization.
+
+Staging keeps the extension inert. The supplied authorization remains in its original
+location. A future installer needs fresh release authorization, tenant installation
+permissions, and an isolated runtime. Staging receipts describe the inspection and confer
+no installation permissions.

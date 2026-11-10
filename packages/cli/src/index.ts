@@ -26,6 +26,8 @@ Commands:
                     Options: --proof=<file>, --trust=<file>, --json
   inspect <archive> Verify a signed archive and inspect its packaged manifest and files
                     Options: --proof=<file>, --trust=<file>, --json
+  stage <archive>   Prepare a verified, inspected archive in a private local directory
+                    Options: --proof=<file>, --trust=<file>, --out=<directory>, --json
   doctor            Inspect developer environment and system diagnostics
                     Options: --json, --verbose
 
@@ -37,7 +39,7 @@ Global Options:
 
 export async function runCli(args: string[]): Promise<number> {
   const packageCommand = args[0]?.toLowerCase();
-  if (packageCommand === 'verify' || packageCommand === 'inspect') {
+  if (packageCommand === 'verify' || packageCommand === 'inspect' || packageCommand === 'stage') {
     if (args.length === 2 && ['--help', '-h'].includes(args[1]!)) {
       printHelp();
       return 0;
