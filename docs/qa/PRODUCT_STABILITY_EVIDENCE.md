@@ -55,6 +55,18 @@ Para reproducir UX-02 y UX-03, ejecutar `npm run test:e2e -- e2e/orders-navigati
 - **Después.** Se puede abrir el pedido desde el historial y volver a la conversación con el borrador y el foco. El administrador abre Pagos y conciliación con el pedido ya seleccionado. El regreso conserva la conversación y la página del listado. El operador conserva el acceso a su contexto y la pantalla explica el requisito de administrador.
 - **Validación.** Siete pruebas de Chromium recorren los módulos con respuestas HTTP controladas. Incluyen escritorio, pantalla estrecha, teclado, Escape, recarga y un identificador inválido. La suite completa pasó 25 recorridos. [Diseño del recorrido](../../Frontend_py_whatsaapweb/docs/DESIGN.md).
 
+## UX-08. Regreso y vencimiento en aprobaciones
+
+- **Antes.** Al regresar desde una solicitud se perdían el filtro y la página. Una confirmación podía quedar abierta tras vencer, y si fallaba la consulta al vencimiento se perdía el foco.
+- **Después.** La cola conserva riesgo y página en la URL y restaura el foco de la solicitud de origen. El detalle desactiva la decisión al vencer, cierra la confirmación y permite actualizar el estado si la consulta falló.
+- **Validación.** Nueve casos de Chromium con PostgreSQL verifican los dos tamaños de pantalla, contraseña incorrecta y correcta, retiro de permisos durante la decisión, acceso entre empresas y reintento con pérdida de acuse. [Reproducciones y resultados](APPROVALS_OPERATOR_JOURNEY.md).
+
+## UX-09. Diagnóstico y revocación de la conexión WhatsApp
+
+- **Antes.** Configuración permitía guardar la línea y el token sin comprobar o desconectar desde la pantalla. Una credencial rechazada mostraba un error HTTP genérico.
+- **Después.** Los administradores comprueban, revocan y vuelven a conectar su línea desde Configuración. Un error explica cómo continuar y la pantalla descarta el valor secreto al cambiar de sesión. El operador conserva la lectura del estado.
+- **Validación.** Tres recorridos Chromium con API, PostgreSQL y Graph local comprobaron rechazo, indisponibilidad, reintento de revocación, reconexión, permisos y aislamiento entre dos empresas. [Reproducciones y resultados](WHATSAPP_CONNECTION_WORKFLOW.md).
+
 ## MSG-01. Conversaciones nuevas y recuperación de la bandeja
 
 La traza de GitHub Actions mostró que el corte de red podía coincidir con la carga inicial de la conversación. La regresión ahora espera que aparezca el mensaje inicial en el historial antes de cortar la red. Así comprueba la recuperación después de una desconexión establecida.
@@ -193,4 +205,4 @@ Con las mismas variables exportadas en el frontend, ejecutar `npm run test:e2e -
 | Bandeja en tiempo real | Filtro por etiqueta, reconexión, reorden de webhooks e historial paginado cubiertos en MSG-04 y MSG-05. |
 | Envío y recepción | MSG-06 y MSG-07 cubren envíos humanos y automáticos, adjuntos, entrega incierta y recuperación tras reinicio con Graph local. Falta el recorrido en navegador con dos líneas Meta reales. |
 | Harness IA | IA-03 e IA-04 cubren Studio en verificación. IA-05 e IA-06 comprueban la cuota común y el modo proveedor desde Studio con transporte local. Faltan el piloto con proveedor real y los perfiles de runtime con herramientas. |
-| Flujo operativo y navegación | UX-07 cubre conversación, pedido, pago y regreso. Quedan las pruebas integradas de aprobación y conexión. |
+| Flujo operativo y navegación | UX-07 a UX-09 cubren conversación, pedido, pago y regreso, aprobación y conexión. Falta el ensayo con una cuenta autorizada de Mercado Pago y la validación independiente del candidato completo. |
