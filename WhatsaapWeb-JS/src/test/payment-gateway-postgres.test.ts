@@ -252,3 +252,64 @@ test('tenant catalog commits atomically and Mercado Pago never approves a vouche
   assert.deepEqual(await stored(), { credentials_json: {}, webhook_secret: null });
   assert.ok(!(await list()).body.data.some((row: { id: number }) => row.id === gateway.id));
 });
+
+test('Mercado Pago credential lookup uses only an active gateway and authenticated envelope at its exact revision', {
+  skip: !connectionString && 'PAYMENT_GATEWAY_TEST_DATABASE_URL is required',
+}, async (t) => {
+  const db = new Pool({ connectionString });
+  t.after(() => db.end());
+  const repo = new PaymentGatewayRepositoryPg(db);
+  const uow = new TenantScopedUoW(db);
+  const companyId = randomInt(850_000_000, 950_000_000);
+  const otherCompany = companyId + 1;
+  const original = process.env.MASTER_ENCRYPTION_KEY;
+  t.after(() => {
+    if (original === undefined) delete process.env.MASTER_ENCRYPTION_KEY;
+    else process.env.MASTER_ENCRYPTION_KEY = original;
+  });
+  process.env.MASTER_ENCRYPTION_KEY = masterKey;
+  for (const company of [companyId, otherCompany]) {
+    await uow.run(company, (sql) => sql.query("INSERT INTO companies (id,name) VALUES ($1,'Orders resolver fixture')", [company]));
+  }
+  const fields = { access_token: accessToken, seller_id: '1858095454' };
+  const gateway = await repo.create(companyId, { provider: 'mercadopago', displayName: 'Fixture Orders', credentials: fields });
+  const scopeFor = async (companyId: number, id: number) => uow.run(companyId, async (sql) => {
+    const { rows: [row] } = await sql.query(
+      `SELECT to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS revision,
+              credentials_json FROM payment_gateways WHERE id = $1`, [id],
+    );
+    return { scope: { companyId, gatewayId: String(id), gatewayRevision: row.revision }, credentials: row.credentials_json };
+  });
+  const { scope, credentials } = await scopeFor(companyId, gateway.id);
+  assert.deepEqual(await repo.resolveMercadoPagoOrdersCredential(scope), { ...scope, accessToken, sellerId: fields.seller_id });
+  assert.equal(await repo.resolveMercadoPagoOrdersCredential({ ...scope, companyId: otherCompany }), null);
+
+  const otherGateway = await repo.create(otherCompany, { provider: 'mercadopago', displayName: 'Foreign fixture' });
+  await uow.run(otherCompany, (sql) => sql.query(
+    'UPDATE payment_gateways SET credentials_json = $1 WHERE id = $2', [JSON.stringify(credentials), otherGateway.id],
+  ));
+  assert.equal(await repo.resolveMercadoPagoOrdersCredential((await scopeFor(otherCompany, otherGateway.id)).scope), null);
+  const wrongGateway = await repo.create(companyId, { provider: 'mercadopago', displayName: 'Wrong gateway fixture' });
+  await uow.run(companyId, (sql) => sql.query(
+    'UPDATE payment_gateways SET credentials_json = $1 WHERE id = $2', [JSON.stringify(credentials), wrongGateway.id],
+  ));
+  assert.equal(await repo.resolveMercadoPagoOrdersCredential((await scopeFor(companyId, wrongGateway.id)).scope), null);
+
+  await repo.update(companyId, gateway.id, { credentials: { access_token: 'fixture-rotated-token', seller_id: fields.seller_id } });
+  assert.equal(await repo.resolveMercadoPagoOrdersCredential(scope), null);
+  const current = (await scopeFor(companyId, gateway.id)).scope;
+  assert.equal((await repo.resolveMercadoPagoOrdersCredential(current))?.accessToken, 'fixture-rotated-token');
+  process.env.MASTER_ENCRYPTION_KEY = 'fixture-incorrect-master-key-length-is-valid';
+  assert.equal(await repo.resolveMercadoPagoOrdersCredential(current), null);
+  delete process.env.MASTER_ENCRYPTION_KEY;
+  assert.equal(await repo.resolveMercadoPagoOrdersCredential(current), null);
+  process.env.MASTER_ENCRYPTION_KEY = masterKey;
+
+  await repo.update(companyId, gateway.id, { status: 'inactive' });
+  assert.equal(await repo.resolveMercadoPagoOrdersCredential((await scopeFor(companyId, gateway.id)).scope), null);
+  await uow.run(companyId, (sql) => sql.query(
+    'UPDATE payment_gateways SET status = \'active\', credentials_json = $1 WHERE id = $2',
+    [JSON.stringify(fields), gateway.id],
+  ));
+  assert.equal(await repo.resolveMercadoPagoOrdersCredential((await scopeFor(companyId, gateway.id)).scope), null);
+});

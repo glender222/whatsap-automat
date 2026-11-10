@@ -19,6 +19,35 @@ type Row = {
 };
 
 const VAULT_PREFIX = 'payment-gateway-v1:';
+const positiveId = /^[1-9][0-9]{0,18}$/;
+const gatewayRevision = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/;
+
+type OrdersCredentialScope = { companyId: number; gatewayId: string; gatewayRevision: string };
+
+function record(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function ordersCredential(vault: string, scope: OrdersCredentialScope, masterKey: string) {
+  if (!vault.startsWith(VAULT_PREFIX)) return null;
+  try {
+    const envelope = vault.slice(VAULT_PREFIX.length);
+    const opened = record(JSON.parse(new SecretVault({ masterKey }).decrypt(envelope)));
+    if (opened?.companyId !== scope.companyId || opened.gatewayId !== scope.gatewayId || opened.field !== 'credentials') {
+      return null;
+    }
+    const fields = record(opened.value);
+    const accessToken = fields?.access_token;
+    const sellerId = fields?.seller_id;
+    if (typeof accessToken !== 'string' || !/^[!-~]{1,512}$/.test(accessToken) ||
+        typeof sellerId !== 'string' || !positiveId.test(sellerId)) return null;
+    return { ...scope, accessToken, sellerId };
+  } catch {
+    return null;
+  }
+}
 
 function mapGateway(row: Row): PaymentGateway {
   const instructions = row.metadata_json?.manualInstructions;
@@ -46,7 +75,7 @@ function encrypt(companyId: number, gatewayId: string, field: string, value: unk
   const masterKey = process.env.MASTER_ENCRYPTION_KEY?.trim();
   try {
     if (!masterKey) throw new InvalidMasterKeyError();
-    // Context stays inside the authenticated ciphertext for any future consumer to verify.
+    // Bind the encrypted value to the gateway and field that may read it.
     const envelope = new SecretVault({ masterKey }).encrypt(JSON.stringify({ companyId, gatewayId, field, value }));
     return VAULT_PREFIX + JSON.stringify(envelope);
   } catch (error) {
@@ -82,6 +111,20 @@ export class PaymentGatewayRepositoryPg {
       const row = await this.find(db, companyId, gatewayId);
       return row ? mapGateway(row) : null;
     });
+  }
+
+  async resolveMercadoPagoOrdersCredential(scope: OrdersCredentialScope) {
+    const masterKey = process.env.MASTER_ENCRYPTION_KEY?.trim();
+    if (!masterKey || !Number.isInteger(scope.companyId) || scope.companyId <= 0 || scope.companyId > 2_147_483_647 ||
+        typeof scope.gatewayId !== 'string' || !positiveId.test(scope.gatewayId) || BigInt(scope.gatewayId) > 9_223_372_036_854_775_807n ||
+        typeof scope.gatewayRevision !== 'string' || !gatewayRevision.test(scope.gatewayRevision)) return null;
+    const { rows: [row] } = await this.uow.run(scope.companyId, (db) => db.query(
+      `SELECT credentials_json ->> 'vault' AS vault FROM payment_gateways
+       WHERE company_id = $1 AND id = $2 AND provider = 'mercadopago' AND status = 'active'
+         AND to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') = $3`,
+      [scope.companyId, scope.gatewayId, scope.gatewayRevision],
+    ));
+    return typeof row?.vault === 'string' ? ordersCredential(row.vault, scope, masterKey) : null;
   }
 
   async getDefault(companyId: number): Promise<PaymentGateway | null> {
