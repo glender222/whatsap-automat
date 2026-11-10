@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { logger } from '../utils/logger';
+import { publishPackageFiles } from '../utils/packageOutput';
 import { validateManifestContents } from '../utils/validator';
 import { packDirectoryToTarGz, calculateSha256, readRegularPackageFile } from '../utils/tar';
 
@@ -43,18 +44,6 @@ export async function handlePack(options: PackOptions): Promise<number> {
   const safeName = manifest.name.replace(/[^a-zA-Z0-9_.-]/g, '-').replace(/^-+/, '');
   const defaultTarName = `${safeName}-${manifest.version}.tgz`;
 
-  let outTarPath: string;
-  if (out) {
-    const resolvedOut = path.resolve(process.cwd(), out);
-    if (fs.existsSync(resolvedOut) && fs.statSync(resolvedOut).isDirectory()) {
-      outTarPath = path.join(resolvedOut, defaultTarName);
-    } else {
-      outTarPath = resolvedOut;
-    }
-  } else {
-    outTarPath = path.join(rootDir, defaultTarName);
-  }
-
   try {
     const { gzBuffer, includedFiles } = packDirectoryToTarGz(rootDir);
 
@@ -66,13 +55,14 @@ export async function handlePack(options: PackOptions): Promise<number> {
       return 0;
     }
 
-    fs.mkdirSync(path.dirname(outTarPath), { recursive: true });
-    fs.writeFileSync(outTarPath, gzBuffer);
-
+    const destination = out ? path.resolve(process.cwd(), out) : rootDir;
+    const outTarPath = !out || fs.lstatSync(destination, { throwIfNoEntry: false })?.isDirectory()
+      ? path.join(destination, defaultTarName)
+      : destination;
     const sha256 = calculateSha256(gzBuffer);
     const checksumPath = `${outTarPath}.sha256`;
     const checksumContent = `${sha256}  ${path.basename(outTarPath)}\n`;
-    fs.writeFileSync(checksumPath, checksumContent, 'utf8');
+    publishPackageFiles(outTarPath, gzBuffer, checksumContent);
 
     logger.success(`Extension packaged successfully:`);
     logger.info(`  Archive:  ${outTarPath} (${gzBuffer.length} bytes, ${includedFiles.length} files)`);

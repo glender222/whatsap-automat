@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as zlib from 'node:zlib';
 import * as crypto from 'node:crypto';
+import { PACKAGE_OUTPUT_STAGE } from './packageOutput';
 
 export interface PackedResult {
   gzBuffer: Buffer;
@@ -12,7 +13,7 @@ export function shouldExclude(relPath: string): boolean {
   const normalized = relPath.replace(/\\/g, '/');
   const parts = normalized.split('/');
   for (const part of parts) {
-    if (part === 'node_modules' || part === '.git' || part === 'coverage' || part === '.agents') {
+    if (part === 'node_modules' || part === '.git' || part === 'coverage' || part === '.agents' || part === PACKAGE_OUTPUT_STAGE) {
       return true;
     }
     if (part === '.env' || part.startsWith('.env.')) {
@@ -33,17 +34,19 @@ export function createUStarHeader(
 ): Buffer {
   const buf = Buffer.alloc(512);
 
-  let prefix = '';
-  let shortName = name;
-  if (name.length > 100) {
-    const idx = name.indexOf('/');
-    if (idx !== -1 && idx <= 155) {
-      prefix = name.substring(0, idx);
-      shortName = name.substring(idx + 1);
+  const encoded = Buffer.from(name, 'utf8');
+  let shortName = encoded;
+  if (encoded.length > 100) {
+    const split = encoded.lastIndexOf(0x2f, 155);
+    const suffixLength = encoded.length - split - 1;
+    if (split <= 0 || suffixLength === 0 || suffixLength > 100) {
+      throw new Error(`Path cannot be represented in USTAR: "${name}".`);
     }
+    encoded.copy(buf, 345, 0, split);
+    shortName = encoded.subarray(split + 1);
   }
 
-  buf.write(shortName, 0, 100, 'utf8');
+  shortName.copy(buf, 0);
   buf.write(mode.toString(8).padStart(6, '0') + ' \0', 100, 8, 'ascii');
   buf.write('000000 \0', 108, 8, 'ascii'); // uid
   buf.write('000000 \0', 116, 8, 'ascii'); // gid
@@ -55,10 +58,6 @@ export function createUStarHeader(
   buf.write('00', 263, 2, 'ascii');
   buf.write('automat', 265, 7, 'ascii');
   buf.write('automat', 297, 7, 'ascii');
-  if (prefix) {
-    buf.write(prefix, 345, 155, 'utf8');
-  }
-
   let sum = 0;
   for (let i = 0; i < 512; i++) {
     sum += buf[i]!;

@@ -69,9 +69,13 @@ function fixture(t: TestContext) {
 test('automat inspect checks the signed snapshot emitted by automat pack and keeps it inert', (t) => {
   const { root, archive, cli, authorize, check, keyId, expiresAt } = fixture(t);
   const src = join(root, 'src');
-  mkdirSync(join(src, 'dist'), { recursive: true });
-  writeFileSync(join(src, 'manifest.json'), JSON.stringify(manifest));
-  writeFileSync(join(src, 'dist', 'index.js'), 'throw new Error("Package code must remain inert");');
+  const longDirectory = `${'a'.repeat(56)}/${'é'.repeat(49)}`;
+  const entrypoint = `${longDirectory}/${'ñ'.repeat(48)}.mjs`;
+  assert.equal(Buffer.byteLength(longDirectory), 155);
+  assert.equal(Buffer.byteLength(entrypoint), 256);
+  mkdirSync(join(src, longDirectory), { recursive: true });
+  writeFileSync(join(src, 'manifest.json'), JSON.stringify({ ...manifest, entrypoint: `./${entrypoint}` }));
+  writeFileSync(join(src, entrypoint), 'throw new Error("Package code must remain inert");');
   writeFileSync(join(src, 'index.html'), '<html></html>');
   mkdirSync(join(src, 'assets'));
   writeFileSync(join(src, 'assets', 'mañana.txt'), 'fixture');
@@ -85,7 +89,7 @@ test('automat inspect checks the signed snapshot emitted by automat pack and kee
   assert.deepEqual(JSON.parse(inspected.stdout), {
     inspected: true, artifact, keyId, trustExpiresAt: expiresAt,
     archive: { entries: 4, expandedBytes: 5120 },
-    manifest: { type: 'ui', entrypoint: 'dist/index.js', entrypointHtml: 'index.html' },
+    manifest: { type: 'ui', entrypoint, entrypointHtml: 'index.html' },
   });
   assert.deepEqual(readdirSync(root), originalFiles);
 

@@ -257,6 +257,124 @@ describe('Developer CLI Tool (automat)', () => {
       assert.ok(!fs.existsSync(`${outTar}.sha256`));
     });
 
+    it('fails explicitly when a source path cannot fit USTAR fields', async () => {
+      const pluginDir = path.join(tmpRoot, 'long-path-test');
+      assert.equal(await runCli(['init', 'long-path-test', '--type=tool', `--dir=${pluginDir}`]), 0);
+      const outTar = path.join(tmpRoot, 'long-path-test.tgz');
+      for (const name of ['a'.repeat(101), 'é'.repeat(51)]) {
+        const file = path.join(pluginDir, name);
+        fs.writeFileSync(file, 'fixture');
+        assert.equal(await runCli(['pack', pluginDir, `--out=${outTar}`]), 1);
+        assert.equal(await runCli(['pack', pluginDir, `--out=${outTar}`, '--dry-run']), 1);
+        assert.ok(!fs.existsSync(outTar));
+        assert.ok(!fs.existsSync(`${outTar}.sha256`));
+        fs.unlinkSync(file);
+      }
+    });
+
+    it('rejects linked destinations before writing and still overwrites regular files', { skip: process.platform === 'win32' }, async () => {
+      const pluginDir = path.join(tmpRoot, 'output-test');
+      assert.equal(await runCli(['init', 'output-test', '--type=tool', `--dir=${pluginDir}`]), 0);
+      const dir = path.join(tmpRoot, 'output-pair');
+      fs.mkdirSync(dir);
+      const outTar = path.join(dir, 'extension.tgz');
+      const checksum = `${outTar}.sha256`;
+      const external = path.join(tmpRoot, 'external-file');
+      fs.writeFileSync(external, 'external content');
+      fs.symlinkSync(external, outTar);
+      fs.writeFileSync(checksum, 'previous checksum');
+
+      assert.equal(await runCli(['pack', pluginDir, `--out=${outTar}`]), 1);
+      assert.equal(fs.readFileSync(external, 'utf8'), 'external content');
+      assert.equal(fs.readFileSync(checksum, 'utf8'), 'previous checksum');
+      assert.ok(fs.lstatSync(outTar).isSymbolicLink());
+
+      fs.unlinkSync(outTar);
+      fs.writeFileSync(outTar, 'previous archive', { mode: 0o600 });
+      fs.unlinkSync(checksum);
+      const missingTarget = path.join(tmpRoot, 'missing-external-file');
+      fs.symlinkSync(missingTarget, checksum);
+      const dryRunParent = path.join(tmpRoot, 'dry-run-unused-dir');
+      assert.equal(await runCli(['pack', pluginDir, `--out=${path.join(dryRunParent, 'unused.tgz')}`, '--dry-run']), 0);
+      assert.ok(!fs.existsSync(dryRunParent));
+      assert.equal(await runCli(['pack', pluginDir, `--out=${outTar}`, '--dry-run']), 0);
+      assert.equal(await runCli(['pack', pluginDir, `--out=${outTar}`]), 1);
+      assert.equal(fs.readFileSync(outTar, 'utf8'), 'previous archive');
+      assert.ok(fs.lstatSync(checksum).isSymbolicLink());
+      assert.ok(!fs.existsSync(missingTarget));
+
+      const directoryLink = path.join(tmpRoot, 'output-directory-link');
+      fs.symlinkSync(dir, directoryLink);
+      assert.equal(await runCli(['pack', pluginDir, `--out=${directoryLink}`]), 1);
+      assert.ok(fs.lstatSync(directoryLink).isSymbolicLink());
+
+      fs.unlinkSync(checksum);
+      fs.writeFileSync(checksum, 'previous checksum');
+      assert.equal(await runCli(['pack', pluginDir, `--out=${outTar}`]), 0);
+      assert.deepEqual(fs.readdirSync(dir).sort(), ['extension.tgz', 'extension.tgz.sha256']);
+      const digest = crypto.createHash('sha256').update(fs.readFileSync(outTar)).digest('hex');
+      assert.equal(fs.readFileSync(checksum, 'utf8'), `${digest}  extension.tgz\n`);
+      assert.equal(fs.statSync(outTar).mode & 0o777, 0o600);
+    });
+
+    it('restores both regular destinations after a failure publishing the checksum', async (t) => {
+      const pluginDir = path.join(tmpRoot, 'rollback-test');
+      assert.equal(await runCli(['init', 'rollback-test', '--type=tool', `--dir=${pluginDir}`]), 0);
+      const dir = path.join(tmpRoot, 'rollback-output');
+      fs.mkdirSync(dir);
+      const archive = path.join(dir, 'extension.tgz');
+      const checksum = `${archive}.sha256`;
+      fs.writeFileSync(archive, 'previous archive');
+      fs.writeFileSync(checksum, 'previous checksum');
+      const fileOps = require('node:fs') as typeof fs;
+      const link = fileOps.linkSync;
+      let failedPublication = false;
+      t.mock.method(fileOps, 'linkSync', (source, destination) => {
+        if (destination === checksum && path.basename(String(source)) === 'checksum.new') {
+          failedPublication = true;
+          throw new Error('Fixture write failure');
+        }
+        return link(source, destination);
+      });
+      assert.equal(await runCli(['pack', pluginDir, `--out=${archive}`]), 1);
+      assert.ok(failedPublication);
+      assert.equal(fs.readFileSync(archive, 'utf8'), 'previous archive');
+      assert.equal(fs.readFileSync(checksum, 'utf8'), 'previous checksum');
+      assert.deepEqual(fs.readdirSync(dir).sort(), ['extension.tgz', 'extension.tgz.sha256']);
+    });
+
+    it('preserves recovery files when a destination changes type during publication', async (t) => {
+      const pluginDir = path.join(tmpRoot, 'output-race-test');
+      assert.equal(await runCli(['init', 'output-race-test', '--type=tool', `--dir=${pluginDir}`]), 0);
+      const dir = path.join(tmpRoot, 'race-output');
+      fs.mkdirSync(dir);
+      const archive = path.join(dir, 'extension.tgz');
+      const checksum = `${archive}.sha256`;
+      fs.writeFileSync(archive, 'previous archive');
+      fs.writeFileSync(checksum, 'previous checksum');
+      const fileOps = require('node:fs') as typeof fs;
+      const rename = fileOps.renameSync;
+      const previousChecksum = path.join(tmpRoot, 'racing-writer-saved-checksum');
+      t.mock.method(fileOps, 'renameSync', (source, destination) => {
+        if (source === checksum && path.basename(String(destination)) === 'checksum.before') {
+          rename(checksum, previousChecksum);
+          fs.mkdirSync(checksum);
+          fs.writeFileSync(path.join(checksum, 'keep.txt'), 'new directory content');
+        }
+        return rename(source, destination);
+      });
+      assert.equal(await runCli(['pack', pluginDir, `--out=${archive}`]), 1);
+      assert.equal(fs.readFileSync(archive, 'utf8'), 'previous archive');
+      assert.equal(fs.readFileSync(previousChecksum, 'utf8'), 'previous checksum');
+      const recovery = path.join(dir, '.automat-pack.lock');
+      assert.equal(await runCli(['pack', pluginDir, `--out=${archive}`]), 1);
+      assert.equal(fs.readFileSync(archive, 'utf8'), 'previous archive');
+      assert.equal(fs.readFileSync(path.join(recovery, 'checksum.before', 'keep.txt'), 'utf8'), 'new directory content');
+      assert.deepEqual(JSON.parse(fs.readFileSync(path.join(recovery, 'destinations.json'), 'utf8')), {
+        archive: 'extension.tgz', checksum: 'extension.tgz.sha256',
+      });
+    });
+
     it('fails to pack if manifest.json is missing in directory', async () => {
       const emptyDir = path.join(tmpRoot, 'empty-dir');
       fs.mkdirSync(emptyDir, { recursive: true });

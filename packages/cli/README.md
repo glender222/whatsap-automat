@@ -31,7 +31,23 @@ automat doctor
 
 `automat pack` expects a source directory under the developer's control. It accepts regular
 files and directories in the included tree. Symbolic links and special files cause packing
-to fail before the archive is written.
+to fail before the archive is written. USTAR paths must fit a 100-byte UTF-8 name, optionally
+with a directory prefix of up to 155 bytes. Unrepresentable paths fail explicitly.
+
+Packing prepares both output files before publication. An existing output can be replaced
+if it is a writable regular file. The output directory must support hard links for exclusive
+publication of each complete file. `--dry-run` leaves the destination untouched.
+
+The archive and checksum have separate filenames, so a reader can observe an incomplete
+pair during publication. Compare the archive's SHA-256 with its checksum before using the
+pair. `automat verify` independently authenticates the archive against its signed proof and
+administrator authorization. On a publication failure the CLI attempts to restore the earlier
+files. If the process stops
+mid-publication or rollback cannot finish safely, `.automat-pack.lock` remains in the output
+directory. After confirming no pack process is active, use `destinations.json` to identify
+the output names. The `.before` entries hold destinations moved before publication, the
+`.new` files hold prepared outputs, and any `.reverted` entry was moved during rollback.
+Verify the recovered pair by digest before clearing the recovery directory.
 
 ## Offline package verification
 
