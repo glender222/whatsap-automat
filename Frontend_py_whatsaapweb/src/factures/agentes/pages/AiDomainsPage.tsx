@@ -50,6 +50,7 @@ type AgentTab = 'general' | 'knowledge' | 'tools' | 'rules' | 'tests' | 'logs';
 type WizardStep = 1 | 2 | 3;
 type ToolAccess = NonNullable<AiAgent['toolAccess']>;
 type FlowNodeId = 'entry' | 'agent' | 'reply' | 'handoff';
+type LoadState<T> = { status: 'loading' | 'error' } | { status: 'ready'; data: T };
 
 type FlowPosition = {
   x: number;
@@ -67,6 +68,12 @@ const MODE_LABELS: Record<AgentMode, string> = {
   disabled: 'Manual',
   suggest: 'Asistido',
   auto: 'Automático',
+};
+const AGENT_STATUS_LABELS: Record<AiAgent['status'], string> = {
+  draft: 'Borrador',
+  active: 'Activo',
+  paused: 'Pausado',
+  archived: 'Archivado',
 };
 
 const MODE_DESCRIPTIONS: Record<AgentMode, string> = {
@@ -209,10 +216,13 @@ export default function AiDomainsPage() {
   const [selectedDomainKey, setSelectedDomainKey] = React.useState<AiDomainKey>('gestion_web');
   const [selectedAgent, setSelectedAgent] = React.useState<AiAgent | null>(null);
   const [activeTab, setActiveTab] = React.useState<AgentTab>('general');
-  const [activity, setActivity] = React.useState<AgentActivityTurn[]>([]);
-  const [metrics, setMetrics] = React.useState<AiDomainMetrics | null>(null);
+  const [activity, setActivity] = React.useState<LoadState<AgentActivityTurn[]>>({ status: 'loading' });
+  const [metrics, setMetrics] = React.useState<LoadState<AiDomainMetrics>>({ status: 'loading' });
   const [heatmap, setHeatmap] = React.useState<HeatmapByDateMatrix | null>(null);
   const [heatmapState, setHeatmapState] = React.useState<'loading' | 'ready' | 'error'>('loading');
+  const activityRequest = React.useRef(0);
+  const metricsRequest = React.useRef(0);
+  const openedInitialDomain = React.useRef<AiDomainKey | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState(false);
   const [message, setMessage] = React.useState<string | null>(null);
@@ -263,15 +273,9 @@ export default function AiDomainsPage() {
     loadDomains();
   }, [loadDomains]);
 
-  React.useEffect(() => {
-    if (!domains.length || initialView !== 'flow' || !initialDomainKey) return;
-    if (!domains.some((domain) => domain.domainKey === initialDomainKey)) return;
-    setSelectedDomainKey(initialDomainKey);
-    setView('flow');
-    loadActivity(initialDomainKey);
-  }, [domains, initialDomainKey, initialView]);
-
-  const loadActivity = async (domainKey = selectedDomainKey) => {
+  const loadActivity = React.useCallback(async (domainKey = selectedDomainKey) => {
+    const request = ++activityRequest.current;
+    setActivity({ status: 'loading' });
     try {
       const response = await agentService.listDomainOperations(domainKey, {
         agentId: operationFilters.agentId ? Number(operationFilters.agentId) : null,
@@ -282,56 +286,62 @@ export default function AiDomainsPage() {
         dateTo: operationFilters.dateTo || undefined,
         limit: 100,
       });
-      setActivity(response);
+      if (!Array.isArray(response)) throw new Error('Respuesta de actividad inválida.');
+      if (request === activityRequest.current) setActivity({ status: 'ready', data: response });
     } catch {
-      setActivity([]);
+      if (request === activityRequest.current) setActivity({ status: 'error' });
     }
-  };
+  }, [operationFilters, selectedDomainKey]);
+
+  React.useEffect(() => {
+    if (initialView !== 'flow' || !initialDomainKey) {
+      openedInitialDomain.current = null;
+      return;
+    }
+    if (openedInitialDomain.current === initialDomainKey ||
+        !domains.some((domain) => domain.domainKey === initialDomainKey)) return;
+    openedInitialDomain.current = initialDomainKey;
+    setSelectedDomainKey(initialDomainKey);
+    setView('flow');
+    void loadActivity(initialDomainKey);
+  }, [domains, initialDomainKey, initialView, loadActivity]);
 
   const openFlow = async (domainKey: AiDomainKey) => {
+    metricsRequest.current += 1;
     setSelectedDomainKey(domainKey);
     setSelectedAgent(null);
-    setMetrics(null);
     setView('flow');
     await loadActivity(domainKey);
   };
 
-  const openMetrics = async () => {
+  const openMetrics = () => {
+    const request = ++metricsRequest.current;
     setView('metrics');
-    setMetrics(null);
+    setMetrics({ status: 'loading' });
     setHeatmap(null);
     setHeatmapState('loading');
-    setLoading(true);
-    try {
-      const heatmapRequest = dashboardService
-        .getHeatmap(7)
-        .then((response) => {
+    void loadActivity(selectedDomainKey);
+    void agentService.getDomainMetrics(selectedDomainKey).then(
+      (response) => {
+        if (request === metricsRequest.current) {
+          setMetrics(response?.domainKey === selectedDomainKey ? { status: 'ready', data: response } : { status: 'error' });
+        }
+      },
+      () => {
+        if (request === metricsRequest.current) setMetrics({ status: 'error' });
+      },
+    );
+    void dashboardService.getHeatmap(7).then(
+      (response) => {
+        if (request === metricsRequest.current) {
           setHeatmap(response);
           setHeatmapState('ready');
-        })
-        .catch(() => {
-          setHeatmapState('error');
-        });
-      const [metricResponse, activityResponse] = await Promise.all([
-        agentService.getDomainMetrics(selectedDomainKey),
-        agentService.listDomainOperations(selectedDomainKey, {
-          agentId: operationFilters.agentId ? Number(operationFilters.agentId) : null,
-          status: operationFilters.status || undefined,
-          tool: operationFilters.tool || undefined,
-          chatId: operationFilters.chatId || undefined,
-          dateFrom: operationFilters.dateFrom || undefined,
-          dateTo: operationFilters.dateTo || undefined,
-          limit: 100,
-        }),
-        heatmapRequest,
-      ]);
-      setMetrics(metricResponse);
-      setActivity(activityResponse);
-    } catch (err: unknown) {
-      setError(readError(err, 'No se pudieron cargar las métricas.'));
-    } finally {
-      setLoading(false);
-    }
+        }
+      },
+      () => {
+        if (request === metricsRequest.current) setHeatmapState('error');
+      },
+    );
   };
 
   const openAgentConfig = async () => {
@@ -547,7 +557,6 @@ export default function AiDomainsPage() {
             activity={activity}
             operationFilters={operationFilters}
             onOperationFilters={setOperationFilters}
-            loading={loading}
             onBack={() => setView('flow')}
             onDomains={() => setView('domains')}
             onReload={openMetrics}
@@ -728,14 +737,15 @@ function DomainFlow({
   onReload,
 }: {
   domain: AiDomainSummary;
-  activity: AgentActivityTurn[];
+  activity: LoadState<AgentActivityTurn[]>;
   onBack: () => void;
   onMetrics: () => void;
   onConfig: () => void;
   onReload: () => void;
 }) {
-  const agentName = domain.assignedAgent?.name || 'Agente sin asignar';
+  const agent = domain.assignedAgent;
   const domainLabel = formatDomainLabel(domain);
+  const stages = DOMAIN_META[domain.domainKey].flow;
   const canvasRef = React.useRef<HTMLDivElement | null>(null);
   const dragRef = React.useRef<{ id: FlowNodeId; offsetX: number; offsetY: number } | null>(null);
   const [nodePositions, setNodePositions] = React.useState<Record<FlowNodeId, FlowPosition>>({
@@ -760,7 +770,7 @@ function DomainFlow({
         ...current,
         [activeDrag.id]: {
           x: Math.max(24, Math.min(rect.width - bounds.width - 24, nextX)),
-          y: Math.max(96, Math.min(rect.height - bounds.height - 140, nextY)),
+          y: Math.max(24, Math.min(rect.height - bounds.height - 24, nextY)),
         },
       }));
     };
@@ -834,143 +844,98 @@ function DomainFlow({
         </div>
       </div>
 
-      <section className="overflow-hidden rounded-xl border border-[#D9E5DF] bg-[#EEF4F1] shadow-inner dark:border-slate-800 dark:bg-slate-950">
-        <div
-          ref={canvasRef}
-          className="relative h-[600px] min-w-[1120px]"
-          style={{
-            backgroundImage: 'radial-gradient(#bdc9c5 1px, transparent 1px)',
-            backgroundSize: '24px 24px',
-            backgroundPosition: '-12px -12px',
-          }}
-        >
-          <svg className="absolute inset-0 h-full w-full">
-            {[connectorPath(entryOut, agentIn), connectorPath(agentOut, replyIn), connectorPath(agentOut, handoffIn)].map((path, index) => (
-              <path
-                key={index}
-                d={path}
-                fill="none"
-                stroke="#128C7E"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth="2.25"
-              />
-            ))}
-            {[entryOut, agentIn, agentOut, replyIn, handoffIn].map((point, index) => (
-              <React.Fragment key={`${point.x}-${point.y}-${index}`}>
-                <circle className="animate-ping" cx={point.x} cy={point.y} fill="#128C7E" r="3" />
-                <circle cx={point.x} cy={point.y} fill="#128C7E" r="4" />
-              </React.Fragment>
-            ))}
-          </svg>
-
-          <FlowNode
-            x={nodePositions.entry.x}
-            y={nodePositions.entry.y}
-            title="Entrada de Usuario"
-            subtitle="WhatsApp / Web"
-            icon={MessageSquareText}
-            portSide="right"
-            onPointerDown={(event) => startDrag('entry', event)}
-          >
-            <div className="absolute -bottom-[118px] left-0 z-30 w-[280px] rounded-lg border border-[#D9E5DF] bg-white p-3 shadow-md dark:border-slate-700 dark:bg-slate-900">
-              <div className="mb-1 flex items-center justify-between text-[11px] font-semibold">
-                <span className="text-[#10231C] dark:text-slate-100">Cliente Web</span>
-                <span className="text-[#5B6F66] dark:text-slate-400">10:42 AM</span>
-              </div>
-              <p className="text-xs leading-5 text-[#10231C] dark:text-slate-200">
-                Hola, necesito saber si tienen disponibilidad y si me pueden ayudar ahora.
-              </p>
-            </div>
-          </FlowNode>
-
+      <section aria-labelledby="domain-plan-title" className="overflow-hidden rounded-xl border border-[#D9E5DF] bg-[#EEF4F1] shadow-inner dark:border-slate-800 dark:bg-slate-950">
+        <header className="border-b border-[#D9E5DF] bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+          <h2 id="domain-plan-title" className="font-bold text-[#10231C] dark:text-slate-100">Esquema del dominio</h2>
+          <p className="mt-1 text-sm text-[#5B6F66] dark:text-slate-400">Etapas previstas y configuración actual del agente.</p>
+        </header>
+        <div role="region" aria-label="Diagrama de configuración" tabIndex={0} className="overflow-x-auto">
           <div
-            onPointerDown={(event) => startDrag('agent', event)}
-            className="absolute z-20 w-[300px] cursor-move select-none rounded-lg border-2 border-[#128C7E] bg-white shadow-md dark:bg-slate-900"
-            style={{ left: nodePositions.agent.x, top: nodePositions.agent.y }}
+            ref={canvasRef}
+            className="relative h-[460px] min-w-[1120px]"
+            style={{
+              backgroundImage: 'radial-gradient(#bdc9c5 1px, transparent 1px)',
+              backgroundSize: '24px 24px',
+              backgroundPosition: '-12px -12px',
+            }}
           >
-            <span className="absolute -left-2 top-1/2 h-3 w-3 -translate-y-1/2 rounded-full bg-[#128C7E]" />
-            <span className="absolute -right-2 top-1/2 h-3 w-3 -translate-y-1/2 rounded-full border-2 border-[#128C7E] bg-white dark:bg-slate-900" />
-            <div className="flex items-center gap-3 rounded-t-md border-b border-[#D9E5DF] bg-[#DDF4EF] p-3 dark:border-slate-700 dark:bg-emerald-950/30">
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#128C7E] text-white">
-                <Sparkles className="h-5 w-5" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center justify-between gap-2">
-                  <h4 className="truncate text-sm font-bold text-[#10231C] dark:text-slate-100">{agentName}</h4>
-                  <span className="inline-flex items-center gap-1 rounded-full border border-[#128C7E]/20 bg-white px-2 py-0.5 text-[10px] font-bold text-[#128C7E] dark:bg-slate-950">
-                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#128C7E]" />
-                    Procesando
-                  </span>
+            <svg className="absolute inset-0 h-full w-full">
+              {[connectorPath(entryOut, agentIn), connectorPath(agentOut, replyIn), connectorPath(agentOut, handoffIn)].map((path, index) => (
+                <path
+                  key={index}
+                  d={path}
+                  fill="none"
+                  stroke="#128C7E"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2.25"
+                />
+              ))}
+              {[entryOut, agentIn, agentOut, replyIn, handoffIn].map((point, index) => (
+                <circle key={index} cx={point.x} cy={point.y} fill="#128C7E" r="4" />
+              ))}
+            </svg>
+
+            <FlowNode
+              x={nodePositions.entry.x}
+              y={nodePositions.entry.y}
+              title={stages[0]}
+              subtitle="Entrada prevista"
+              icon={MessageSquareText}
+              portSide="right"
+              onPointerDown={(event) => startDrag('entry', event)}
+            />
+
+            <div
+              onPointerDown={(event) => startDrag('agent', event)}
+              className="absolute z-20 w-[300px] cursor-move select-none rounded-lg border-2 border-[#128C7E] bg-white shadow-md dark:bg-slate-900"
+              style={{ left: nodePositions.agent.x, top: nodePositions.agent.y }}
+            >
+              <span className="absolute -left-2 top-1/2 h-3 w-3 -translate-y-1/2 rounded-full bg-[#128C7E]" />
+              <span className="absolute -right-2 top-1/2 h-3 w-3 -translate-y-1/2 rounded-full border-2 border-[#128C7E] bg-white dark:bg-slate-900" />
+              <div className="flex items-center gap-3 rounded-t-md border-b border-[#D9E5DF] bg-[#DDF4EF] p-3 dark:border-slate-700 dark:bg-emerald-950/30">
+                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#128C7E] text-white">
+                  <Sparkles className="h-5 w-5" />
                 </div>
-                <p className="mt-1 text-[11px] text-[#5B6F66] dark:text-slate-400">Dominio {domainLabel}</p>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <h4 className="truncate text-sm font-bold text-[#10231C] dark:text-slate-100">{agent?.name || 'Agente sin asignar'}</h4>
+                    <span className="inline-flex items-center gap-1 rounded-full border border-[#128C7E]/20 bg-white px-2 py-0.5 text-[10px] font-bold text-[#128C7E] dark:bg-slate-950">
+                      {agent ? AGENT_STATUS_LABELS[agent.status] : 'Sin asignar'}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-[11px] text-[#5B6F66] dark:text-slate-400">Dominio {domainLabel}</p>
+                </div>
+              </div>
+              <div className="p-3">
+                <MiniSignal label="Modo configurado" value={agent ? MODE_LABELS[agent.mode] : 'Sin configurar'} />
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-2 p-3">
-              <MiniSignal label="Intención" value={domain.domainKey === 'inventory_stock' ? 'Consulta stock' : 'Atención cliente'} />
-              <MiniSignal label="Contexto" value="Historial + reglas" />
-            </div>
-            <div className="absolute -top-[96px] left-1/2 z-30 w-[320px] -translate-x-1/2 rounded-lg border border-[#D9E5DF] bg-white/95 p-3 shadow-md backdrop-blur dark:border-slate-700 dark:bg-slate-900/95">
-              <div className="mb-2 flex items-center gap-2 border-b border-[#D9E5DF] pb-2 text-xs font-bold text-[#10231C] dark:border-slate-700 dark:text-slate-100">
-                <CheckCircle2 className="h-4 w-4 text-[#128C7E]" />
-                Resolución asistida
-              </div>
-              <ul className="space-y-1 text-[11px] leading-4 text-[#5B6F66] dark:text-slate-400">
-                <li><span className="font-bold text-[#128C7E]">•</span> Contexto del dominio detectado.</li>
-                <li><span className="font-bold text-[#128C7E]">•</span> Herramientas y reglas listas para auditar.</li>
-              </ul>
-            </div>
+
+            <FlowNode
+              x={nodePositions.reply.x}
+              y={nodePositions.reply.y}
+              title={stages[2]}
+              subtitle="Salida prevista"
+              icon={CheckCircle2}
+              portSide="left"
+              onPointerDown={(event) => startDrag('reply', event)}
+            />
+
+            <FlowNode
+              x={nodePositions.handoff.x}
+              y={nodePositions.handoff.y}
+              title={stages[3]}
+              subtitle="Etapa prevista"
+              icon={ShieldCheck}
+              portSide="left"
+              onPointerDown={(event) => startDrag('handoff', event)}
+            />
           </div>
-
-          <FlowNode
-            x={nodePositions.reply.x}
-            y={nodePositions.reply.y}
-            title="Respuesta / sugerencia"
-            subtitle="Resolución directa"
-            icon={CheckCircle2}
-            portSide="left"
-            onPointerDown={(event) => startDrag('reply', event)}
-          >
-            <div className="absolute -right-[280px] top-0 z-30 hidden w-[260px] rounded-lg rounded-tl-none border border-[#128C7E]/20 bg-[#DDF4EF] p-3 shadow-sm group-hover:block dark:bg-emerald-950/40">
-              <div className="mb-1 flex justify-end gap-1 text-[10px] font-semibold text-[#128C7E]">
-                <span>{agentName}</span>
-                <span>10:42 AM</span>
-              </div>
-              <p className="text-right text-xs leading-5 text-[#10231C] dark:text-slate-100">
-                Claro, puedo ayudarte con esa información y dejar la acción registrada.
-              </p>
-            </div>
-          </FlowNode>
-
-          <FlowNode
-            x={nodePositions.handoff.x}
-            y={nodePositions.handoff.y}
-            title="Handoff humano"
-            subtitle="Derivación operativa"
-            icon={ShieldCheck}
-            portSide="left"
-            onPointerDown={(event) => startDrag('handoff', event)}
-          />
         </div>
       </section>
 
-      <div className="grid gap-5 lg:grid-cols-[1fr_360px]">
-        <section className="rounded-xl border border-[#D9E5DF] bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <div className="mb-4 flex items-center justify-between">
-            <h3 className="flex items-center gap-2 text-lg font-bold text-[#10231C] dark:text-slate-100">
-              <Activity className="h-5 w-5 text-[#128C7E]" />
-              Actividad en tiempo real
-            </h3>
-            <span className="text-xs font-semibold text-[#5B6F66] dark:text-slate-400">Última actualización reciente</span>
-          </div>
-          <div className="space-y-3">
-            {(activity.length ? activity.slice(0, 3) : defaultActivity(domainLabel, agentName)).map((item, index) => (
-              <LiveFeedItem key={`${item.id || index}-${item.startedAt || index}`} item={item} agentName={agentName} />
-            ))}
-          </div>
-        </section>
-        <ActivityPanel activity={activity} onReload={onReload} />
-      </div>
+      <ActivityPanel activity={activity} onReload={onReload} />
     </>
   );
 }
@@ -983,16 +948,15 @@ function DomainMetrics({
   activity,
   operationFilters,
   onOperationFilters,
-  loading,
   onBack,
   onDomains,
   onReload,
 }: {
   domain: AiDomainSummary;
-  metrics: AiDomainMetrics | null;
+  metrics: LoadState<AiDomainMetrics>;
   heatmap: HeatmapByDateMatrix | null;
   heatmapState: 'loading' | 'ready' | 'error';
-  activity: AgentActivityTurn[];
+  activity: LoadState<AgentActivityTurn[]>;
   operationFilters: {
     agentId: string;
     status: string;
@@ -1009,15 +973,12 @@ function DomainMetrics({
     dateFrom: string;
     dateTo: string;
   }>>;
-  loading: boolean;
   onBack: () => void;
   onDomains: () => void;
   onReload: () => void;
 }) {
-  const activeSessions = metrics?.activeSessions || 0;
-  const turns = metrics?.turns || 0;
-  const commands = metrics?.commands || 0;
-  const assists = (metrics?.suggestions || 0) + (metrics?.autoReplies || 0);
+  const counters = metrics.status === 'ready' ? metrics.data : null;
+  const operations = activity.status === 'ready' ? activity.data : [];
 
   return (
     <>
@@ -1054,121 +1015,97 @@ function DomainMetrics({
         </div>
       </header>
 
-      {loading && !metrics ? (
-        <LoadingPanel label="Cargando métricas..." />
-      ) : (
-        <div className="flex flex-col gap-5">
-          <div className="grid items-start gap-5 lg:grid-cols-[380px_1fr]">
-            <section className="flex flex-col gap-4 rounded-2xl border border-[#D9E5DF] bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-              <div className="flex items-center justify-between border-b border-[#D9E5DF] pb-4 dark:border-slate-800">
-                <h2 className="flex items-center gap-2 text-lg font-bold text-[#10231C] dark:text-slate-100">
-                  <Activity className="h-5 w-5 animate-pulse text-[#128C7E]" />
-                  Registro de operaciones
-                </h2>
-                <span className="inline-flex items-center gap-2 rounded-full bg-[#E4FBEF] px-3 py-1 text-xs font-bold text-[#128C7E] dark:bg-emerald-950/40 dark:text-emerald-300">
-                  <span className="h-2 w-2 animate-ping rounded-full bg-[#128C7E]" />
-                  En vivo
-                </span>
-              </div>
-              <div className="grid gap-2 md:grid-cols-2">
-                <input
-                  value={operationFilters.agentId}
-                  onChange={(event) => onOperationFilters((current) => ({ ...current, agentId: event.target.value }))}
-                  className="input"
-                  placeholder="Agente ID"
-                />
-                <select
-                  value={operationFilters.status}
-                  onChange={(event) => onOperationFilters((current) => ({ ...current, status: event.target.value }))}
-                  className="input"
-                >
-                  <option value="">Todos los status</option>
-                  <option value="running">running</option>
-                  <option value="ok">ok</option>
-                  <option value="skipped">skipped</option>
-                  <option value="failed">failed</option>
-                </select>
-                <input
-                  value={operationFilters.tool}
-                  onChange={(event) => onOperationFilters((current) => ({ ...current, tool: event.target.value }))}
-                  className="input"
-                  placeholder="Tool"
-                />
-                <input
-                  value={operationFilters.chatId}
-                  onChange={(event) => onOperationFilters((current) => ({ ...current, chatId: event.target.value }))}
-                  className="input"
-                  placeholder="Chat"
-                />
-                <input
-                  type="date"
-                  value={operationFilters.dateFrom}
-                  onChange={(event) => onOperationFilters((current) => ({ ...current, dateFrom: event.target.value }))}
-                  className="input"
-                />
-                <input
-                  type="date"
-                  value={operationFilters.dateTo}
-                  onChange={(event) => onOperationFilters((current) => ({ ...current, dateTo: event.target.value }))}
-                  className="input"
-                />
-              </div>
-              <div className="max-h-[315px] space-y-3 overflow-y-auto pr-1">
-                {(activity.length ? activity : defaultActivity(formatDomainLabel(domain), domain.assignedAgent?.name || 'Agente')).map((item, index) => (
-                  <LiveFeedItem key={`${item.id || index}-${item.startedAt || index}`} item={item} agentName={domain.assignedAgent?.name || 'Agente'} />
-                ))}
-              </div>
-            </section>
-
-            <MessageHeatmap
-              data={heatmap}
-              loadState={heatmapState}
-              footer={(
-                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                  <MetricPill label="Turnos ejecutados" value={turns} />
-                  <MetricPill label="Dry-run pruebas" value={metrics?.dryRuns || 0} />
-                  <MetricPill label="Auto-respuestas" value={metrics?.autoReplies || 0} />
-                  <MetricPill label="Errores" value={metrics?.errors || 0} />
-                </div>
-              )}
-            />
-          </div>
-
-          <section className="rounded-2xl border border-[#D9E5DF] bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <div className="flex flex-col gap-5">
+        <div className="grid items-start gap-5 lg:grid-cols-[380px_1fr]">
+          <section className="flex flex-col gap-4 rounded-2xl border border-[#D9E5DF] bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
             <div className="flex items-center justify-between border-b border-[#D9E5DF] pb-4 dark:border-slate-800">
               <h2 className="flex items-center gap-2 text-lg font-bold text-[#10231C] dark:text-slate-100">
-                <BarChart3 className="h-5 w-5 text-[#128C7E]" />
-                Impacto del dominio
+                <Activity className="h-5 w-5 text-[#128C7E]" />
+                Registro de operaciones
               </h2>
-              <span className="text-sm font-semibold text-[#5B6F66] dark:text-slate-400">Últimos 7 días</span>
             </div>
-            <div className="mt-5 grid gap-6 md:grid-cols-3">
-              <ImpactMetric label="Sesiones activas" value={activeSessions} color="#128C7E" bars={[30, 50, 40, 70, 60, 90, 100]} />
-              <ImpactMetric label="Asistencias exitosas" value={assists} color="#006d2f" bars={[20, 40, 50, 45, 70, 65, 85]} />
-              <ImpactMetric label="Comandos auditados" value={commands} color="#ba1a1a" bars={[40, 30, 50, 20, 30, 10, 15]} />
+            <div className="grid gap-2 md:grid-cols-2">
+              <input
+                value={operationFilters.agentId}
+                onChange={(event) => onOperationFilters((current) => ({ ...current, agentId: event.target.value }))}
+                className="input"
+                placeholder="Agente ID"
+              />
+              <select
+                value={operationFilters.status}
+                onChange={(event) => onOperationFilters((current) => ({ ...current, status: event.target.value }))}
+                className="input"
+              >
+                <option value="">Todos los status</option>
+                <option value="running">running</option>
+                <option value="ok">ok</option>
+                <option value="skipped">skipped</option>
+                <option value="failed">failed</option>
+              </select>
+              <input
+                value={operationFilters.tool}
+                onChange={(event) => onOperationFilters((current) => ({ ...current, tool: event.target.value }))}
+                className="input"
+                placeholder="Tool"
+              />
+              <input
+                value={operationFilters.chatId}
+                onChange={(event) => onOperationFilters((current) => ({ ...current, chatId: event.target.value }))}
+                className="input"
+                placeholder="Chat"
+              />
+              <input
+                type="date"
+                value={operationFilters.dateFrom}
+                onChange={(event) => onOperationFilters((current) => ({ ...current, dateFrom: event.target.value }))}
+                className="input"
+              />
+              <input
+                type="date"
+                value={operationFilters.dateTo}
+                onChange={(event) => onOperationFilters((current) => ({ ...current, dateTo: event.target.value }))}
+                className="input"
+              />
+            </div>
+            <div className="max-h-[315px] space-y-3 overflow-y-auto pr-1">
+              {operations.length ? operations.map((item) => (
+                <LiveFeedItem key={item.id} item={item} agentName={domain.assignedAgent?.name || 'Agente'} />
+              )) : <ActivityStateMessage status={activity.status} />}
             </div>
           </section>
-        </div>
-      )}
-    </>
-  );
-}
 
-function ImpactMetric({ label, value, color, bars }: { label: string; value: string | number; color: string; bars: number[] }) {
-  return (
-    <div className="flex flex-col gap-2">
-      <span className="text-sm font-semibold text-[#5B6F66] dark:text-slate-400">{label}</span>
-      <span className="text-3xl font-bold text-[#10231C] dark:text-slate-100">{value}</span>
-      <div className="mt-2 flex h-16 items-end gap-1">
-        {bars.map((height, index) => (
-          <div
-            key={`${label}-${index}`}
-            className="w-full rounded-t-sm"
-            style={{ height: `${height}%`, backgroundColor: color, opacity: 0.25 + (index / bars.length) * 0.75 }}
+          <MessageHeatmap
+            data={heatmap}
+            loadState={heatmapState}
+            footer={counters && (
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <MetricPill label="Turnos ejecutados" value={counters.turns} />
+                <MetricPill label="Pruebas" value={counters.dryRuns} />
+                <MetricPill label="Respuestas automáticas" value={counters.autoReplies} />
+                <MetricPill label="Errores" value={counters.errors} />
+              </div>
+            )}
           />
-        ))}
+        </div>
+
+        <section className="rounded-2xl border border-[#D9E5DF] bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <div className="flex items-center justify-between border-b border-[#D9E5DF] pb-4 dark:border-slate-800">
+            <h2 className="flex items-center gap-2 text-lg font-bold text-[#10231C] dark:text-slate-100">
+              <BarChart3 className="h-5 w-5 text-[#128C7E]" />
+              Impacto del dominio
+            </h2>
+            <span className="text-sm font-semibold text-[#5B6F66] dark:text-slate-400">Acumulado</span>
+          </div>
+          {counters && <div className="mt-5 grid gap-6 md:grid-cols-3">
+            <MetricPill label="Sesiones activas" value={counters.activeSessions} />
+            <MetricPill label="Sugerencias y respuestas automáticas" value={counters.suggestions + counters.autoReplies} />
+            <MetricPill label="Comandos registrados" value={counters.commands} />
+          </div>}
+          {metrics.status === 'loading' && <p role="status" className="mt-4 text-sm text-secondary">Cargando métricas del dominio…</p>}
+          {metrics.status === 'error' && <p role="alert" className="mt-4 text-sm text-red-700 dark:text-red-300">No se pudieron cargar las métricas del dominio. Actualiza para volver a consultar.</p>}
+        </section>
       </div>
-    </div>
+    </>
   );
 }
 
@@ -1189,7 +1126,6 @@ function FlowNode({
   icon: Icon,
   portSide,
   onPointerDown,
-  children,
 }: {
   x: number;
   y: number;
@@ -1198,7 +1134,6 @@ function FlowNode({
   icon: React.ElementType;
   portSide: 'left' | 'right';
   onPointerDown: (event: React.PointerEvent<HTMLElement>) => void;
-  children?: React.ReactNode;
 }) {
   return (
     <div
@@ -1220,7 +1155,6 @@ function FlowNode({
           <p className="text-[11px] font-semibold text-[#5B6F66] dark:text-slate-400">{subtitle}</p>
         </div>
       </div>
-      {children}
     </div>
   );
 }
@@ -1239,53 +1173,6 @@ function MiniSignal({ label, value }: { label: string; value: string }) {
 
 function SearchIcon() {
   return <span className="h-1.5 w-1.5 rounded-full bg-[#128C7E]" />;
-}
-
-function defaultActivity(domainLabel: string, agentName: string): AgentActivityTurn[] {
-  return [
-    {
-      id: -1,
-      sessionId: -1,
-      agentId: null,
-      agentName,
-      inboundProviderMessageId: null,
-      status: 'ok',
-      finalAction: 'suggest',
-      finalReplyPreview: `${agentName} formuló un borrador para ${domainLabel}.`,
-      commandCount: 0,
-      startedAt: new Date().toISOString(),
-      completedAt: new Date().toISOString(),
-      commands: [],
-    },
-    {
-      id: -2,
-      sessionId: -2,
-      agentId: null,
-      agentName,
-      inboundProviderMessageId: null,
-      status: 'ok',
-      finalAction: 'none',
-      finalReplyPreview: 'La conversación fue clasificada y quedó registrada en trazabilidad.',
-      commandCount: 0,
-      startedAt: new Date(Date.now() - 4 * 60 * 1000).toISOString(),
-      completedAt: new Date(Date.now() - 4 * 60 * 1000).toISOString(),
-      commands: [],
-    },
-    {
-      id: -3,
-      sessionId: -3,
-      agentId: null,
-      agentName,
-      inboundProviderMessageId: null,
-      status: 'ok',
-      finalAction: 'handoff',
-      finalReplyPreview: 'El sistema revisó si correspondía derivar a una persona.',
-      commandCount: 0,
-      startedAt: new Date(Date.now() - 12 * 60 * 1000).toISOString(),
-      completedAt: new Date(Date.now() - 12 * 60 * 1000).toISOString(),
-      commands: [],
-    },
-  ];
 }
 
 function LiveFeedItem({ item, agentName }: { item: AgentActivityTurn; agentName: string }) {
@@ -1779,23 +1666,30 @@ function TestsTab({
   );
 }
 
-function ActivityPanel({ activity, onReload }: { activity: AgentActivityTurn[]; onReload: () => void }) {
+function ActivityStateMessage({ status }: { status: LoadState<AgentActivityTurn[]>['status'] }) {
+  if (status === 'loading') return <p role="status" className="p-3 text-sm text-secondary">Cargando actividad del dominio…</p>;
+  if (status === 'error') return <p role="alert" className="p-3 text-sm text-red-700 dark:text-red-300">No se pudo cargar la actividad. Actualiza para volver a consultar.</p>;
+  return <EmptyState icon={Clock3} title="Sin actividad registrada" text="No se encontraron turnos para esta consulta." />;
+}
+
+function ActivityPanel({ activity, onReload }: { activity: LoadState<AgentActivityTurn[]>; onReload: () => void }) {
+  const operations = activity.status === 'ready' ? activity.data : [];
   return (
     <aside className="rounded-xl border border-[#D9E5DF] bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
       <div className="flex items-center justify-between gap-3">
         <div>
           <h2 className="text-base font-bold text-[#10231C] dark:text-slate-100">Actividad reciente</h2>
-          <p className="mt-1 text-sm text-[#5B6F66] dark:text-slate-400">Eventos trazables del agente asignado.</p>
+          <p className="mt-1 text-sm text-[#5B6F66] dark:text-slate-400">Turnos registrados para este dominio.</p>
         </div>
-        <button type="button" onClick={onReload} className={iconButtonClass} aria-label="Actualizar actividad">
+        <button type="button" onClick={onReload} disabled={activity.status === 'loading'} className={iconButtonClass} aria-label="Actualizar actividad">
           <RefreshCw className="h-4 w-4" />
         </button>
       </div>
       <div className="mt-5 space-y-3">
-        {activity.length === 0 ? (
-          <EmptyState icon={Clock3} title="Sin actividad" text="Cuando el dominio opere, los eventos aparecerán aquí." />
+        {operations.length === 0 ? (
+          <ActivityStateMessage status={activity.status} />
         ) : (
-          activity.slice(0, 8).map((item) => (
+          operations.slice(0, 8).map((item) => (
             <div key={`${item.id}-${item.startedAt}`} className="rounded-lg border border-[#D9E5DF] bg-[#F7FAF8] p-3 dark:border-slate-800 dark:bg-slate-950">
               <div className="flex items-center justify-between gap-3">
                 <p className="truncate text-sm font-bold text-[#10231C] dark:text-slate-100">
