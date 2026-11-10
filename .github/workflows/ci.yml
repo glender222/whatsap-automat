@@ -83,7 +83,8 @@ jobs:
 
   product-smoke:
     name: Flujo de producto con PostgreSQL y Socket.IO
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
     services:
       postgres:
         image: postgres:16
@@ -92,7 +93,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd pg_isready
+          --health-cmd "pg_isready -U postgres"
           --health-interval 3s
           --health-timeout 3s
           --health-retries 15
@@ -160,7 +161,17 @@ jobs:
             cat "$RUNNER_TEMP/product-smoke.log" "$RUNNER_TEMP/product-smoke-peer.log"
             exit 1
           fi
+      - name: Preparar FFmpeg para la prueba de video
+        timeout-minutes: 10
+        run: |
+          if ! command -v ffmpeg || ! command -v ffprobe; then
+            sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 update
+            sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 install --yes --no-install-recommends ffmpeg
+          fi
+          ffmpeg -version
+          ffprobe -version
       - name: Probar envíos, campañas, Marketplace, Studio, conexiones, inventario, pedidos y workflows contra PostgreSQL
+        timeout-minutes: 5
         env:
           CAMPAIGN_SMOKE: '1'
           WORKFLOW_CONSOLE_SMOKE: '1'
@@ -181,10 +192,6 @@ jobs:
           LEGACY_META_TEST_DATABASE_URL: postgres://whatsap_smoke:ci-runtime-only@127.0.0.1:5432/whatsap_automat_smoke
           LEGACY_META_TEST_VIDEO: '1'
         run: |
-          if ! command -v ffmpeg || ! command -v ffprobe; then
-            sudo apt-get update
-            sudo apt-get install --yes --no-install-recommends ffmpeg
-          fi
           node --import tsx --test --test-concurrency=3 src/test/campaign-persistence.integration.test.ts src/test/marketplace-postgres.test.ts src/test/agent-studio-postgres.test.ts src/test/ai-quota-reservations-postgres.test.ts src/test/bounded-agent-dispatch.test.ts src/test/agent-domains-postgres.test.ts src/test/channel-connections-postgres.test.ts src/test/workflow-console.integration.test.ts src/test/conversation-send-postgres.test.ts src/test/attachment-rls-postgres.test.ts src/test/challenger_f8_immutability_compliance.test.ts src/test/operation-executions-postgres.test.ts src/test/catalog-inventory-postgres.test.ts src/test/orders-postgres.test.ts src/test/payment-gateway-postgres.test.ts src/test/payment-checkout-intents-postgres.test.ts src/test/payment-checkout-dispatch-postgres.test.ts src/test/payment-checkout-reconciliation-postgres.test.ts src/test/payment-checkout-reconciliation-routes.test.ts src/test/legacy-meta-send-postgres.test.ts
       - name: Ejecutar workflows con el worker compilado y Temporal
         env:
