@@ -3,8 +3,9 @@ import fs from 'fs';
 import path from 'path';
 import pool from '../config/database';
 import config from '../config/index';
+import { TenantScopedUoW } from '../db/TenantScopedUoW';
 import { JwtRequest, resolveWhatsappCompanyId } from '../middleware/jwtAuth';
-import { PaymentRepositoryPg, PaymentService } from '../modules/payments';
+import { listCheckoutReconciliations, PaymentRepositoryPg, PaymentService } from '../modules/payments';
 import { emitDashboard } from '../sockets/socketEmitter';
 
 const multer = require('multer') as any;
@@ -12,6 +13,14 @@ const multer = require('multer') as any;
 function parsePositiveInt(value: unknown): number | null {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function parseOrderId(value: unknown): string | null {
+  if (value === undefined) return null;
+  if (typeof value !== 'string' || !/^[1-9]\d{0,18}$/.test(value) || BigInt(value) > 9223372036854775807n) {
+    throw validationError('Identificador de pedido inválido.');
+  }
+  return value;
 }
 
 function getUserId(req: JwtRequest): number | null {
@@ -34,6 +43,7 @@ const ALLOWED_MIME = /^(image\/(jpeg|png|webp|gif)|application\/pdf|video\/mp4)$
 export default function createPaymentRoutes(database = pool): Router {
   const router = Router();
   const service = new PaymentService(new PaymentRepositoryPg(database));
+  const tenantWork = new TenantScopedUoW(database);
   const mediaDir = path.join(config.whatsapp.uploadDir, 'payment-vouchers');
   fs.mkdirSync(mediaDir, { recursive: true });
   const upload = multer({
@@ -73,6 +83,29 @@ export default function createPaymentRoutes(database = pool): Router {
       res.json({ success: true, data });
     } catch (error) {
       next(error);
+    }
+  });
+
+  router.get('/mercadopago-reconciliations', async (req: JwtRequest, res: Response, next: NextFunction) => {
+    try {
+      res.set('Cache-Control', 'no-store');
+      const actorUserId = getUserId(req);
+      if (!actorUserId || !Number.isSafeInteger(actorUserId)) {
+        return res.status(403).json({ success: false, error: 'ADMIN_REQUIRED', message: 'Se requiere un administrador activo.' });
+      }
+      const { limit = '25', orderId, beforeOrderId } = req.query;
+      if (typeof limit !== 'string' || !/^(?:[1-9]\d?|100)$/.test(limit)) {
+        throw validationError('El límite debe estar entre 1 y 100.');
+      }
+      const data = await listCheckoutReconciliations({
+        companyId: resolveWhatsappCompanyId(req), actorUserId,
+        sessionRole: typeof req.user?.rol === 'string' ? req.user.rol : undefined,
+      }, {
+        orderId: parseOrderId(orderId), beforeOrderId: parseOrderId(beforeOrderId), limit: Number(limit),
+      }, tenantWork);
+      return res.json({ success: true, data });
+    } catch (error) {
+      return next(error);
     }
   });
 

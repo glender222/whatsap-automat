@@ -64,7 +64,7 @@ export const workspaceSections: WorkspaceSection[] = [
       { to: '/dashboard/catalogos', label: 'Catálogos', icon: Layers3, adminOnly: true },
       { to: '/dashboard/inventario', label: 'Inventario', icon: Package },
       { to: '/dashboard/pedidos', label: 'Pedidos', icon: ShoppingBag },
-      { to: '/dashboard/pagos', label: 'Validación de pagos', icon: ReceiptText },
+      { to: '/dashboard/pagos', label: 'Validación de pagos', icon: ReceiptText, adminOnly: true },
     ],
   },
   {

@@ -43,6 +43,23 @@ export type PaymentVoucherPage = {
   offset: number;
 };
 
+export type MercadoPagoReconciliation = {
+  orderId: string;
+  providerOrderId: string | null;
+  expectedAmount: string;
+  amountPaid: string | null;
+  currency: 'PEN';
+  state: 'awaiting_observation' | 'unpaid' | 'pending' | 'failed' | 'partial' | 'settled' | 'review_required';
+  observedAt: string | null;
+  settledAt: string | null;
+  reviewCode: string | null;
+};
+
+export type MercadoPagoReconciliationPage = {
+  rows: MercadoPagoReconciliation[];
+  nextBeforeOrderId: string | null;
+};
+
 export type PaymentListFilters = {
   status?: PaymentVoucherStatus;
   paymentMethod?: PaymentMethod;
@@ -91,6 +108,16 @@ export const paymentsService = {
       },
     });
     return unwrap<PaymentVoucherPage>(response);
+  },
+
+  async listMercadoPagoReconciliations(
+    filters: { orderId: string; beforeOrderId: string | null }, signal: AbortSignal,
+  ): Promise<MercadoPagoReconciliationPage> {
+    const response = await api.get('/payments/mercadopago-reconciliations', {
+      params: { orderId: filters.orderId || undefined, beforeOrderId: filters.beforeOrderId ?? undefined, limit: 15 },
+      signal,
+    });
+    return unwrap<MercadoPagoReconciliationPage>(response);
   },
 
   async countPending(): Promise<number> {

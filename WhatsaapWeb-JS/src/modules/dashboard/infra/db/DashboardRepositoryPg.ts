@@ -1,5 +1,6 @@
 import type { Pool } from 'pg';
 import { queryInTenantScope, withTenantTransaction } from '../../../../db/TenantScopedUoW';
+import { PaymentRepositoryPg } from '../../../payments/infra/db/PaymentRepositoryPg';
 import {
   ActionCardsStats,
   HeatmapByDateDay,
@@ -115,37 +116,7 @@ export class DashboardRepositoryPg {
              )`,
           [companyId]
         ),
-        client.query(
-          `WITH payable_orders AS (
-             SELECT o.id
-             FROM customer_orders o
-             WHERE o.company_id = $1
-               AND o.order_type = 'commercial'
-               AND o.status IN ('draft','quoted','pending_handoff','pending_approval','confirmed')
-               AND EXISTS (
-                 SELECT 1 FROM order_items oi
-                 WHERE oi.company_id = o.company_id AND oi.order_id = o.id
-               )
-               AND NOT EXISTS (
-                 SELECT 1 FROM payment_vouchers pv
-                 WHERE pv.company_id = o.company_id
-                   AND pv.order_id = o.id
-                   AND pv.status = 'validated'
-               )
-           ),
-           orphan_pending_vouchers AS (
-             SELECT pv.id
-             FROM payment_vouchers pv
-             WHERE pv.company_id = $1
-               AND pv.order_id IS NULL
-               AND pv.status = 'pending'
-           )
-           SELECT (
-             (SELECT COUNT(*) FROM payable_orders) +
-             (SELECT COUNT(*) FROM orphan_pending_vouchers)
-           )::int AS count`,
-          [companyId]
-        ),
+        new PaymentRepositoryPg(client).countPending(companyId),
         client.query(
           `SELECT COUNT(*)::int AS count
            FROM products
@@ -159,7 +130,7 @@ export class DashboardRepositoryPg {
 
       return {
         pendingChatsCount: Number(pending.rows[0]?.count || 0),
-        pendingPaymentsCount: Number(payments.rows[0]?.count || 0),
+        pendingPaymentsCount: payments,
         lowStockCount: Number(lowStock.rows[0]?.count || 0),
       };
     }, this.pool);

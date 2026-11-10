@@ -5,6 +5,7 @@ import { PaymentCheckoutIntentRepositoryPg } from '../infra/db/PaymentCheckoutIn
 import {
   PaymentCheckoutReconciliationRepositoryPg,
   type CheckoutReconciliation,
+  type CheckoutReconciliationFilters,
   type ObservationDecision,
 } from '../infra/db/PaymentCheckoutReconciliationRepositoryPg';
 import { isMercadoPagoOrderId, type MercadoPagoOrdersAdapter } from '../infra/mercadopago/MercadoPagoOrdersAdapter';
@@ -40,6 +41,16 @@ function unavailableDispatch() {
 
 function review(reviewCode: Extract<ObservationDecision, { state: 'review_required' }>['reviewCode']): ObservationDecision {
   return { state: 'review_required', reviewCode };
+}
+
+export function listCheckoutReconciliations(
+  actor: CheckoutActor, filters: CheckoutReconciliationFilters,
+  uow: Pick<TenantScopedUoW, 'run'> = tenantScopedUoW,
+) {
+  return uow.run(actor.companyId, async (client) => {
+    await requireCheckoutAdmin(client, actor);
+    return new PaymentCheckoutReconciliationRepositoryPg(client).list(actor.companyId, filters);
+  });
 }
 
 export class PaymentCheckoutReconciliationService {

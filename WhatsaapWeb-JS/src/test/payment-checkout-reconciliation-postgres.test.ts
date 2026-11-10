@@ -4,9 +4,14 @@ import { randomInt, randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { test } from 'node:test';
+import express from 'express';
 import { Pool } from 'pg';
 import { TenantScopedUoW } from '../db/TenantScopedUoW';
+import { requireJwt } from '../middleware/jwtAuth';
+import { DashboardRepositoryPg } from '../modules/dashboard/infra/db/DashboardRepositoryPg';
 import { OrderRepositoryPg } from '../modules/orders';
+import createPaymentRoutes from '../routes/paymentRoutes';
+import { createTestJwt } from './fixtures/authFixtures';
 import type { Queryable } from '../shared/UnitOfWorkPort';
 import {
   PaymentCheckoutDispatchService, PaymentCheckoutIntentService, PaymentCheckoutReconciliationService, PaymentRepositoryPg,
@@ -132,6 +137,22 @@ test('reconciles only verified checkout observations and settles once under tena
     async (scope) => scope.companyId === companyId && scope.gatewayId === String(gatewayId)
       ? { ...scope, sellerId, accessToken: 'fixture-access-token' } : null,
   );
+  const app = express();
+  app.use('/api/payments', requireJwt, createPaymentRoutes(db));
+  app.use(require('../middleware/errorHandler').errorHandler);
+  const http = app.listen(0, '127.0.0.1');
+  await once(http, 'listening');
+  t.after(() => new Promise<void>((resolve) => http.close(() => resolve())));
+  const appAddress = http.address();
+  assert.ok(appAddress && typeof appAddress !== 'string');
+  const api = (path: string, token?: string) => fetch(`http://127.0.0.1:${appAddress.port}/api/payments${path}`, {
+    headers: token ? { authorization: `Bearer ${token}` } : {},
+  });
+  const token = (tenantId: number, userId: number, rol = 'ADMIN') =>
+    createTestJwt({ companyId: tenantId, userId, rol }, process.env.JWT_SECRET);
+  const adminToken = token(companyId, actor.actorUserId);
+  const ledgerPath = '/mercadopago-reconciliations';
+
   const dispatcher = new PaymentCheckoutDispatchService(adapter, uow);
   const reconciliation = new PaymentCheckoutReconciliationService(adapter, uow);
   let chatSequence = 0;
@@ -203,6 +224,13 @@ test('reconciles only verified checkout observations and settles once under tena
       source: 'mercadopago_orders', intentId: checkout.id, providerOrderId: checkout.providerId, amount: '0.40', currency: 'PEN',
     }]);
     assert.equal((await observe(checkout.id)).settledAt?.getTime(), settled.settledAt.getTime());
+    const manualList = await api(`?orderId=${checkout.orderId}`, adminToken);
+    assert.equal(manualList.status, 200);
+    assert.deepEqual((await manualList.json()).data.rows, []);
+    const pendingCount = await api('/pending/count', adminToken);
+    assert.equal(pendingCount.status, 200);
+    assert.equal((await pendingCount.json()).data.count, 0);
+    assert.equal((await new DashboardRepositoryPg(db).getActionCards(companyId)).pendingPaymentsCount, 0);
     assert.equal((await settlementActions(checkout.orderId)).length, 1);
     await assert.rejects(createVoucher(checkout.orderId), { statusCode: 409, code: 'ORDER_PAYMENT_ALREADY_SETTLED' });
     await assert.rejects(uow.run(companyId, (sql) => sql.query(`
@@ -302,5 +330,36 @@ test('reconciles only verified checkout observations and settles once under tena
     assert.equal((await observe(expired.id)).reviewCode, 'checkout_expired');
     assert.equal((await orders.get(companyId, expired.orderId))?.status, 'cancelled');
     assert.equal((await settlementActions(expired.orderId)).length, 0);
+  });
+
+  await t.test('serves a scoped, read-only ledger with order filter, cursor and sanitized rows', async () => {
+    const first = await api(`${ledgerPath}?limit=1`, adminToken);
+    assert.equal(first.status, 200);
+    assert.equal(first.headers.get('cache-control'), 'no-store');
+    const page = (await first.json()).data;
+    assert.equal(page.rows.length, 1);
+    assert.equal(page.nextBeforeOrderId, page.rows[0].orderId);
+    assert.deepEqual(Object.keys(page.rows[0]).sort(), [
+      'amountPaid', 'currency', 'expectedAmount', 'observedAt', 'orderId', 'providerOrderId', 'reviewCode', 'settledAt', 'state',
+    ]);
+    const next = await api(`${ledgerPath}?limit=1&beforeOrderId=${page.nextBeforeOrderId}`, adminToken);
+    assert.equal(next.status, 200);
+    const second = (await next.json()).data.rows[0];
+    assert.ok(BigInt(second.orderId) < BigInt(page.rows[0].orderId));
+    const orderPath = `${ledgerPath}?orderId=${second.orderId}`;
+    const exact = await api(orderPath, adminToken);
+    assert.equal(exact.status, 200);
+    assert.deepEqual((await exact.json()).data, { rows: [second], nextBeforeOrderId: null });
+
+    const otherToken = token(companyId + 1, actorIds.get(companyId + 1)!);
+    const inaccessible = await api(orderPath, otherToken);
+    assert.equal(inaccessible.status, 200);
+    assert.deepEqual((await inaccessible.json()).data, { rows: [], nextBeforeOrderId: null });
+    assert.equal((await api(orderPath)).status, 401);
+    assert.equal((await api(orderPath, token(companyId, actor.actorUserId, 'EMPLEADO'))).status, 403);
+    assert.equal((await api(orderPath, token(companyId, actorIds.get(companyId + 1)!))).status, 403);
+    for (const invalidQuery of ['orderId=0', 'orderId=1e3', 'beforeOrderId=9223372036854775808', 'limit=101', 'limit=1&limit=2']) {
+      assert.equal((await api(`${ledgerPath}?${invalidQuery}`, adminToken)).status, 400);
+    }
   });
 });

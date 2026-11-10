@@ -15,6 +15,15 @@ export type CheckoutReconciliation = {
 export type ObservationDecision = { state: Exclude<ObservationState, 'review_required'> } |
   { state: 'review_required'; reviewCode: ReviewCode };
 
+export type CheckoutReconciliationRow = Pick<CheckoutReconciliation,
+  'state' | 'amountPaid' | 'observedAt' | 'settledAt' | 'reviewCode'> & {
+  orderId: string;
+  providerOrderId: string | null;
+  expectedAmount: string;
+  currency: 'PEN';
+};
+export type CheckoutReconciliationFilters = { orderId: string | null; beforeOrderId: string | null; limit: number };
+
 const columns = `
   state, amount_paid::text AS "amountPaid", provider_status AS "providerStatus",
   provider_status_detail AS "providerStatusDetail", observed_at AS "observedAt",
@@ -23,6 +32,25 @@ const columns = `
 
 export class PaymentCheckoutReconciliationRepositoryPg {
   constructor(private readonly db: Queryable) {}
+
+  async list(companyId: number, filters: CheckoutReconciliationFilters) {
+    const { rows } = await this.db.query(`
+      SELECT d.order_id::text AS "orderId", d.provider_order_id AS "providerOrderId",
+             i.amount::text AS "expectedAmount", i.currency,
+             r.state, r.amount_paid::text AS "amountPaid", r.observed_at AS "observedAt",
+             r.settled_at AS "settledAt", r.review_code AS "reviewCode"
+      FROM payment_checkout_dispatches d
+      JOIN payment_checkout_reconciliations r USING (company_id, intent_id)
+      JOIN payment_checkout_intents i ON i.company_id = d.company_id AND i.id = d.intent_id
+      WHERE d.company_id = $1
+        AND ($2::bigint IS NULL OR d.order_id = $2)
+        AND ($3::bigint IS NULL OR d.order_id < $3)
+      ORDER BY d.order_id DESC
+      LIMIT $4
+    `, [companyId, filters.orderId, filters.beforeOrderId, filters.limit + 1]);
+    const visible = rows.slice(0, filters.limit) as CheckoutReconciliationRow[];
+    return { rows: visible, nextBeforeOrderId: rows.length > filters.limit ? visible[visible.length - 1].orderId : null };
+  }
 
   async begin(companyId: number, intentId: string): Promise<number> {
     const { rows: [row] } = await this.db.query(`

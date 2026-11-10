@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { isAxiosError } from 'axios';
 import { Link } from 'react-router-dom';
+import MercadoPagoReconciliationPanel from '../components/MercadoPagoReconciliationPanel';
 import { CheckCircle2, ExternalLink, FileText, Image as ImageIcon, Loader2, XCircle } from 'lucide-react';
 import {
   type PaymentMethod,
@@ -231,7 +232,7 @@ export default function PaymentsPage() {
             <p className="text-sm font-semibold uppercase text-[#128C7E]">Operaciones</p>
             <h2 className="mt-1 text-3xl font-bold text-[#10231C]">Validar Pagos</h2>
             <p className="mt-2 text-sm text-[#5B6F66]">
-              Proceso de cobro IA y comprobantes · {total} {total === 1 ? 'caso' : 'casos'}
+              Cobros y comprobantes manuales · {total} {total === 1 ? 'caso' : 'casos'}
             </p>
           </div>
 
@@ -262,7 +263,9 @@ export default function PaymentsPage() {
           </div>
         </section>
 
-        <section className="overflow-hidden rounded-2xl border border-[#D9E5DF] bg-white shadow-sm">
+        <MercadoPagoReconciliationPanel />
+
+        <section aria-label="Comprobantes manuales" className="overflow-hidden rounded-2xl border border-[#D9E5DF] bg-white shadow-sm">
           {loadState === 'loading' && rows.length === 0 ? (
             <div className="flex h-48 items-center justify-center text-[#5B6F66]">
               <Loader2 className="h-6 w-6 animate-spin text-[#128C7E]" />

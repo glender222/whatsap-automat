@@ -24,6 +24,12 @@ function rethrowVoucherWriteError(error: unknown): never {
   throw error;
 }
 
+const settledOnlineCheckout = `EXISTS (
+  SELECT 1 FROM payment_checkout_dispatches d
+  JOIN payment_checkout_reconciliations r USING (company_id, intent_id)
+  WHERE d.company_id = o.company_id AND d.order_id = o.id AND r.settled_at IS NOT NULL
+)`;
+
 export class PaymentRepositoryPg {
   constructor(private readonly pool: Queryable) {}
 
@@ -38,6 +44,7 @@ export class PaymentRepositoryPg {
       "o.order_type = 'commercial'",
       `(o.status IN ('draft','quoted','pending_handoff','pending_approval','confirmed')
         OR o.reservation_expires_at IS NOT NULL OR (o.reservation_expired_at IS NOT NULL AND last_voucher.id IS NOT NULL))`,
+      `(last_voucher.id IS NOT NULL OR NOT ${settledOnlineCheckout})`,
       `EXISTS (
          SELECT 1 FROM order_items oi
          WHERE oi.company_id = o.company_id AND oi.order_id = o.id
@@ -204,6 +211,7 @@ export class PaymentRepositoryPg {
              SELECT 1 FROM order_items oi
              WHERE oi.company_id = o.company_id AND oi.order_id = o.id
            )
+           AND NOT ${settledOnlineCheckout}
            AND NOT EXISTS (
              SELECT 1 FROM payment_vouchers pv
              WHERE pv.company_id = o.company_id
