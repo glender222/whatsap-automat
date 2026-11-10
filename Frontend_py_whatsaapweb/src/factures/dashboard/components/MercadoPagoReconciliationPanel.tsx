@@ -44,18 +44,26 @@ const lookupErrors: Record<string, string> = {
   CHECKOUT_INPUT_INVALID: 'Verifica el ID de la orden de Mercado Pago.',
 };
 
-type LookupNotice = { kind: 'error' | 'success'; message: string };
+type LookupNotice = { kind: 'error'; message: string; observedAt: string | null } | { kind: 'success'; message: string };
 
-function LedgerLookup({ orderId, intentId, onObserved }: {
-  orderId: string; intentId: string; onObserved: (observation: MercadoPagoObservation) => void;
+function LedgerLookup({ orderId, intentId, observedAt, onObserved }: {
+  orderId: string; intentId: string; observedAt: string | null; onObserved: (observation: MercadoPagoObservation) => void;
 }) {
   const [checking, setChecking] = useState(false);
   const [notice, setNotice] = useState<LookupNotice>();
   const [showCandidate, setShowCandidate] = useState(false);
   const [candidate, setCandidate] = useState('');
   const request = useRef<AbortController | null>(null);
+  const candidateInput = useRef<HTMLInputElement>(null);
+  const lookupButton = useRef<HTMLButtonElement>(null);
+  const wasCandidateVisible = useRef(false);
 
   useEffect(() => () => request.current?.abort(), []);
+  useEffect(() => {
+    if (showCandidate) candidateInput.current?.focus();
+    else if (wasCandidateVisible.current) lookupButton.current?.focus();
+    wasCandidateVisible.current = showCandidate;
+  }, [showCandidate]);
 
   const reconcile = async (providerOrderId?: string) => {
     if (request.current) return;
@@ -78,7 +86,7 @@ function LedgerLookup({ orderId, intentId, onObserved }: {
       const message = (code && lookupErrors[code]) || (response?.status === 403
         ? 'Solo administradores activos pueden conciliar el pedido.'
         : 'No se pudo conciliar el pedido. Actualiza los registros antes de volver a consultar.');
-      setNotice({ kind: 'error', message });
+      setNotice({ kind: 'error', message, observedAt });
     } finally {
       request.current = null;
       if (!controller.signal.aborted) setChecking(false);
@@ -88,7 +96,7 @@ function LedgerLookup({ orderId, intentId, onObserved }: {
   return (
     <div className="space-y-2 sm:col-span-2 lg:col-span-3">
       {!showCandidate ? (
-        <button type="button" className="admin-button-secondary" disabled={checking}
+        <button ref={lookupButton} type="button" className="admin-button-secondary" disabled={checking}
           aria-label={`Consultar y conciliar el pedido #${orderId}`}
           aria-describedby="mercadopago-reconciliation-effect" onClick={() => void reconcile()}>
           Consultar y conciliar
@@ -100,7 +108,7 @@ function LedgerLookup({ orderId, intentId, onObserved }: {
         }}>
           <label className="flex min-w-0 flex-col gap-1 text-sm font-semibold text-primary">
             ID de la orden de Mercado Pago
-            <input className="admin-control" type="text" value={candidate} onChange={(event) => setCandidate(event.target.value)}
+            <input ref={candidateInput} className="admin-control" type="text" value={candidate} onChange={(event) => setCandidate(event.target.value)}
               required maxLength={32} pattern={providerIdPattern} disabled={checking} spellCheck={false} />
           </label>
           <button type="submit" className="admin-button-secondary" disabled={checking}
@@ -114,7 +122,7 @@ function LedgerLookup({ orderId, intentId, onObserved }: {
       )}
       {checking && <p role="status" className="text-sm text-secondary">Consultando a Mercado Pago…</p>}
       {notice?.kind === 'success' && <p role="status" className="text-sm font-medium text-emerald-800 dark:text-emerald-300">{notice.message}</p>}
-      {notice?.kind === 'error' && <p role="alert" className="text-sm font-medium text-red-700 dark:text-red-300">{notice.message}</p>}
+      {notice?.kind === 'error' && notice.observedAt === observedAt && <p role="alert" className="text-sm font-medium text-red-700 dark:text-red-300">{notice.message}</p>}
     </div>
   );
 }
@@ -157,7 +165,7 @@ function LedgerRow({ row, canReconcile, onObserved }: {
         </div>
       </dl>
       {canReconcile && row.intentId && <LedgerLookup key={row.intentId} orderId={row.orderId} intentId={row.intentId}
-        onObserved={onObserved} />}
+        observedAt={row.observedAt} onObserved={onObserved} />}
     </li>
   );
 }
