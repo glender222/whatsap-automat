@@ -221,6 +221,13 @@ El ejemplo inicial del editor validaba estructura, pero no preparaba el modelo n
 - **Después.** La pestaña conserva solo el identificador y el plazo del intento por usuario, empresa, revisión y modo. Studio pide reintroducir el mismo texto y reutiliza ese identificador. La nueva ejecución es una acción explícita que prepara el formulario y devuelve el foco al campo. Las solicitudes del panel también se vinculan a la sesión que abrió Studio.
 - **Validación.** Chromium dejó que la API completara el intento de Alfa y descartó su respuesta. Tras recargar, Alfa reenvió el mismo identificador y la API devolvió `not_dispatched`. El texto no quedó en el almacenamiento de la pestaña y la interfaz de Bravo no mostró ese intento. La reserva de cuota conserva la evidencia del despacho. La salida de texto original solo está disponible si su primera respuesta llega al navegador.
 
+## IA-10. Revisión publicada de texto en el runtime de WhatsApp
+
+- **Antes.** Alfa podía ejecutar el modelo estricto con cuota, pero el siguiente mensaje de WhatsApp terminaba omitido. Bravo seguía por el runtime anterior.
+- **Después.** Un administrador fija explícitamente una revisión y huella. El runtime liga el trabajo entrante al intento del modelo y confirma cuota y salida cifrada en la misma transacción. Si se interrumpe la entrega, recupera la salida confirmada sin repetir la inferencia. Si falta confirmación, conserva la incertidumbre. Antes de entregar vuelve a comprobar el vínculo, el modo y el control de la conversación.
+- **Validación.** Pasaron 28 pruebas PostgreSQL de cuota, pin, API y worker. Con Chromium y proveedores locales, Alfa vinculó la revisión, recibió un mensaje firmado y vio una sola notificación Socket.IO sin texto. La sugerencia se recuperó después de recargar y se copió al borrador sin enviar a Graph. Bravo recibió un mensaje con el mismo identificador externo y no recibió esa sugerencia ni notificación. Un cambio administrativo concurrente protegió la vinculación de un retiro obsoleto.
+- **Alcance.** El perfil admite una llamada de texto. Los perfiles de router y herramientas conservan sus propios requisitos de evaluación y recuperación. [Contrato, migración y reproducción](STRICT_WHATSAPP_RUNTIME.md).
+
 ## WF-01. Ingreso mientras se revierte una revisión publicada
 
 - **Antes.** CI devolvió `WORKFLOW_NOT_PUBLISHED` durante una reversión válida. La regresión local mantuvo la reversión abierta hasta observar en PostgreSQL que un webhook esperaba su bloqueo. El ingreso falló al intentar fijar la revisión mediante una consulta que también bloqueaba la definición.
@@ -232,5 +239,5 @@ El ejemplo inicial del editor validaba estructura, pero no preparaba el modelo n
 | --- | --- |
 | Bandeja en tiempo real | Filtro por etiqueta, reconexión, reorden de webhooks e historial paginado cubiertos en MSG-04 y MSG-05. |
 | Envío y recepción | MSG-06 y MSG-07 cubren envíos humanos y automáticos, adjuntos, entrega incierta y recuperación tras reinicio con Graph local. Falta el recorrido en navegador con dos líneas Meta reales. |
-| Harness IA | IA-03 a IA-06 cubren Studio y su cuota. IA-07 e IA-08 cubren autorización de derivaciones y reclamo de efectos del broker. Faltan el piloto con proveedor real, la admisión estricta en el runtime con herramientas y la conciliación de efectos por proveedor. |
+| Harness IA | IA-03 a IA-10 cubren Studio, cuota, autorización de derivaciones, reclamo de efectos y el perfil de texto del runtime estricto de WhatsApp. Faltan el piloto con proveedor real, los perfiles estrictos de router y herramientas y la conciliación de efectos por proveedor. |
 | Flujo operativo y navegación | UX-07 a UX-10 cubren conversación, pedido, pago y regreso, aprobación, conexión y conciliación desde navegador con el proveedor local. Falta el ensayo con una cuenta autorizada de Mercado Pago y la validación independiente del candidato completo. |

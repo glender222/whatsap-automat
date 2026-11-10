@@ -76,4 +76,6 @@ npm test
 
 La suite de almacenamiento cubre pin exacto/CAS, preparación concurrente, rollback de cuota y salida, aislamiento, TTL y sugerencias. La suite HTTP cubre autorización, validación, cambio explícito y conflicto administrativo. La integración ejecuta WhatsApp, el worker y PostgreSQL reales con transporte sintético para comprobar que el runtime strict no usa el router o proveedor anterior.
 
+El recorrido de Chromium vincula una revisión desde Studio, entrega un webhook firmado, comprueba la notificación en la Bandeja y recupera la sugerencia tras recargar. El operador copia el texto a su borrador sin generar un envío de WhatsApp. La prueba también comprueba la segunda empresa y un conflicto administrativo. [Entorno y comando de navegador](AI_PROVIDER_ADMISSION.md).
+
 Validación del corte (2026-11-10): 28 pruebas PostgreSQL conjuntas, incluyendo `ai-quota-reservations-postgres.test.ts`; 22 pruebas existentes de `meta-inbound-work-postgres.test.ts` en otra base local; typecheck de producción y de los tres archivos nuevos de pruebas; build. La recuperación de un checkpoint anterior mientras un turno posterior tiene lease vigente, y la variante con lease de preparación vencido, primero fallaron con `23505 / uq_meta_inbound_active_conversation`; ambas pasan y verifican progreso sin respuesta antigua ni llamadas adicionales al proveedor.
