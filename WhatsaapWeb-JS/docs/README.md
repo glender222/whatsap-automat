@@ -10,6 +10,7 @@ Estos archivos deben mantenerse vivos durante todo el proyecto:
 - `current-state.md`: estado actual del proyecto, sprint activo, sprint cerrado más reciente y foco inmediato.
 - `specs/catalogo-comercial-inventario.md`: especificación del catálogo comercial operable por IA para productos, servicios, cursos, suscripciones y ofertas vendibles.
 - [Lista de cobros y comprobantes](payments-list.md): contrato de filtros, totales y paginación de pagos manuales.
+- [Efectos durables del broker](tool-effect-claims.md): reclamaciones, incertidumbre y conciliación de herramientas mutativas.
 
 ## Mercado Pago
 

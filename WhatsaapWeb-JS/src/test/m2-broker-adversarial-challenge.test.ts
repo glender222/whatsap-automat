@@ -4,7 +4,7 @@ process.env.DB_PASSWORD = 'test-only-database-password';
 
 import assert from 'node:assert/strict';
 import { describe, it, beforeEach } from 'node:test';
-const { createBrokerFixtureRegistry } = require('./fixtures/brokerTools') as typeof import('./fixtures/brokerTools');
+const { createBrokerFixtureRegistry, createBrokerFixtureEffectCache } = require('./fixtures/brokerTools') as typeof import('./fixtures/brokerTools');
 const {
   ToolBroker,
   ToolRegistry,
@@ -257,7 +257,7 @@ describe('PR-F5-02 Empirical Adversarial Stress Challenge Suite', () => {
   let registry: ToolRegistry;
   let hitlService: HitlApprovalService;
   let casService: ConversationCasService;
-  let effectCache: EffectCache;
+  let effectCache: ReturnType<typeof createBrokerFixtureEffectCache>;
   let broker: ToolBroker;
 
   beforeEach(() => {
@@ -265,7 +265,7 @@ describe('PR-F5-02 Empirical Adversarial Stress Challenge Suite', () => {
     registry = createBrokerFixtureRegistry(mockUow);
     hitlService = new HitlApprovalService(mockUow);
     casService = new ConversationCasService(mockUow);
-    effectCache = new EffectCache(mockUow);
+    effectCache = createBrokerFixtureEffectCache();
     broker = new ToolBroker({
       uow: mockUow,
       registry,

@@ -8,7 +8,7 @@ import { describe, test, beforeEach } from 'node:test';
 const jwt = require('jsonwebtoken');
 
 const createAiRoutes = require('../routes/ai.routes').default as typeof import('../routes/ai.routes').default;
-const { createBrokerFixtureRegistry } = require('./fixtures/brokerTools') as typeof import('./fixtures/brokerTools');
+const { createBrokerFixtureRegistry, createBrokerFixtureEffectCache } = require('./fixtures/brokerTools') as typeof import('./fixtures/brokerTools');
 const {
   ToolBroker,
   ToolRegistry,
@@ -281,7 +281,7 @@ describe('PR-F5-02: AI ToolBroker Express Routes Integration (/api/v1/ai/tools &
     registry = createBrokerFixtureRegistry(mockUow);
     hitlService = new HitlApprovalService(mockUow);
     casService = new ConversationCasService(mockUow);
-    effectCache = new EffectCache(mockUow);
+    effectCache = createBrokerFixtureEffectCache();
     broker = new ToolBroker({
       uow: mockUow,
       registry,

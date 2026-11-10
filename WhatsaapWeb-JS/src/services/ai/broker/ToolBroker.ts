@@ -12,13 +12,15 @@ import { EffectCache } from './EffectCache';
 import { ConversationCasService } from '../../conversations/ConversationCasService';
 import { TenantScopedUoW, tenantScopedUoW } from '../../../db/TenantScopedUoW';
 
+export type BrokerEffectStore = Pick<EffectCache, 'claim' | 'complete' | 'markUnknown'>;
+
 export interface ToolBrokerOptions {
   uow?: TenantScopedUoW;
   registry?: ToolRegistry;
   hitlService?: HitlApprovalService;
   casService?: ConversationCasService;
   ssrfGuard?: typeof SsrfEgressGuard;
-  effectCache?: EffectCache;
+  effectCache?: BrokerEffectStore;
 }
 
 export class ToolBroker {
@@ -27,7 +29,7 @@ export class ToolBroker {
   private readonly hitlService: HitlApprovalService;
   private readonly casService: ConversationCasService;
   private readonly ssrfGuard: typeof SsrfEgressGuard;
-  private readonly effectCache: EffectCache;
+  private readonly effectCache: BrokerEffectStore;
 
   constructor(options: ToolBrokerOptions = {}) {
     this.uow = options.uow || tenantScopedUoW;
@@ -353,15 +355,27 @@ export class ToolBroker {
     }
 
     // =========================================================================
-    // STEP 8: Idempotent Execution & Effect Key Caching
+    // STEP 8: Commit an exclusive effect claim before invoking a mutative tool.
     // =========================================================================
+    const effectFailure = (code: string, message: string): ToolExecutionResultV1 => ({
+      success: false, status: 'failed', output: null, error: { code, message },
+      durationMs: Date.now() - startTime, riskLevel, hitlRequired: false, approvalId: null, effectKey,
+    });
+    let claimToken: string | undefined;
     if (riskLevel !== 'read') {
-      const cached = await this.effectCache.get(tenantIdNum, effectKey);
-      if (cached) {
+      let claim;
+      try {
+        claim = await this.effectCache.claim(tenantIdNum, effectKey, {
+          runId: request.runId, toolName: request.toolName, actionHash: proposedActionHash,
+        }, tool.definition.timeoutMs);
+      } catch {
+        return effectFailure('EFFECT_STORE_UNAVAILABLE', 'The durable effect claim could not be confirmed; no tool was dispatched.');
+      }
+      if (claim.kind === 'cached') {
         return {
           success: true,
           status: 'cached',
-          output: cached.output,
+          output: claim.record.output,
           durationMs: Date.now() - startTime,
           riskLevel,
           hitlRequired: false,
@@ -369,9 +383,23 @@ export class ToolBroker {
           effectKey,
         };
       }
+      if (claim.kind === 'conflict') {
+        return effectFailure('EFFECT_KEY_CONFLICT', 'This effect key is bound to a different action or run.');
+      }
+      if (claim.kind === 'unbound') {
+        return effectFailure('EFFECT_LEGACY_UNBOUND', 'A historical result exists without a verified action binding; inspect it before proceeding.');
+      }
+      if (claim.kind === 'in_progress') {
+        return effectFailure('EFFECT_IN_PROGRESS', 'The effect has already been claimed and its outcome is not confirmed yet; no additional tool was dispatched.');
+      }
+      if (claim.kind === 'unknown') {
+        return effectFailure('EFFECT_OUTCOME_UNKNOWN', 'The previous effect outcome is uncertain and requires reconciliation; it will not be dispatched again.');
+      }
+      claimToken = claim.token;
     }
 
     // Execute physical tool implementation with timeout protection
+    let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
       const output = await Promise.race([
         tool.execute(request.input, {
@@ -383,22 +411,15 @@ export class ToolBroker {
           conversationId: request.conversationId,
           expectedConversationVersion: request.expectedConversationVersion,
         }),
-        new Promise((_, reject) =>
-          setTimeout(
+        new Promise((_, reject) => {
+          timeout = setTimeout(
             () => reject(new Error(`Tool execution timed out after ${tool.definition.timeoutMs}ms`)),
             tool.definition.timeoutMs
-          )
-        ),
+          );
+        }),
       ]);
 
-      if (riskLevel !== 'read') {
-        await this.effectCache.set(tenantIdNum, effectKey, {
-          runId: request.runId,
-          toolName: request.toolName,
-          status: 'executed',
-          output,
-        });
-      }
+      if (claimToken) await this.effectCache.complete(tenantIdNum, effectKey, claimToken, output);
 
       return {
         success: true,
@@ -411,6 +432,14 @@ export class ToolBroker {
         effectKey,
       };
     } catch (err: any) {
+      if (claimToken) {
+        // A timeout does not cancel the tool; neither a thrown error nor a lost
+        // persistence acknowledgement proves the physical effect did not happen.
+        try { await this.effectCache.markUnknown(tenantIdNum, effectKey, claimToken); } catch {
+          // The committed claim still fences retries even if this diagnostic update fails.
+        }
+        return effectFailure('EFFECT_OUTCOME_UNKNOWN', 'The tool outcome could not be confirmed durably; reconcile the existing effect before proceeding.');
+      }
       return {
         success: false,
         status: 'failed',
@@ -425,6 +454,8 @@ export class ToolBroker {
         approvalId: null,
         effectKey,
       };
+    } finally {
+      clearTimeout(timeout);
     }
   }
 
