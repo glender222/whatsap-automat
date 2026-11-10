@@ -130,7 +130,7 @@ class AuthController {
   logout = asyncHandler(async (req, res) => {
     const { refreshToken } = req.body;
 
-    await AuthService.logout(req.user.userId, refreshToken);
+    await AuthService.logout(req.whatsappCompanyId, req.user.userId, refreshToken);
 
     res.json({
       success: true,

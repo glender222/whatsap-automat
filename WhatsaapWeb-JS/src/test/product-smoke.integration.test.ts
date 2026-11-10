@@ -66,15 +66,19 @@ test('real API isolates two companies through auth, signed ingress, inbox, socke
   const [first, second] = await Promise.all([1, 2].map(() => api('/api/auth/login', 200, undefined, accounts[0])));
   assert.notEqual(first.refreshToken, second.refreshToken);
   const digest = (token: string) => `sha256:${createHash('sha256').update(token).digest('hex')}`;
-  const { rows: sessions } = await pool.query<{ token: string }>(
+  const { rows: sessions } = await withTenantTransaction(owner.user.companyId, (db) => db.query(
     'SELECT token FROM refresh_tokens WHERE usuario_id = $1 ORDER BY token',
-    [owner.user.id]
-  );
+    [owner.user.id],
+  ));
   const expectedDigests = [
     digest(owner.refreshToken), digest(first.refreshToken), digest(second.refreshToken),
   ].sort();
   assert.ok(sessions.length === expectedDigests.length &&
     sessions.every(({ token }, index) => token === expectedDigests[index]), 'PostgreSQL must store only session token digests');
+  assert.equal((await pool.query('SELECT id FROM refresh_tokens WHERE usuario_id = $1', [owner.user.id])).rowCount, 0);
+  assert.equal((await withTenantTransaction(other.user.companyId, (db) => db.query(
+    'UPDATE refresh_tokens SET revocado = true WHERE usuario_id = $1 RETURNING id', [owner.user.id],
+  ))).rowCount, 0);
   const renewal = await api('/api/auth/refresh', 200, undefined, { refreshToken: first.refreshToken });
   assert.equal((await api('/api/auth/me', 200, renewal.accessToken)).companyId, owner.user.companyId);
   await api('/api/auth/logout', 200, other.accessToken, { refreshToken: first.refreshToken });
@@ -686,4 +690,37 @@ test('real API isolates two companies through auth, signed ingress, inbox, socke
   assert.equal((await remove(`${tagsRoot}/${defaultTag.id}`)).status, 400);
   assert.equal((await remove(`${tagsRoot}/${createdTag.id}`)).status, 200);
   await api(`${tagsRoot}/${createdTag.id}`, 404, owner.accessToken);
+
+  const stationPath = `/api/auth/employees/${employeeId}`;
+  const updateStation = (data: object, accessToken = owner.accessToken) => fetch(`${base}${stationPath}`, {
+    method: 'PUT', headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  const renewStation = (refreshToken: string, status: number) => api('/api/auth/refresh', status, undefined, { refreshToken });
+  assert.equal((await updateStation({ nombre: 'Operador actualizado', email: station.email })).status, 200);
+  await renewStation(stationSession.refreshToken, 200);
+  assert.equal((await updateStation({ password: randomUUID() }, other.accessToken)).status, 404);
+  await renewStation(stationSession.refreshToken, 200);
+  const nextPassword = randomUUID();
+  const [changed, concurrentLogin] = await Promise.all([
+    updateStation({ password: nextPassword }),
+    fetch(`${base}/api/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: station.email, password: tempPassword }) }),
+  ]);
+  assert.equal(changed.status, 200);
+  assert.ok([200, 401].includes(concurrentLogin.status));
+  if (concurrentLogin.ok) await renewStation((await concurrentLogin.json()).data.refreshToken, 401);
+  await renewStation(stationSession.refreshToken, 401);
+  const currentStation = await api('/api/auth/login', 200, undefined, { email: station.email, password: nextPassword });
+  await renewStation(currentStation.refreshToken, 200);
+  assert.equal((await updateStation({ email: `${randomUUID()}@example.invalid` })).status, 200);
+  assert.equal((await updateStation({ email: station.email })).status, 200);
+  await renewStation(currentStation.refreshToken, 401);
+  const lastStation = await api('/api/auth/login', 200, undefined, { email: station.email, password: nextPassword });
+  assert.equal((await remove(stationPath)).status, 200);
+  await renewStation(lastStation.refreshToken, 401);
+  const { rows: [revocations] } = await withTenantTransaction(owner.user.companyId, (db) => db.query(
+    'SELECT bool_and(revocado) AS revoked FROM refresh_tokens WHERE usuario_id = $1', [employeeId],
+  ));
+  assert.equal(revocations.revoked, true);
 });

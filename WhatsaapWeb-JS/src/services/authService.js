@@ -73,13 +73,19 @@ class AuthService {
     if (!user?.password_hash || !await comparePassword(password, user.password_hash)) {
       throw authError('Correo o contraseña incorrectos', 401);
     }
-    return issueSession(user);
+    const { companyId } = accessClaims(user);
+    return withTenantTransaction(companyId, async (client) => {
+      const current = await User.lockSessionUser(companyId, user.id, client);
+      if (current?.email !== user.email || current?.password_hash !== user.password_hash) {
+        throw authError('Correo o contraseña incorrectos', 401);
+      }
+      return issueSession(current, client);
+    });
   }
 
   static async refreshAccessToken(refreshToken) {
     const payload = typeof refreshToken === 'string' ? verifyToken(refreshToken) : null;
-    if (!payload?.userId || typeof payload.email !== 'string' ||
-        !await User.verifyRefreshToken(payload.userId, refreshToken)) {
+    if (!payload?.userId || typeof payload.email !== 'string') {
       throw authError('Refresh token inválido o expirado', 401);
     }
 
@@ -87,7 +93,14 @@ class AuthService {
     if (!user || String(user.id) !== String(payload.userId)) {
       throw authError('Refresh token inválido o expirado', 401);
     }
-    return { accessToken: generateAccessToken(accessClaims(user)) };
+    const { companyId } = accessClaims(user);
+    return withTenantTransaction(companyId, async (client) => {
+      const current = await User.lockSessionUser(companyId, user.id, client);
+      if (current?.email !== payload.email || !await User.verifyRefreshToken(user.id, refreshToken, client)) {
+        throw authError('Refresh token inválido o expirado', 401);
+      }
+      return { accessToken: generateAccessToken(accessClaims(current)) };
+    });
   }
 
   static async createStation(ownerId, nombre, email, password, companyId) {
@@ -123,11 +136,7 @@ class AuthService {
    * Actualizar estación de trabajo del administrador autenticado
    */
   static async updateEmployee(ownerId, employeeId, data, companyId) {
-    const employee = await User.findEmployeeByOwner(ownerId, employeeId, companyId);
-    if (!employee) {
-      throw new Error('Estación no encontrada o no pertenece al administrador');
-    }
-
+    data ||= {};
     const updates = {};
 
     if (typeof data.nombre === 'string') {
@@ -153,27 +162,26 @@ class AuthService {
       throw new Error('No hay datos para actualizar');
     }
 
-    return User.updateEmployeeForOwner(ownerId, employeeId, updates, companyId);
+    const employee = await User.updateEmployeeForOwner(ownerId, employeeId, updates, companyId);
+    if (!employee) throw authError('Estación no encontrada o no pertenece al administrador', 404);
+    return employee;
   }
 
   /**
    * Desactivar estación de trabajo del administrador autenticado
    */
   static async deactivateEmployee(ownerId, employeeId, companyId) {
-    const employee = await User.findEmployeeByOwner(ownerId, employeeId, companyId);
-    if (!employee) {
-      throw new Error('Estación no encontrada o no pertenece al administrador');
-    }
-
-    return User.deactivateEmployeeForOwner(ownerId, employeeId, companyId);
+    const employee = await User.deactivateEmployeeForOwner(ownerId, employeeId, companyId);
+    if (!employee) throw authError('Estación no encontrada o no pertenece al administrador', 404);
+    return employee;
   }
 
   /**
    * Logout
    */
-  static async logout(userId, refreshToken) {
+  static async logout(companyId, userId, refreshToken) {
     if (typeof refreshToken === 'string' && refreshToken) {
-      await User.revokeRefreshToken(userId, refreshToken);
+      await withTenantTransaction(companyId, (client) => User.revokeRefreshToken(userId, refreshToken, client));
     }
     return true;
   }

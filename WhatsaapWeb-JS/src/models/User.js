@@ -133,6 +133,15 @@ class User {
     });
   }
 
+  static async lockSessionUser(companyId, userId, client) {
+    const { rows: [user] } = await client.query(
+      `SELECT id, email, nombre, password_hash, rol, id_padre, company_id FROM usuarios
+       WHERE company_id = $1 AND id = $2 AND activo = true FOR SHARE`,
+      [companyId, userId],
+    );
+    return user || null;
+  }
+
   /**
    * Buscar usuario por ID
    */
@@ -162,26 +171,9 @@ class User {
   }
 
   /**
-   * Obtener un empleado específico del dueño autenticado
-   */
-  static async findEmployeeByOwner(ownerId, employeeId, companyId) {
-    const query = `
-      SELECT id, nombre, email, rol, id_padre, company_id, activo, fecha_creacion
-      FROM usuarios
-      WHERE id = $1
-        AND id_padre = $2
-        AND rol = 'EMPLEADO'
-        AND activo = true
-    `;
-
-    const result = await withTenantTransaction(companyId, (client) => client.query(query, [employeeId, ownerId]));
-    return result.rows[0] || null;
-  }
-
-  /**
    * Guardar refresh token
    */
-  static async saveRefreshToken(usuarioId, token, expiresIn, db = pool) {
+  static async saveRefreshToken(usuarioId, token, expiresIn, db) {
     const expiresAt = new Date(Date.now() + expiresIn);
     const query = `
       INSERT INTO refresh_tokens (usuario_id, token, expira_en)
@@ -196,55 +188,35 @@ class User {
   /**
    * Verificar si refresh token existe y es válido
    */
-  static async verifyRefreshToken(usuarioId, token) {
+  static async verifyRefreshToken(usuarioId, token, db) {
     const query = `
       SELECT id FROM refresh_tokens
-      WHERE usuario_id = $1 AND token = $2 AND revocado = false AND expira_en > CURRENT_TIMESTAMP
+      WHERE usuario_id = $1 AND token = $2 AND revocado = false AND expira_en > clock_timestamp()
+      FOR SHARE
     `;
     
-    const result = await pool.query(query, [usuarioId, digestRefreshToken(token)]);
+    const result = await db.query(query, [usuarioId, digestRefreshToken(token)]);
     return result.rows.length > 0;
   }
 
   /**
    * Revocar refresh token
    */
-  static async revokeRefreshToken(usuarioId, token) {
+  static async revokeRefreshToken(usuarioId, token, db) {
     const query = `
       UPDATE refresh_tokens
       SET revocado = true
       WHERE token = $1 AND usuario_id = $2
     `;
     
-    await pool.query(query, [digestRefreshToken(token), usuarioId]);
+    await db.query(query, [digestRefreshToken(token), usuarioId]);
   }
 
-  /**
-   * Actualizar usuario
-   */
-  static async update(id, data) {
-    const fields = [];
-    const values = [];
-    let paramCount = 1;
-
-    for (const [key, value] of Object.entries(data)) {
-      fields.push(`${key} = $${paramCount}`);
-      values.push(value);
-      paramCount++;
-    }
-
-    fields.push(`fecha_actualizacion = CURRENT_TIMESTAMP`);
-    values.push(id);
-
-    const query = `
-      UPDATE usuarios
-      SET ${fields.join(', ')}
-      WHERE id = $${paramCount}
-      RETURNING id, nombre, email, rol, id_padre, company_id, activo, fecha_creacion
-    `;
-
-    const result = await pool.query(query, values);
-    return result.rows[0] || null;
+  static async revokeUserSessions(userId, client) {
+    await client.query(
+      'UPDATE refresh_tokens SET revocado = true WHERE usuario_id = $1 AND revocado = false',
+      [userId],
+    );
   }
 
   /**
@@ -268,21 +240,33 @@ class User {
     }
 
     fields.push('fecha_actualizacion = CURRENT_TIMESTAMP');
-    values.push(employeeId, ownerId);
+    values.push(employeeId, ownerId, companyId);
 
     const query = `
-      UPDATE usuarios
+      WITH prior AS (
+        SELECT id, email FROM usuarios
+        WHERE id = $${paramCount} AND id_padre = $${paramCount + 1} AND company_id = $${paramCount + 2}
+          AND rol = 'EMPLEADO' AND activo = true FOR UPDATE
+      )
+      UPDATE usuarios AS employee
       SET ${fields.join(', ')}
-      WHERE id = $${paramCount}
-        AND id_padre = $${paramCount + 1}
-        AND rol = 'EMPLEADO'
-        AND activo = true
-      RETURNING id, nombre, email, rol, id_padre, company_id, activo, fecha_creacion, fecha_actualizacion
+      FROM prior
+      WHERE employee.id = prior.id
+      RETURNING employee.id, employee.nombre, employee.email, employee.rol, employee.id_padre,
+        employee.company_id, employee.activo, employee.fecha_creacion, employee.fecha_actualizacion,
+        prior.email AS previous_email
     `;
 
     try {
-      const result = await withTenantTransaction(companyId, (client) => client.query(query, values));
-      return result.rows[0] || null;
+      return await withTenantTransaction(companyId, async (client) => {
+        const { rows: [updated] } = await client.query(query, values);
+        if (!updated) return null;
+        const { previous_email, ...employee } = updated;
+        if (Object.hasOwn(data, 'password_hash') || previous_email !== employee.email) {
+          await User.revokeUserSessions(employee.id, client);
+        }
+        return employee;
+      });
     } catch (error) {
       if (error.code === '23505') {
         const err = new Error('El email ya está registrado');
@@ -294,21 +278,6 @@ class User {
   }
 
   /**
-   * Desactivar usuario
-   */
-  static async deactivate(id) {
-    const query = `
-      UPDATE usuarios
-      SET activo = false, fecha_actualizacion = CURRENT_TIMESTAMP
-      WHERE id = $1
-      RETURNING id, nombre, email, activo
-    `;
-
-    const result = await pool.query(query, [id]);
-    return result.rows[0] || null;
-  }
-
-  /**
    * Desactivar un empleado validando pertenencia al dueño
    */
   static async deactivateEmployeeForOwner(ownerId, employeeId, companyId) {
@@ -317,13 +286,18 @@ class User {
       SET activo = false, fecha_actualizacion = CURRENT_TIMESTAMP
       WHERE id = $1
         AND id_padre = $2
+        AND company_id = $3
         AND rol = 'EMPLEADO'
         AND activo = true
       RETURNING id, nombre, email, activo
     `;
 
-    const result = await withTenantTransaction(companyId, (client) => client.query(query, [employeeId, ownerId]));
-    return result.rows[0] || null;
+    return withTenantTransaction(companyId, async (client) => {
+      const { rows: [employee] } = await client.query(query, [employeeId, ownerId, companyId]);
+      if (!employee) return null;
+      await User.revokeUserSessions(employee.id, client);
+      return employee;
+    });
   }
 }
 

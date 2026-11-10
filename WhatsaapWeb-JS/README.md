@@ -331,6 +331,12 @@ Checklist de aceptación para la demo:
 - El handoff crea/reutiliza un ticket y se refleja en el frontend.
 - La respuesta aceptada por Meta deja trazabilidad de los IDs inbound/outbound sin guardar el texto completo en los logs de runtime.
 
+## Renovación de sesiones por empresa
+
+La migración 051 activa RLS en `refresh_tokens` y conserva las sesiones existentes. Registro, inicio de sesión, renovación y cierre de sesión operan dentro de la empresa. Cambiar el correo o la contraseña de una estación o desactivarla revoca sus tokens de renovación en la misma transacción. Un token de acceso ya emitido conserva su plazo de expiración.
+
+Para instalar la migración 051, drena las réplicas anteriores, aplica la migración y arranca las réplicas con el backend actualizado. Las versiones anteriores accedían a `refresh_tokens` sin el contexto que exige la nueva política.
+
 ## Reservas con plazo
 
 Aplica las migraciones antes de iniciar el backend. Desde Pedidos en la web, un operador puede reservar stock o capacidad de un prepedido durante un plazo elegido. La API acepta `PATCH /api/orders/{id}/status` con `status: "reserved"` y `reservationMinutes` entero de 1 a 10080. Repetir la reserva conserva el vencimiento original. Las reservas existentes sin plazo conservan su comportamiento.
