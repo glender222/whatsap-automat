@@ -247,6 +247,33 @@ jobs:
           npm --prefix ../Frontend_py_whatsaapweb run test:e2e -- --reporter=list,json --output "$evidence/traces"
           node -e 'const { expected, skipped } = require(process.argv[1]).stats;
             if (!expected || skipped) throw new Error(`Expected all browser tests to run. Passed: ${expected}, skipped: ${skipped}`)' "$PLAYWRIGHT_JSON_OUTPUT_FILE"
+      - name: Probar Studio con la política de proveedor y credencial por empresa
+        timeout-minutes: 3
+        env:
+          DB_NAME: whatsap_automat_browser_smoke
+          PORT: 3029
+          PRODUCT_SMOKE_URL: http://127.0.0.1:3029
+          STUDIO_FIXTURE_URL: http://127.0.0.1:3030
+          STUDIO_PROVIDER_FIXTURE: '1'
+          PLAYWRIGHT_PORT: 4180
+        run: |
+          evidence="$RUNNER_TEMP/browser-smoke/studio-provider"
+          mkdir -p "$evidence"
+          node --import tsx src/test/fixtures/browserStudio.ts > "$evidence/backend.log" 2>&1 &
+          app_pid=$!
+          trap 'kill "$app_pid" 2>/dev/null || true' EXIT
+          for attempt in {1..30}; do
+            if curl -fsS "$PRODUCT_SMOKE_URL/ready" >/dev/null 2>&1; then break; fi
+            if ! kill -0 "$app_pid" 2>/dev/null; then break; fi
+            sleep 1
+          done
+          curl -fsS "$PRODUCT_SMOKE_URL/ready"
+          curl -fsS "$STUDIO_FIXTURE_URL/health"
+          export PLAYWRIGHT_JSON_OUTPUT_FILE="$evidence/results.json"
+          npm --prefix ../Frontend_py_whatsaapweb run test:e2e -- e2e/agent-studio.integration.spec.ts \
+            -g 'provider mode' --reporter=list,json --output "$evidence/traces"
+          node -e 'const { expected, skipped } = require(process.argv[1]).stats;
+            if (expected !== 1 || skipped) throw new Error("Provider browser test did not pass")' "$PLAYWRIGHT_JSON_OUTPUT_FILE"
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
