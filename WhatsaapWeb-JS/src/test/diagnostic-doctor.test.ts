@@ -15,6 +15,11 @@ import {
   DiagnosticReport,
 } from '../services/diagnostics/DiagnosticDoctor';
 
+function diskStats(availableMb: number): fs.StatsFs {
+  const blocks = availableMb * 256;
+  return { type: 0, bsize: 4096, blocks: 8192 * 256, bfree: blocks, bavail: blocks, files: 100, ffree: 100 };
+}
+
 describe('Phase F8 SRE DiagnosticDoctor Engine', () => {
   let tempMigrationsDir: string;
 
@@ -62,13 +67,21 @@ describe('Phase F8 SRE DiagnosticDoctor Engine', () => {
     assert.ok(result.details.includes('--max-old-space-size'));
   });
 
-  test('4. DISK-001 verifies filesystem write capability and free space', async () => {
+  test('4. DISK-001 verifies writes and applies both free-space thresholds', async (context) => {
     const doctor = new DiagnosticDoctor({ skipDatabase: true, skipNetwork: true });
-    const result = await doctor.checkDiskWritableAndSpace();
+    let availableMb = 1024;
+    context.mock.method(fs, 'statfsSync', () => diskStats(availableMb));
 
-    assert.equal(result.code, 'DISK-001');
-    assert.equal(result.status, 'PASS');
-    assert.ok(result.details.includes('Filesystem read/write verified'));
+    const writable = await doctor.checkDiskWritableAndSpace();
+    assert.equal(writable.code, 'DISK-001');
+    assert.equal(writable.status, 'PASS');
+    assert.ok(writable.details.includes('Filesystem read/write verified'));
+    availableMb = 1023;
+    assert.equal((await doctor.checkDiskWritableAndSpace()).status, 'WARN');
+    availableMb = 100;
+    assert.equal((await doctor.checkDiskWritableAndSpace()).status, 'WARN');
+    availableMb = 99;
+    assert.equal((await doctor.checkDiskWritableAndSpace()).status, 'FAIL');
   });
 
   test('5. SEC-ENC-001 passes when MASTER_ENCRYPTION_KEY is valid 32 bytes and cipher works', async () => {
@@ -208,13 +221,15 @@ describe('Phase F8 SRE DiagnosticDoctor Engine', () => {
     assert.ok(result.remediationGuide?.includes('npm run db:migrate'));
   });
 
-  test('13. runAll aggregates summary stats and overall status accurately', async () => {
+  test('13. runAll aggregates summary stats and overall status accurately', async (context) => {
+    context.mock.method(fs, 'statfsSync', () => diskStats(800));
     const doctor = new DiagnosticDoctor({ skipDatabase: true, skipNetwork: true });
     const report: DiagnosticReport = await doctor.runAll();
 
     assert.ok(report.total >= 5);
     assert.equal(report.failed, 0);
-    assert.equal(report.overallStatus, 'PASS');
+    assert.equal(report.warnings, 1);
+    assert.equal(report.overallStatus, 'WARN');
     assert.ok(report.executionDurationMs >= 0);
     assert.ok(Array.isArray(report.checks));
   });

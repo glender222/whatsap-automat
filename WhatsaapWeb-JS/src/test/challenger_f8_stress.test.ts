@@ -561,10 +561,12 @@ describe('CHALLENGER-F8: Cryptographic & SRE Adversarial Stress Suite', () => {
       assert.ok(resultDefault.details.includes('Database connection failed') || resultDefault.details.includes('ECONNREFUSED'));
     });
 
-    test('4.5: Full diagnostic report runAll() produces clean report with zero secret leakage', async () => {
+    test('4.5: Full diagnostic report runAll() produces clean report with zero secret leakage', async (context) => {
       process.env.MASTER_ENCRYPTION_KEY = KEK_V1;
       process.env.JWT_SECRET = 'a_very_high_entropy_jwt_secret_with_more_than_32_characters_for_sre';
       delete process.env.REDIS_URL;
+      const stats = fs.statfsSync(os.tmpdir());
+      context.mock.method(fs, 'statfsSync', () => ({ ...stats, bsize: 4096, bavail: 1024 * 256 }));
 
       const doctor = new DiagnosticDoctor({ skipDatabase: true, skipNetwork: true });
       const report: DiagnosticReport = await doctor.runAll();
