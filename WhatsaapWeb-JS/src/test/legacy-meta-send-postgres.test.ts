@@ -466,6 +466,70 @@ fs.truncateSync(file, ${overLimit});
     await assertCleanUploadDir();
   });
 
+  await t.test('startup recovers a migrated encrypted environment connection without replacing manual state', async (subtest) => {
+    const defaultTenant = tenantA + 13;
+    const phoneNumberId = `${defaultTenant}85`;
+    const originalMeta = { ...config.meta };
+    const originalCompany = config.defaultCompanyId;
+    const originalCipher = config.security.tokenEncryptionKey;
+    subtest.after(() => {
+      Object.assign(config.meta, originalMeta);
+      config.defaultCompanyId = originalCompany;
+      config.security.tokenEncryptionKey = originalCipher;
+    });
+
+    config.defaultCompanyId = defaultTenant;
+    const cipher = 'test-only-meta-credential-cipher-key';
+    config.security.tokenEncryptionKey = cipher;
+    Object.assign(config.meta, {
+      phoneNumberId, accessToken: 'test-only-legacy-env-credential', graphVersion: 'v25.0',
+    });
+    await uow.run(defaultTenant, (client) => client.query(
+      "INSERT INTO companies (id, name) VALUES ($1, 'Encrypted environment fixture')", [defaultTenant],
+    ));
+
+    const account = async () => (await uow.run(defaultTenant, (client) => client.query(`
+      SELECT status, metadata_json ->> 'source' AS source, access_token_encrypted IS NOT NULL AS encrypted
+      FROM whatsapp_business_accounts WHERE company_id = $1 AND phone_number_id = $2
+    `, [defaultTenant, phoneNumberId]))).rows[0];
+    const requireVerification = () => uow.run(defaultTenant, (client) => client.query(`
+      UPDATE whatsapp_business_accounts SET status = 'verification_required'
+      WHERE company_id = $1 AND phone_number_id = $2
+    `, [defaultTenant, phoneNumberId]));
+
+    await new WhatsApp().initialize();
+    assert.deepEqual(await account(), { status: 'connected', source: 'env', encrypted: true });
+    // Reproduce the state left by 055 for an encrypted row with no prior diagnosis.
+    await requireVerification();
+    config.security.tokenEncryptionKey = '';
+    const withoutCipher = new WhatsApp();
+    await withoutCipher.initialize();
+    assert.deepEqual(await account(), { status: 'verification_required', source: 'env', encrypted: true });
+    assert.equal(await withoutCipher.metaAccountStore!.findByPhoneNumberId(phoneNumberId), null);
+
+    config.security.tokenEncryptionKey = cipher;
+    config.meta.accessToken = 'test-only-current-env-credential';
+    const restored = new WhatsApp();
+    await restored.initialize();
+    assert.deepEqual(await account(), { status: 'connected', source: 'env', encrypted: true });
+    assert.deepEqual(await restored.metaAccountStore!.findByPhoneNumberId(phoneNumberId), { company_id: defaultTenant });
+    const stored = await restored.metaAccountStore!.getAccountForCompany(defaultTenant);
+    assert.equal(restored.metaAccountStore!.toClientConfig(stored)?.accessToken, config.meta.accessToken);
+
+    await restored.metaAccountStore!.upsertConnection(defaultTenant, {
+      phoneNumberId, accessToken: 'test-only-manual-credential', metadata: { source: 'manual_settings' },
+    });
+    await requireVerification();
+    await new WhatsApp().initialize();
+    assert.deepEqual(await account(), { status: 'verification_required', source: 'manual_settings', encrypted: true });
+    assert.equal(await restored.metaAccountStore!.findByPhoneNumberId(phoneNumberId), null);
+
+    await restored.logout(defaultTenant);
+    await new WhatsApp().initialize();
+    assert.equal((await account()).status, 'disconnected');
+    assert.equal(await restored.metaAccountStore!.findByPhoneNumberId(phoneNumberId), null);
+  });
+
   await t.test('disconnect revokes environment access across reads and restart until explicit reconnection', async (subtest) => {
     const defaultTenant = tenantA + 10;
     const envPhoneId = `${defaultTenant}81`;

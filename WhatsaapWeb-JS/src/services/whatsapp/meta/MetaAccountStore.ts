@@ -159,8 +159,13 @@ export class MetaAccountStore {
        )) OR (
          $15::boolean AND whatsapp_business_accounts.status IN ('connected', 'configured', 'missing_token', 'verification_required')
          AND whatsapp_business_accounts.disconnected_at IS NULL
-         AND whatsapp_business_accounts.access_token_encrypted IS NULL
          AND whatsapp_business_accounts.metadata_json ->> 'source' = 'env'
+         AND (
+           whatsapp_business_accounts.access_token_encrypted IS NULL OR (
+             whatsapp_business_accounts.status = 'verification_required'
+             AND EXCLUDED.access_token_encrypted IS NOT NULL
+           )
+         )
        )
        RETURNING *`,
       [
