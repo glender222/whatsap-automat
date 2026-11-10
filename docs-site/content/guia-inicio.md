@@ -1,5 +1,7 @@
 # Guía de inicio de Whatsap-Automat
 
+Esta guía describe el candidato v0.4 probado en QA. Su publicación en GitHub está pendiente. Los pasos de instalación se aplican a la revisión que contiene los contratos adjuntos.
+
 ## Requisitos
 
 - Una cuenta con acceso de lectura a `glender222/whatsap-automat` en GitHub.
