@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { ArrowLeft, LockKeyhole, RefreshCw } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import {
-  approvalDate, approvalHttpStatus, approvalProblem, approvalsPath, approvalStatuses, currentApprovalSession,
+  approvalDate, approvalHttpStatus, approvalProblem, approvalStatuses, currentApprovalSession,
   decideApproval, isSensitiveApproval, readApproval, riskLabels, type Approval, type Decision, type DecisionIntent,
 } from './approvalApi';
 
@@ -102,8 +102,8 @@ function DecisionDialog({ approval, confirmation, onCancel, onConfirm }: {
   );
 }
 
-export default function ApprovalDetail({ id, tenantId, session, canReauthenticate }: {
-  id: string; tenantId: string; session: string; canReauthenticate: boolean;
+export default function ApprovalDetail({ id, tenantId, session, canReauthenticate, queueLocation }: {
+  id: string; tenantId: string; session: string; canReauthenticate: boolean; queueLocation: string;
 }) {
   const [approval, setApproval] = useState<Approval>();
   const [loading, setLoading] = useState(true);
@@ -112,12 +112,13 @@ export default function ApprovalDetail({ id, tenantId, session, canReauthenticat
   const [confirmation, setConfirmation] = useState<Confirmation>();
   const [attempt, setAttempt] = useState(() => scopedAttempts(session)?.get(id));
   const [working, setWorking] = useState(false);
+  const [deadlineReached, setDeadlineReached] = useState(false);
   const request = useRef<AbortController>(null);
   const lock = useRef(false);
   const mounted = useRef(false);
   const heading = useRef<HTMLHeadingElement>(null);
   const sensitive = approval ? isSensitiveApproval(approval.risk) : false;
-  const canReview = approval?.status === 'pending' && !loading && !loadError && !working && (!sensitive || canReauthenticate);
+  const canReview = approval?.status === 'pending' && !deadlineReached && !loading && !loadError && !working && (!sensitive || canReauthenticate);
 
   const forget = useCallback((intent: DecisionIntent) => {
     const scope = scopedAttempts(session);
@@ -170,9 +171,43 @@ export default function ApprovalDetail({ id, tenantId, session, canReauthenticat
     if (approval) heading.current?.focus();
   }, [approval]);
 
+  const expiresAt = approval?.expiresAt;
+  const status = approval?.status;
+  useEffect(() => {
+    if (!expiresAt || status !== 'pending') {
+      setDeadlineReached(false);
+      return;
+    }
+    const deadline = Date.parse(expiresAt);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    function checkDeadline() {
+      const remaining = deadline - Date.now();
+      if (remaining > 0) {
+        setDeadlineReached(false);
+        timer = setTimeout(checkDeadline, Math.min(remaining, 2_147_483_647));
+        return;
+      }
+      setDeadlineReached(true);
+      setConfirmation(undefined);
+      if (!lock.current) void refresh();
+    }
+    checkDeadline();
+    return () => clearTimeout(timer);
+  }, [expiresAt, status, refresh]);
+
+  useEffect(() => {
+    if (deadlineReached) heading.current?.focus();
+  }, [deadlineReached]);
+
   async function submit(intent: DecisionIntent, password?: string) {
     if (!canReview || !approval || lock.current || currentApprovalSession() !== session ||
         intent.expectedVersion !== approval.policyVersion || (sensitive && !password)) return;
+    if (Date.parse(approval.expiresAt) <= Date.now()) {
+      setDeadlineReached(true);
+      setConfirmation(undefined);
+      void refresh();
+      return;
+    }
     lock.current = true;
     setConfirmation(undefined);
     setWorking(true);
@@ -214,11 +249,14 @@ export default function ApprovalDetail({ id, tenantId, session, canReauthenticat
 
   return (
     <div className="space-y-4">
-      <Link to={approvalsPath} className={secondary}><ArrowLeft size={16} aria-hidden="true" /> Volver a la cola</Link>
+      <Link to={queueLocation} state={{ focusApprovalId: id }} className={secondary}><ArrowLeft size={16} aria-hidden="true" /> Volver a la cola</Link>
       {loadError && <p role="alert" className={panel + ' text-sm text-red-800 dark:text-red-300'}>{loadError}</p>}
       {notice && <p role={notice.tone === 'success' ? 'status' : 'alert'}
         className={panel + (notice.tone === 'success' ? ' text-sm text-emerald-800 dark:text-emerald-300' : ' text-sm text-amber-900 dark:text-amber-200')}>{notice.message}</p>}
       {loading && !approval && <p role="status" className={subtext}>Cargando solicitud…</p>}
+      {deadlineReached && approval?.status === 'pending' && <p role="status" className={subtext}>
+        Se alcanzó el vencimiento. Consulta el estado del servidor antes de continuar.
+      </p>}
       {approval && (
         <>
           <header className="space-y-1">
@@ -242,7 +280,7 @@ export default function ApprovalDetail({ id, tenantId, session, canReauthenticat
         </>
       )}
       <div className="flex flex-wrap gap-2">
-        <button type="button" onClick={() => void refresh()} disabled={loading || working} className={secondary}>
+        <button type="button" onClick={() => { setNotice(undefined); void refresh(); }} disabled={loading || working} className={secondary}>
           <RefreshCw size={16} aria-hidden="true" /> Actualizar estado
         </button>
         {approval && canReview && !attempt && (['approved', 'rejected'] as const).map((decision) => (

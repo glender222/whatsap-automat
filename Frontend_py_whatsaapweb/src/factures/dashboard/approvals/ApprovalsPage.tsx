@@ -1,10 +1,11 @@
 import { subscribeSession } from '../../../shared/auth/session';
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { ClipboardCheck, RefreshCw } from 'lucide-react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useLocation, useParams, useSearchParams } from 'react-router-dom';
 import ApprovalDetail from './ApprovalDetail';
+import { approvalLocation, approvalQueueParams, readApprovalQueue, type ApprovalQueueQuery } from './approvalNavigation';
 import {
-  approvalDate, approvalIdPattern, approvalPageSize, approvalProblem, approvalsPath, currentApprovalSession,
+  approvalDate, approvalIdPattern, approvalPageSize, approvalProblem, currentApprovalSession,
   listApprovals, readApprovalWorkspace, riskLabels, type Approval, type ApprovalWorkspace, type Risk,
 } from './approvalApi';
 
@@ -13,13 +14,22 @@ const button = 'inline-flex min-h-11 items-center justify-center gap-2 rounded-m
 const subtext = 'text-sm text-gray-600 dark:text-gray-300';
 
 function ApprovalsQueue({ workspace }: { workspace: ApprovalWorkspace }) {
-  const [query, setQuery] = useState<{ risk: Risk | ''; page: number }>({ risk: '', page: 1 });
-  const [draftRisk, setDraftRisk] = useState<Risk | ''>('');
+  const [params, setParams] = useSearchParams();
+  const { risk, page } = readApprovalQueue(params);
+  const [attempt, setAttempt] = useState(0);
+  const query = useMemo(() => ({ risk, page, attempt }), [risk, page, attempt]);
+  const [draftRisk, setDraftRisk] = useState<Risk | ''>(risk);
   const [result, setResult] = useState<{ query: typeof query; items?: Approval[]; error?: string }>();
   const heading = useRef<HTMLHeadingElement>(null);
+  const { state } = useLocation();
+  const returnId = typeof state?.focusApprovalId === 'string' ? state.focusApprovalId : undefined;
+  const returnLink = useRef<HTMLAnchorElement>(null);
+  const returnFocusRestored = useRef(false);
   const focusResults = useRef(false);
   const offset = (query.page - 1) * approvalPageSize;
   const current = result?.query === query ? result : undefined;
+
+  useEffect(() => { setDraftRisk(risk); }, [risk]);
 
   useEffect(() => {
     const request = new AbortController();
@@ -35,12 +45,16 @@ function ApprovalsQueue({ workspace }: { workspace: ApprovalWorkspace }) {
     if (current && focusResults.current) {
       heading.current?.focus();
       focusResults.current = false;
+    } else if (current && returnId && !returnFocusRestored.current) {
+      (returnLink.current ?? heading.current)?.focus();
+      returnFocusRestored.current = true;
     }
-  }, [current]);
+  }, [current, returnId]);
 
-  function navigate(next: typeof query) {
+  function navigate(next: ApprovalQueueQuery) {
     focusResults.current = true;
-    setQuery(next);
+    setParams(approvalQueueParams(next));
+    setAttempt((value) => value + 1);
   }
 
   function filter(event: FormEvent<HTMLFormElement>) {
@@ -55,7 +69,7 @@ function ApprovalsQueue({ workspace }: { workspace: ApprovalWorkspace }) {
           <h2 className="text-2xl font-semibold">Aprobaciones pendientes</h2>
           <p className={subtext + ' mt-1 break-words'}>Espacio de trabajo {workspace.workspaceName}</p>
         </div>
-        <button type="button" className={button} disabled={!current} onClick={() => navigate({ ...query, page: 1 })}>
+        <button type="button" className={button} disabled={!current} onClick={() => navigate(query)}>
           <RefreshCw size={16} aria-hidden="true" /> Actualizar cola
         </button>
       </header>
@@ -84,7 +98,7 @@ function ApprovalsQueue({ workspace }: { workspace: ApprovalWorkspace }) {
           <ul className="divide-y divide-gray-200 rounded-xl border border-gray-200 bg-white dark:divide-gray-700 dark:border-gray-700 dark:bg-gray-900">
             {current.items.map((item) => (
               <li key={item.id}>
-                <Link to={`${approvalsPath}/${encodeURIComponent(item.id)}`}
+                <Link ref={item.id === returnId ? returnLink : undefined} to={approvalLocation(query, item.id)}
                   className="flex min-h-11 flex-wrap items-start justify-between gap-2 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800">
                   <div className="min-w-0 space-y-1">
                     <h4 className="flex items-center gap-2 break-all text-sm font-semibold">
@@ -114,6 +128,8 @@ function ApprovalsQueue({ workspace }: { workspace: ApprovalWorkspace }) {
 
 export default function ApprovalsPage() {
   const { approvalId } = useParams();
+  const [params] = useSearchParams();
+  const queueLocation = approvalLocation(readApprovalQueue(params));
   const [session, setSession] = useState(currentApprovalSession);
   const [attempt, setAttempt] = useState(0);
   const [result, setResult] = useState<{ session: string; attempt: number; workspace?: ApprovalWorkspace; error?: string }>();
@@ -146,12 +162,14 @@ export default function ApprovalsPage() {
       {current?.error && <div role="alert" className={panel + ' text-sm text-red-800 dark:text-red-300'}>
         <p>{current.error}</p>
         <button type="button" className="min-h-11 font-semibold underline" onClick={() => setAttempt((value) => value + 1)}>Comprobar acceso de nuevo</button>
+        <Link to="/gestion-web/inicio" className={button + ' ml-3'}>Volver a Bandeja</Link>
       </div>}
       {current?.workspace && session && (!approvalId ? <ApprovalsQueue workspace={current.workspace} />
         : approvalIdPattern.test(approvalId) ? (
           <ApprovalDetail key={approvalId} id={approvalId} tenantId={current.workspace.tenantId} session={session}
-            canReauthenticate={current.workspace.capabilities.includes('approvals.reauthenticate')} />
-        ) : <p role="alert" className={panel + ' text-sm'}>El identificador de solicitud no es válido.</p>)}
+            queueLocation={queueLocation} canReauthenticate={current.workspace.capabilities.includes('approvals.reauthenticate')} />
+        ) : <div className="space-y-3"><p role="alert" className={panel + ' text-sm'}>El identificador de solicitud no es válido.</p>
+          <Link to={queueLocation} className={button}>Volver a la cola</Link></div>)}
     </section>
   );
 }
