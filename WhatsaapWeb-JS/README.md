@@ -331,6 +331,14 @@ Checklist de aceptación para la demo:
 - El handoff crea/reutiliza un ticket y se refleja en el frontend.
 - La respuesta aceptada por Meta deja trazabilidad de los IDs inbound/outbound sin guardar el texto completo en los logs de runtime.
 
+## Reservas con plazo
+
+Aplica las migraciones antes de iniciar el backend. Desde Pedidos en la web, un operador puede reservar stock o capacidad de un prepedido durante un plazo elegido. La API acepta `PATCH /api/orders/{id}/status` con `status: "reserved"` y `reservationMinutes` entero de 1 a 10080. Repetir la reserva conserva el vencimiento original. Las reservas existentes sin plazo conservan su comportamiento.
+
+Al confirmar el pedido a tiempo se conserva el stock reservado y se elimina el vencimiento. Una vez vencido el plazo, la API rechaza la confirmación y el cierre. El backend consulta periódicamente las reservas pendientes por empresa y cancela el pedido, devuelve el stock y registra la operación en una transacción. `reservationReleasePending` distingue el fin del plazo de la liberación efectiva, registrada en `reservationExpiredAt`.
+
+Un comprobante vinculado sigue visible en Pagos. Si se valida después del vencimiento, se registra la decisión y el comprobante queda con `orderReconciliationRequired`. El equipo debe conciliarlo manualmente antes de comprometer otra entrega o resolver el pago.
+
 ## Validación de entrega
 
 Backend:

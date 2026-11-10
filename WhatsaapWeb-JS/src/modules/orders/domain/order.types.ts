@@ -49,6 +49,9 @@ export type CommercialOrder = {
   occurredAt: Date;
   confirmedAt: Date | null;
   reservedAt: Date | null;
+  reservationExpiresAt: Date | null;
+  reservationExpiredAt: Date | null;
+  reservationReleasePending: boolean;
   createdAt: Date;
   updatedAt: Date;
   items: OrderItem[];

@@ -1,7 +1,7 @@
 import { Pool } from 'pg';
 import { queryInTenantScope, withTenantTransaction } from '../../../../db/TenantScopedUoW';
 import { Queryable } from '../../../../shared/UnitOfWorkPort';
-import { OrderRepositoryPg } from '../../../orders';
+import { OrderError, OrderRepositoryPg } from '../../../orders';
 import {
   CreatePaymentVoucherInput,
   MarkFromMessageInput,
@@ -26,7 +26,8 @@ export class PaymentRepositoryPg {
     const orderClauses: string[] = [
       'o.company_id = $1',
       "o.order_type = 'commercial'",
-      "o.status IN ('draft','quoted','pending_handoff','pending_approval','confirmed')",
+      `(o.status IN ('draft','quoted','pending_handoff','pending_approval','confirmed')
+        OR o.reservation_expires_at IS NOT NULL OR (o.reservation_expired_at IS NOT NULL AND last_voucher.id IS NOT NULL))`,
       `EXISTS (
          SELECT 1 FROM order_items oi
          WHERE oi.company_id = o.company_id AND oi.order_id = o.id
@@ -78,6 +79,7 @@ export class PaymentRepositoryPg {
           last_voucher.id AS voucher_id,
           o.status AS order_status,
           last_voucher.status AS voucher_status,
+          last_voucher.order_reconciliation_required,
           last_voucher.payment_method,
           last_voucher.amount,
           COALESCE(items.order_total, 0)::numeric AS order_total,
@@ -126,6 +128,7 @@ export class PaymentRepositoryPg {
           pv.id AS voucher_id,
           NULL::varchar AS order_status,
           pv.status AS voucher_status,
+          pv.order_reconciliation_required,
           pv.payment_method,
           pv.amount,
           NULL::numeric AS order_total,
@@ -181,7 +184,12 @@ export class PaymentRepositoryPg {
          FROM customer_orders o
          WHERE o.company_id = $1
            AND o.order_type = 'commercial'
-           AND o.status IN ('draft','quoted','pending_handoff','pending_approval','confirmed')
+           AND (o.status IN ('draft','quoted','pending_handoff','pending_approval','confirmed')
+             OR o.reservation_expires_at IS NOT NULL
+             OR (o.reservation_expired_at IS NOT NULL AND EXISTS (
+               SELECT 1 FROM payment_vouchers pv
+               WHERE pv.company_id = o.company_id AND pv.order_id = o.id AND pv.status = 'pending'
+             )))
            AND EXISTS (
              SELECT 1 FROM order_items oi
              WHERE oi.company_id = o.company_id AND oi.order_id = o.id
@@ -337,11 +345,19 @@ export class PaymentRepositoryPg {
 
       let orderConfirmed = false;
       if (status === 'validated' && voucher.order_id) {
-        const order = await new OrderRepositoryPg(client).updateStatus(
-          companyId, Number(voucher.order_id), 'confirmed', actorUserId,
-        );
-        if (!order) throw Object.assign(new Error('Pedido comercial no encontrado'), { statusCode: 404 });
-        orderConfirmed = true;
+        try {
+          const order = await new OrderRepositoryPg(client).updateStatus(
+            companyId, Number(voucher.order_id), 'confirmed', actorUserId,
+          );
+          if (!order) throw Object.assign(new Error('Pedido comercial no encontrado'), { statusCode: 404 });
+          orderConfirmed = true;
+        } catch (error) {
+          if (!(error instanceof OrderError) || error.code !== 'ORDER_RESERVATION_EXPIRED') throw error;
+          await client.query(`
+            UPDATE payment_vouchers SET order_reconciliation_required = true WHERE company_id = $1 AND id = $2
+          `, [companyId, voucherId]);
+          voucher.order_reconciliation_required = true;
+        }
       }
       await client.query(
         `INSERT INTO operational_actions (
@@ -350,7 +366,7 @@ export class PaymentRepositoryPg {
         [companyId, voucher.order_id, voucher.contact_id, voucher.conversation_id, actorUserId,
           status === 'validated' ? 'payment_validated' : 'payment_rejected',
           status === 'validated' ? 'Comprobante validado' : 'Comprobante rechazado',
-          JSON.stringify({ voucherId, orderConfirmed, source: 'payments' })]
+          JSON.stringify({ voucherId, orderConfirmed, orderReconciliationRequired: voucher.order_reconciliation_required === true, source: 'payments' })]
       );
       return this.mapVoucher(voucher);
     });
@@ -374,6 +390,7 @@ export class PaymentRepositoryPg {
       senderReference: row.sender_reference || null,
       status: row.status,
       rejectionReason: row.rejection_reason || null,
+      orderReconciliationRequired: row.order_reconciliation_required === true,
       uploadedBy: row.uploaded_by ? Number(row.uploaded_by) : null,
       validatedBy: row.validated_by ? Number(row.validated_by) : null,
       validatedAt: row.validated_at || null,
@@ -402,6 +419,7 @@ export class PaymentRepositoryPg {
       voucherId: row.voucher_id ? Number(row.voucher_id) : null,
       orderStatus: row.order_status || null,
       voucherStatus,
+      orderReconciliationRequired: row.order_reconciliation_required === true,
       paymentMethod: row.payment_method || null,
       amount: row.amount === null || row.amount === undefined ? null : Number(row.amount),
       orderTotal: row.order_total === null || row.order_total === undefined ? null : Number(row.order_total),

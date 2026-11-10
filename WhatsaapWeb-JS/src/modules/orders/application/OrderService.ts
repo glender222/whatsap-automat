@@ -56,10 +56,15 @@ export class OrderService {
     return this.repository.createDetected({ ...input, chatId: input.chatId.trim(), items });
   }
 
-  updateStatus(companyId: number, orderId: number, status: CommercialOrderStatus, actorUserId: number | null) {
+  updateStatus(companyId: number, orderId: number, status: CommercialOrderStatus, actorUserId: number | null, reservationMinutes?: unknown) {
     this.assertId(orderId);
     if (!orderStatuses.includes(status)) throw invalid('Estado de pedido invalido');
-    return this.repository.updateStatus(companyId, orderId, status, actorUserId);
+    if (reservationMinutes === undefined) return this.repository.updateStatus(companyId, orderId, status, actorUserId);
+    if (status !== 'reserved' || typeof reservationMinutes !== 'number' || !Number.isInteger(reservationMinutes) ||
+        reservationMinutes < 1 || reservationMinutes > 10080) {
+      throw invalid('Una reserva temporal requiere una duración de 1 a 10080 minutos');
+    }
+    return this.repository.updateStatus(companyId, orderId, status, actorUserId, reservationMinutes);
   }
 
   private assertId(value: number): void {

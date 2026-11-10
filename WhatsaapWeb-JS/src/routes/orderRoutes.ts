@@ -80,7 +80,8 @@ export default function createOrderRoutes(database: Pool = pool): Router {
         companyId,
         id,
         String(req.body?.status || '') as CommercialOrderStatus,
-        getUserId(req)
+        getUserId(req),
+        req.body?.reservationMinutes
       );
       if (!data) return res.status(404).json({ success: false, message: 'Pedido no encontrado' });
       emitDashboard('order-status-changed', { companyId, orderId: data.id, status: data.status, chatId: data.metadata?.chatId || null });

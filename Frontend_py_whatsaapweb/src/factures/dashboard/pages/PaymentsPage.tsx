@@ -324,6 +324,9 @@ export default function PaymentsPage() {
                         >
                           {STATUS_LABEL[row.processStatus]}
                         </span>
+                        {row.orderReconciliationRequired && (
+                          <p className="mt-1 text-xs font-semibold text-amber-800">Reserva vencida · Requiere conciliación</p>
+                        )}
                         <div className="mt-1 text-xs text-[#5B6F66]">
                           {row.paymentMethod ? METHOD_LABEL[row.paymentMethod] : 'Metodo por definir'}
                         </div>
@@ -475,6 +478,12 @@ export default function PaymentsPage() {
                 {STATUS_LABEL[selectedRow.processStatus]}
               </span>
             </div>
+
+            {selectedRow.orderReconciliationRequired && (
+              <p className="mb-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
+                El comprobante está validado. La reserva venció y el pedido requiere conciliación manual.
+              </p>
+            )}
 
             {selectedRow.fileUrl && <VoucherPreview key={selectedRow.fileUrl} fileUrl={selectedRow.fileUrl} />}
 

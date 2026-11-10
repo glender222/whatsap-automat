@@ -38,6 +38,8 @@ import { optionalWhatsappJwt, requireJwt } from './middleware/jwtAuth';
 import { requireChatTenantAccess, requireMediaTenantAccess, requireVoucherTenantAccess } from './middleware/resourceAuth';
 import { coreModel } from './core/coreModel';
 import config from './config/index';
+import pool from './config/database';
+import { startOrderReservationExpiry } from './modules/orders/application/OrderReservationExpiry';
 import swaggerSpec from './config/swagger';
 import { Migrator } from './db/Migrator';
 import { setSocketIo } from './sockets/socketEmitter';
@@ -367,6 +369,7 @@ export class App {
       this.setupErrorHandling();
 
       this.server.listen(config.server.port, config.server.host, () => {
+        this.server.once('close', startOrderReservationExpiry(pool));
         console.log(`🚀 API + Socket.IO corriendo en http://${config.server.host}:${config.server.port}`);
         console.log(`📱 WhatsApp provider: ${this.whatsappService.provider}`);
         console.log(`🔐 JWT WhatsApp API: ${config.security.whatsappApiRequireJwt ? 'activado' : 'desactivado en desarrollo'}`);

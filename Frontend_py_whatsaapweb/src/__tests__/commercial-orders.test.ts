@@ -21,6 +21,12 @@ test('the web only offers operator transitions permitted for the observed order'
   assert.deepEqual(orderActions({ ...order, status: 'reserved', confirmedAt: order.occurredAt }), ['completed', 'cancelled']);
   assert.deepEqual(orderActions({ ...order, status: 'completed' }), []);
   assert.deepEqual(orderActions({ ...order, status: 'cancelled' }), []);
+  assert.deepEqual(orderActions({ ...order, items: [{
+    id: 1, itemNameSnapshot: 'Stock', quantity: 1, unitPrice: null, currency: 'PEN',
+    availabilityStatus: 'available', metadata: { availabilityType: 'stock' },
+  }] }), ['confirmed', 'reserved', 'cancelled']);
+  assert.deepEqual(orderActions({ ...order, status: 'reserved', confirmedAt: order.occurredAt,
+    reservationExpiresAt: '2026-11-08T00:30:00Z' }), ['confirmed', 'completed', 'cancelled']);
 });
 
 test('a preorder submits selected catalog IDs and requires the persisted order', async (context) => {
@@ -57,4 +63,17 @@ test('stock conflicts state the constraint before another attempt', () => {
   const error = new AxiosError('Conflict');
   error.response = { status: 409, statusText: 'Conflict', data: { error: 'ORDER_STOCK_UNAVAILABLE' }, headers: {} } as typeof error.response;
   assert.match(orderError(error, 'Sin confirmar'), /disponibilidad es insuficiente.*inventario/);
+});
+
+test('a timed reservation sends the selected duration and verifies the deadline', async (context) => {
+  let reservationExpiresAt: string | null = '2026-11-08T00:30:00Z';
+  respond(context, (request) => {
+    assert.equal(request.url, '/orders/8/status');
+    assert.equal(request.method, 'patch');
+    assert.deepEqual(JSON.parse(request.data), { status: 'reserved', reservationMinutes: 30 });
+    return { status: 200, data: { success: true, data: { ...order, status: 'reserved', reservationExpiresAt } } };
+  });
+  assert.equal((await changeOrderStatus(order, 'reserved', 30)).reservationExpiresAt, reservationExpiresAt);
+  reservationExpiresAt = null;
+  await assert.rejects(changeOrderStatus(order, 'reserved', 30), /no confirmó el cambio/);
 });

@@ -8,12 +8,14 @@ import type { CommercialOrder, CommercialOrderStatus, CreateDetectedOrderInput, 
 type Row = Record<string, any>;
 type ConversationReference = { contactId: number | null; conversationId: number; chatId: string };
 type Reservation = { productId: number; itemId: number | null; quantity: number };
+export type DueReservation = { id: number; deadline: string };
+export const dueReservationPageSize = 25;
 const preorderStates = ['draft', 'quoted', 'pending_handoff', 'pending_approval', 'out_of_stock', 'unavailable'];
 const committedStates = ['confirmed', 'reserved'];
 const terminalStates = ['cancelled', 'completed'];
 const quantityTypes = ['stock', 'capacity'];
 const manualTypes = ['manual', 'schedule'];
-const selectOrder = `SELECT orders.*, COALESCE((
+const selectOrder = `SELECT orders.*, reservation_expires_at <= statement_timestamp() AS reservation_due, COALESCE((
   SELECT jsonb_agg(items ORDER BY items.id)
   FROM order_items items WHERE items.company_id = orders.company_id AND items.order_id = orders.id
 ), '[]'::jsonb) AS items_json FROM customer_orders orders`;
@@ -207,15 +209,21 @@ export class OrderRepositoryPg {
     return [...matched.values()].map((match) => ({ ...match, ...this.evaluateAvailability(match.product, match.quantity, input.agentId != null) }));
   }
 
-  async updateStatus(companyId: number, orderId: number, status: CommercialOrderStatus, actorUserId: number | null): Promise<CommercialOrder | null> {
-    return this.inScope(companyId, (repo) => repo.transition(companyId, orderId, status, actorUserId));
+  async updateStatus(companyId: number, orderId: number, status: CommercialOrderStatus, actorUserId: number | null, reservationMinutes?: number): Promise<CommercialOrder | null> {
+    return this.inScope(companyId, (repo) => repo.transition(companyId, orderId, status, actorUserId, reservationMinutes));
   }
 
-  private async transition(companyId: number, orderId: number, status: CommercialOrderStatus, actorUserId: number | null) {
+  private async transition(companyId: number, orderId: number, status: CommercialOrderStatus, actorUserId: number | null, reservationMinutes?: number) {
     const row = await this.lockOrder(companyId, orderId);
     if (!row) return null;
+    if ((row.reservation_due || row.reservation_expired_at) && status !== 'cancelled') {
+      throw this.conflict('ORDER_RESERVATION_EXPIRED', 'El plazo de reserva terminó. Actualiza el pedido.');
+    }
     const reserves = committedStates.includes(status);
     const previousCommitted = committedStates.includes(row.status);
+    if (reservationMinutes !== undefined && (row.status === 'confirmed' || (row.status === 'reserved' && !row.reservation_expires_at))) {
+      throw this.conflict('ORDER_STATUS_CONFLICT', 'La reserva temporal se aplica a un prepedido');
+    }
     if (row.status === status && (!reserves || row.confirmed_at)) return this.withItems(row);
     if (terminalStates.includes(row.status) || (previousCommitted && preorderStates.includes(status))) {
       throw this.conflict('ORDER_STATUS_CONFLICT', 'El pedido no admite el cambio de estado solicitado');
@@ -233,32 +241,73 @@ export class OrderRepositoryPg {
           [companyId, orderId, status]);
       } else {
         reserved = await this.reserveInventory(order, status, actorUserId!);
+        if (reservationMinutes !== undefined && !reserved) {
+          throw this.conflict('ORDER_RESERVATION_NOT_APPLICABLE', 'El pedido no contiene stock ni capacidad que reservar');
+        }
       }
     } else if (terminalStates.includes(status)) {
       if (status === 'completed' && (!previousCommitted || !row.confirmed_at)) {
         throw this.conflict('ORDER_CONFIRMATION_REQUIRED', 'Confirma el pedido y sus reservas antes de completarlo');
       }
-      await this.finalizeInventory(order, status === 'completed', actorUserId!);
-      await this.db.query(`
-        UPDATE order_items SET status = $3,
-          availability_status = CASE WHEN availability_status = 'reserved' THEN 'available' ELSE availability_status END,
-          updated_at = NOW()
-        WHERE company_id = $1 AND order_id = $2
-      `, [companyId, orderId, status]);
+      await this.finishOrderItems(order, status, actorUserId);
     }
 
     const { rows: [updated] } = await this.db.query(`
       UPDATE customer_orders SET status = $3, updated_at = NOW(),
         confirmed_at = CASE WHEN $4 THEN COALESCE(confirmed_at, NOW()) ELSE confirmed_at END,
-        reserved_at = CASE WHEN $5 THEN COALESCE(reserved_at, NOW()) ELSE reserved_at END
+        reserved_at = CASE WHEN $5 THEN COALESCE(reserved_at, NOW()) ELSE reserved_at END,
+        reservation_expires_at = CASE WHEN $3::varchar <> 'reserved' THEN NULL
+          WHEN $6::integer IS NOT NULL THEN clock_timestamp() + make_interval(mins => $6)
+          ELSE reservation_expires_at END
       WHERE company_id = $1 AND id = $2 AND order_type = 'commercial' RETURNING *
-    `, [companyId, orderId, status, reserves, reserved]);
+    `, [companyId, orderId, status, reserves, reserved, reservationMinutes ?? null]);
     await this.createAction(companyId, orderId, `order_${status}`, 'completed', actorUserId, `Pedido actualizado a ${status}`);
     if (reserved) {
       await this.createAction(companyId, orderId, 'availability_reserved', 'completed', actorUserId, 'Disponibilidad reservada');
     }
     await this.setCommercialStateForOrder(companyId, orderId, status, actorUserId);
     return this.withItems(updated);
+  }
+
+  async listDueReservations(companyId: number, after?: DueReservation): Promise<DueReservation[]> {
+    return this.inScope(companyId, async (repo) => {
+      const { rows } = await repo.db.query(`
+        SELECT id, reservation_expires_at::text AS deadline FROM customer_orders
+        WHERE company_id = $1 AND order_type = 'commercial' AND status = 'reserved'
+          AND reservation_expires_at <= statement_timestamp()
+          AND ($2::timestamptz IS NULL OR (reservation_expires_at, id) > ($2, $3::bigint))
+        ORDER BY reservation_expires_at, id LIMIT $4
+      `, [companyId, after?.deadline ?? null, after?.id ?? null, dueReservationPageSize]);
+      return rows.map(({ id, deadline }) => ({ id: Number(id), deadline }));
+    });
+  }
+
+  async expireReservation(companyId: number, orderId: number): Promise<CommercialOrder | null> {
+    return this.inScope(companyId, async (repo) => {
+      await repo.db.query("SET LOCAL lock_timeout = '1s'");
+      const row = await repo.lockOrder(companyId, orderId);
+      if (row?.status !== 'reserved' || !row.reservation_due) return null;
+
+      await repo.finishOrderItems(await repo.withItems(row), 'cancelled', null);
+      await repo.setCommercialStateForOrder(companyId, orderId, 'cancelled', null, true);
+      const { rows: [updated] } = await repo.db.query(`
+        UPDATE customer_orders SET status = 'cancelled', updated_at = NOW(),
+          reservation_expired_at = clock_timestamp(), reservation_expires_at = NULL
+        WHERE company_id = $1 AND id = $2 RETURNING *
+      `, [companyId, orderId]);
+      await repo.createAction(companyId, orderId, 'order_reservation_expired', 'completed', null, 'Venció el plazo de reserva del pedido');
+      return repo.withItems(updated);
+    });
+  }
+
+  private async finishOrderItems(order: CommercialOrder, status: CommercialOrderStatus, actorId: number | null): Promise<void> {
+    await this.finalizeInventory(order, status === 'completed', actorId);
+    await this.db.query(`
+      UPDATE order_items SET status = $3,
+        availability_status = CASE WHEN availability_status = 'reserved' THEN 'available' ELSE availability_status END,
+        updated_at = NOW()
+      WHERE company_id = $1 AND order_id = $2
+    `, [order.companyId, order.id, status]);
   }
 
   private async lockOrder(companyId: number, orderId: number): Promise<Row | undefined> {
@@ -280,6 +329,12 @@ export class OrderRepositoryPg {
       throw this.conflict('ORDER_REFERENCE_CHANGED', 'La conversacion del pedido cambio');
     }
     if (order?.contact_id != null) await this.requireContact(companyId, order.contact_id);
+    if (order?.reservation_expires_at) {
+      const { rows: [deadline] } = await this.db.query(`
+        SELECT reservation_expires_at <= clock_timestamp() AS due FROM customer_orders WHERE company_id = $1 AND id = $2
+      `, [companyId, orderId]);
+      order.reservation_due = deadline.due;
+    }
     return order;
   }
 
@@ -323,7 +378,7 @@ export class OrderRepositoryPg {
     return usesStock;
   }
 
-  private async finalizeInventory(order: CommercialOrder, complete: boolean, actorId: number): Promise<void> {
+  private async finalizeInventory(order: CommercialOrder, complete: boolean, actorId: number | null): Promise<void> {
     const balances = await this.reservations(order.companyId, order.id);
     const items = new Map(order.items.map((item) => [item.id, item]));
     const expected = new Set(complete
@@ -371,7 +426,7 @@ export class OrderRepositoryPg {
   }
 
   private async moveStock(
-    order: CommercialOrder, productId: number, itemId: number | null, actorId: number, movement: string,
+    order: CommercialOrder, productId: number, itemId: number | null, actorId: number | null, movement: string,
     availableDelta: number, reservedDelta: number,
   ): Promise<void> {
     const { rows: [product] } = await this.db.query(`
@@ -480,6 +535,9 @@ export class OrderRepositoryPg {
       occurredAt: row.occurred_at,
       confirmedAt: row.confirmed_at || null,
       reservedAt: row.reserved_at || null,
+      reservationExpiresAt: row.reservation_expires_at || null,
+      reservationExpiredAt: row.reservation_expired_at || null,
+      reservationReleasePending: row.status === 'reserved' && row.reservation_due === true,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       items: items.map((item) => ({
@@ -527,7 +585,7 @@ export class OrderRepositoryPg {
     );
   }
 
-  private async setCommercialStateForOrder(companyId: number, orderId: number, status: CommercialOrderStatus, actorUserId: number | null): Promise<void> {
+  private async setCommercialStateForOrder(companyId: number, orderId: number, status: CommercialOrderStatus, actorUserId: number | null, onlyIfCurrent = false): Promise<void> {
     const context = await this.db.query(
       `SELECT conversation_id FROM customer_orders WHERE company_id = $1 AND id = $2`,
       [companyId, orderId]
@@ -535,15 +593,18 @@ export class OrderRepositoryPg {
     const conversationId = context.rows[0]?.conversation_id ? Number(context.rows[0].conversation_id) : null;
     if (!conversationId) return;
     const state = this.mapOrderStatusToCommercialState(status);
-    await this.db.query(
+    const update = await this.db.query(
       `UPDATE conversations
        SET commercial_stage = $3,
            commercial_substatus = $4,
            commercial_state_updated_at = NOW(),
            updated_at = NOW()
-       WHERE company_id = $1 AND id = $2`,
-      [companyId, conversationId, state.stage, state.substatus]
+       WHERE company_id = $1 AND id = $2 AND (NOT $5::boolean OR commercial_state_updated_at = (
+         SELECT updated_at FROM customer_orders WHERE company_id = $1 AND id = $6
+       ))`,
+      [companyId, conversationId, state.stage, state.substatus, onlyIfCurrent, orderId]
     );
+    if (!update.rowCount) return;
     await this.db.query(
       `INSERT INTO operational_actions (
          company_id, order_id, conversation_id, actor_user_id, action_type, status, description, metadata_json

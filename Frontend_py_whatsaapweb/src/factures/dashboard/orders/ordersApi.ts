@@ -17,7 +17,7 @@ const availabilityLabels: Record<string, string> = {
 };
 const preorders = ['draft', 'quoted', 'pending_handoff', 'pending_approval', 'out_of_stock', 'unavailable'];
 const committed = ['confirmed', 'reserved'];
-export type OrderAction = 'confirmed' | 'completed' | 'cancelled';
+export type OrderAction = 'confirmed' | 'reserved' | 'completed' | 'cancelled';
 export interface OrderItem {
   id: number;
   itemNameSnapshot: string;
@@ -25,6 +25,7 @@ export interface OrderItem {
   unitPrice: number | null;
   currency: string;
   availabilityStatus: string;
+  metadata?: { availabilityType?: string };
 }
 export interface Order {
   id: number;
@@ -34,6 +35,9 @@ export interface Order {
   occurredAt: string;
   confirmedAt: string | null;
   reservedAt: string | null;
+  reservationExpiresAt?: string | null;
+  reservationExpiredAt?: string | null;
+  reservationReleasePending?: boolean;
   notes: string | null;
   metadata: { chatId?: string } | null;
   items: OrderItem[];
@@ -50,7 +54,12 @@ export function itemAvailability(status: string) {
 }
 
 export function orderActions(order: Order): OrderAction[] {
+  if (order.reservationReleasePending) return [];
+  if (preorders.includes(order.status) && order.items.some((item) => ['stock', 'capacity'].includes(item.metadata?.availabilityType ?? ''))) {
+    return ['confirmed', 'reserved', 'cancelled'];
+  }
   if (preorders.includes(order.status) || (committed.includes(order.status) && !order.confirmedAt)) return ['confirmed', 'cancelled'];
+  if (order.status === 'reserved' && order.reservationExpiresAt) return ['confirmed', 'completed', 'cancelled'];
   if (committed.includes(order.status)) return ['completed', 'cancelled'];
   return [];
 }
@@ -117,13 +126,13 @@ export async function savePreorder(chatId: string, items: DraftItem[]) {
   return confirmedOrder(status === 201 && data?.success === true ? data.data?.order : undefined);
 }
 
-export async function changeOrderStatus(order: Order, action: OrderAction) {
+export async function changeOrderStatus(order: Order, action: OrderAction, reservationMinutes?: number) {
   const base = '/orders/' + order.id;
-  const { data } = action === 'completed'
-    ? await api.patch<Envelope<Order>>(base + '/status', { status: action })
+  const { data } = action === 'completed' || action === 'reserved'
+    ? await api.patch<Envelope<Order>>(base + '/status', { status: action, reservationMinutes })
     : await api.post<Envelope<Order>>(base + (action === 'confirmed' ? '/confirm' : '/cancel'));
   const saved = confirmedOrder(data?.success === true ? data.data : undefined, order.id);
-  if (saved.companyId !== order.companyId || saved.status !== action) {
+  if (saved.companyId !== order.companyId || saved.status !== action || (action === 'reserved' && !saved.reservationExpiresAt)) {
     throw new Error('El servidor no confirmó el cambio de estado solicitado.');
   }
   return saved;

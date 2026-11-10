@@ -21,6 +21,7 @@ export type PaymentProcessSummary = {
   voucherId: number | null;
   orderStatus: string | null;
   voucherStatus: PaymentVoucherStatus | null;
+  orderReconciliationRequired?: boolean;
   paymentMethod: PaymentMethod | null;
   amount: number | null;
   orderTotal: number | null;

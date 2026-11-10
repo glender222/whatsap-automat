@@ -18,6 +18,7 @@ export type PaymentVoucher = {
   senderReference: string | null;
   status: PaymentVoucherStatus;
   rejectionReason: string | null;
+  orderReconciliationRequired: boolean;
   uploadedBy: number | null;
   validatedBy: number | null;
   validatedAt: Date | null;
@@ -62,6 +63,7 @@ export type PaymentProcessSummary = {
   voucherId: number | null;
   orderStatus: string | null;
   voucherStatus: PaymentVoucherStatus | null;
+  orderReconciliationRequired: boolean;
   paymentMethod: PaymentMethod | null;
   amount: number | null;
   orderTotal: number | null;

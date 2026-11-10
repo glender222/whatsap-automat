@@ -2,12 +2,15 @@ import './fixtures/testEnv';
 import assert from 'node:assert/strict';
 import { randomInt } from 'node:crypto';
 import { once } from 'node:events';
+import { setTimeout as delay } from 'node:timers/promises';
 import { test, type TestContext } from 'node:test';
 import express from 'express';
 import { Pool } from 'pg';
 import { TenantScopedUoW } from '../db/TenantScopedUoW';
 import { requireJwt } from '../middleware/jwtAuth';
 import { OrderRepositoryPg } from '../modules/orders';
+import { startOrderReservationExpiry } from '../modules/orders/application/OrderReservationExpiry';
+import { PaymentRepositoryPg } from '../modules/payments/infra/db/PaymentRepositoryPg';
 import createOrderRoutes from '../routes/orderRoutes';
 
 const { errorHandler } = require('../middleware/errorHandler');
@@ -239,6 +242,83 @@ test('detected orders, reservations, transitions and audit remain atomic with Po
   assert.equal(pending.status, 'pending_approval');
   assert.equal((await confirm(pending.id)).body.error, 'ORDER_STOCK_UNAVAILABLE');
   assert.deepEqual(await stock(waiting), { stock_available: 0, stock_reserved: 0 });
+
+  const repo = new OrderRepositoryPg(db);
+  const payments = new PaymentRepositoryPg(db);
+  await uow.run(tenantA, (sql) => sql.query("UPDATE usuarios SET rol = 'ADMIN' WHERE id = $1", [actorA]));
+  const payment = (orderId: number) => payments.create({
+    companyId: tenantA, orderId, paymentMethod: 'yape', fileUrl: '/api/media/fixture', uploadedBy: actorA,
+  });
+  const timed = (await detected(second.phone, items(extra))).body.data.order;
+  const reserve = (id: number, reservationMinutes: unknown, auth = user) =>
+    request('PATCH', `/${id}/status`, auth, { status: 'reserved', reservationMinutes });
+  const makeDue = (company: number, id: number) => uow.run(company, (sql) => sql.query(`
+    UPDATE customer_orders SET reservation_expires_at = NOW() - INTERVAL '1 second' WHERE id = $1
+  `, [id]));
+  assert.equal((await reserve(timed.id, '30')).status, 400);
+  assert.equal((await reserve(timed.id, 30, other)).status, 404);
+  const reservation = await reserve(timed.id, 30);
+  assert.equal(reservation.status, 200, JSON.stringify(reservation.body));
+  assert.ok(Date.parse(reservation.body.data.reservationExpiresAt) > Date.now());
+  assert.equal((await reserve(timed.id, 60)).body.data.reservationExpiresAt, reservation.body.data.reservationExpiresAt);
+  const lateVoucher = await payment(timed.id);
+  const paymentRows = () => payments.list(tenantA, { orderId: timed.id, limit: 5, offset: 0 });
+  assert.equal((await paymentRows()).rows[0]?.voucherId, lateVoucher.id);
+  assert.deepEqual(await stock(extra), { stock_available: 3, stock_reserved: 2 });
+  assert.equal(await repo.expireReservation(tenantA, timed.id), null);
+  assert.equal(await repo.expireReservation(tenantB, timed.id), null);
+  await makeDue(tenantA, timed.id);
+  assert.equal((await request('GET', `/${timed.id}`, user)).body.data.reservationReleasePending, true);
+  assert.deepEqual(await repo.listDueReservations(tenantB), []);
+  assert.equal((await confirm(timed.id)).body.error, 'ORDER_RESERVATION_EXPIRED');
+  assert.equal((await request('PATCH', `/${timed.id}/status`, user, { status: 'completed' })).body.error, 'ORDER_RESERVATION_EXPIRED');
+  const competing = await Promise.all([repo.expireReservation(tenantA, timed.id), repo.expireReservation(tenantA, timed.id)]);
+  assert.equal(competing.filter(Boolean).length, 1);
+  const expired = (await request('GET', `/${timed.id}`, user)).body.data;
+  assert.equal(expired.status, 'cancelled');
+  assert.equal(expired.reservationExpiresAt, null);
+  assert.equal(expired.reservationReleasePending, false);
+  assert.ok(expired.reservationExpiredAt);
+  assert.deepEqual(await stock(extra), { stock_available: 5, stock_reserved: 0 });
+  assert.deepEqual((await moves(timed.id)).rows, [
+    { movement_type: 'reservation', delta_available: -2, delta_reserved: 2, actor_user_id: String(actorA) },
+    { movement_type: 'release', delta_available: 2, delta_reserved: -2, actor_user_id: null },
+  ]);
+  assert.equal((await uow.run(tenantA, (sql) => sql.query(`
+    SELECT id FROM operational_actions WHERE order_id = $1 AND action_type = 'order_reservation_expired' AND actor_user_id IS NULL
+  `, [timed.id]))).rowCount, 1);
+  assert.equal((await paymentRows()).rows[0]?.voucherStatus, 'pending');
+  const lateDecision = await payments.updateStatus(tenantA, lateVoucher.id, 'validated', actorA);
+  assert.equal(lateDecision?.status, 'validated');
+  assert.equal(lateDecision?.orderReconciliationRequired, true);
+  assert.equal((await paymentRows()).rows[0]?.orderReconciliationRequired, true);
+  assert.equal((await repo.get(tenantA, timed.id))?.status, 'cancelled');
+  assert.deepEqual(await stock(extra), { stock_available: 5, stock_reserved: 0 });
+
+  const promoted = (await detected(second.phone, items(extra))).body.data.order;
+  assert.equal((await reserve(promoted.id, 1)).status, 200);
+  const earlyVoucher = await payment(promoted.id);
+  const earlyDecision = await payments.updateStatus(tenantA, earlyVoucher.id, 'validated', actorA);
+  assert.equal(earlyDecision?.status, 'validated');
+  assert.equal(earlyDecision?.orderReconciliationRequired, false);
+  assert.equal((await repo.get(tenantA, promoted.id))?.reservationExpiresAt, null);
+  assert.equal(await repo.expireReservation(tenantA, promoted.id), null);
+  assert.deepEqual(await stock(extra), { stock_available: 3, stock_reserved: 2 });
+
+  const otherOrder = (await request('POST', '/detected', other, { chatId: remote.phone, items: items(foreign) })).body.data.order;
+  assert.equal((await reserve(otherOrder.id, 1, other)).status, 200);
+  await makeDue(tenantB, otherOrder.id);
+  const stopExpiry = startOrderReservationExpiry(db);
+  try {
+    for (let i = 0; i < 50; i++) {
+      if ((await repo.get(tenantB, otherOrder.id))?.reservationExpiredAt) break;
+      await delay(20);
+    }
+    assert.ok((await repo.get(tenantB, otherOrder.id))?.reservationExpiredAt);
+    assert.equal((await repo.get(tenantA, promoted.id))?.status, 'confirmed');
+  } finally {
+    stopExpiry();
+  }
   assert.equal((await db.query('SELECT id FROM customer_orders')).rowCount, 0);
   assert.equal((await db.query('SELECT id FROM stock_movements')).rowCount, 0);
 });

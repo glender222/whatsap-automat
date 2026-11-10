@@ -13,6 +13,7 @@ const card = 'min-w-0 rounded-xl border border-gray-200 bg-white p-4 dark:border
 const subtext = 'text-sm text-gray-600 dark:text-gray-300';
 const actions: Record<OrderAction, { label: string; consequence: string }> = {
   confirmed: { label: 'Confirmar pedido', consequence: 'El servidor comprobará la disponibilidad y reservará stock o capacidad cuando corresponda.' },
+  reserved: { label: 'Reservar con plazo', consequence: 'La disponibilidad se liberará al vencer el plazo. Puedes confirmar el pedido antes para conservar la reserva.' },
   completed: { label: 'Completar pedido', consequence: 'Al completar, el servidor consumirá las reservas vigentes de este pedido.' },
   cancelled: { label: 'Cancelar pedido', consequence: 'Al cancelar, el servidor liberará las reservas vigentes de este pedido.' },
 };
@@ -22,7 +23,9 @@ function orderDate(value: string) {
   return Number.isFinite(date.getTime()) ? date.toLocaleString('es', { dateStyle: 'medium', timeStyle: 'short' }) : 'Sin fecha';
 }
 function OrderStatus({ order }: { order: Order }) {
-  return <span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-semibold dark:bg-gray-800">{orderStatus(order.status)}</span>;
+  return <span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-semibold dark:bg-gray-800">
+    {order.reservationExpiredAt ? 'Reserva vencida' : order.reservationReleasePending ? 'Liberación pendiente' : orderStatus(order.status)}
+  </span>;
 }
 function OrderProblem({ message }: { message: string }) {
   return <p role="alert" className="rounded-lg border border-red-200 p-3 text-sm text-red-800 dark:border-red-800 dark:text-red-300">{message}</p>;
@@ -112,9 +115,12 @@ function OrderList({ page }: { page: number }) {
   );
 }
 
-function OrderActionDialog({ order, action, onCancel, onConfirm }: { order: Order; action: OrderAction; onCancel: () => void; onConfirm: () => void }) {
+function OrderActionDialog({ order, action, onCancel, onConfirm }: {
+  order: Order; action: OrderAction; onCancel: () => void; onConfirm: (reservationMinutes?: number) => void;
+}) {
   const dialog = useRef<HTMLDialogElement>(null);
   const cancel = useRef<HTMLButtonElement>(null);
+  const [reservationMinutes, setReservationMinutes] = useState(30);
 
   useEffect(() => {
     const element = dialog.current;
@@ -133,9 +139,18 @@ function OrderActionDialog({ order, action, onCancel, onConfirm }: { order: Orde
       className="fixed left-1/2 top-1/2 m-0 w-[calc(100%_-_2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-xl border border-gray-200 bg-white p-4 text-gray-900 backdrop:bg-gray-950/55 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100">
       <h3 id="order-action-title" className="text-lg font-semibold">{actions[action].label} #{order.id}</h3>
       <p id="order-action-description" className={subtext + ' my-3'}>{actions[action].consequence}</p>
+      {action === 'reserved' && <label className="mb-3 flex flex-wrap items-center gap-2 text-sm font-medium">
+        Duración de la reserva
+        <select className={secondary} value={reservationMinutes} onChange={(event) => setReservationMinutes(Number(event.target.value))}>
+          <option value={15}>15 minutos</option>
+          <option value={30}>30 minutos</option>
+          <option value={60}>1 hora</option>
+          <option value={1440}>24 horas</option>
+        </select>
+      </label>}
       <div className="flex flex-wrap justify-end gap-2">
         <button ref={cancel} type="button" className={secondary} onClick={onCancel}>Volver</button>
-        <button type="button" className={primary} onClick={onConfirm}>{actions[action].label}</button>
+        <button type="button" className={primary} onClick={() => onConfirm(action === 'reserved' ? reservationMinutes : undefined)}>{actions[action].label}</button>
       </div>
     </dialog>
   );
@@ -164,6 +179,31 @@ function OrderDetail({ id }: { id: number }) {
   useEffect(() => {
     if (order) heading.current?.focus();
   }, [order]);
+  const expiresAt = order?.reservationExpiresAt;
+  useEffect(() => {
+    if (!expiresAt) return;
+    const deadline = Date.parse(expiresAt);
+    if (!Number.isFinite(deadline)) return;
+    const request = new AbortController();
+    let timer = window.setTimeout(refresh, Math.max(0, deadline - Date.now()));
+    async function refresh() {
+      try {
+        const result = await readOrder(id, request.signal);
+        if (request.signal.aborted) return;
+        setOrder((current) => {
+          if (!current || current.reservationExpiresAt !== expiresAt) return current;
+          if (current.status === result.status && current.reservationReleasePending === result.reservationReleasePending &&
+              current.reservationExpiresAt === result.reservationExpiresAt) return current;
+          return result;
+        });
+        if (result.reservationExpiresAt !== expiresAt) return;
+      } catch {
+        if (request.signal.aborted) return;
+      }
+      timer = window.setTimeout(refresh, 5000);
+    }
+    return () => { request.abort(); window.clearTimeout(timer); };
+  }, [expiresAt, id]);
 
   function reload() {
     setOrder(undefined);
@@ -171,14 +211,14 @@ function OrderDetail({ id }: { id: number }) {
     setAttempt((value) => value + 1);
   }
 
-  async function update() {
+  async function update(reservationMinutes?: number) {
     if (!order || !action || lock.current || !orderActions(order).includes(action)) return;
     lock.current = true;
     setAction(undefined);
     setWorking(true);
     setNotice(undefined);
     try {
-      const saved = await changeOrderStatus(order, action);
+      const saved = await changeOrderStatus(order, action, reservationMinutes);
       setOrder(saved);
       setNotice({ message: 'Estado confirmado por el servidor · ' + orderStatus(saved.status) });
     } catch (cause) {
@@ -205,6 +245,8 @@ function OrderDetail({ id }: { id: number }) {
               <h2 ref={heading} tabIndex={-1} className="break-words text-2xl font-semibold">#{order.id} · {order.title}</h2>
               <time dateTime={order.occurredAt} className={subtext}>{orderDate(order.occurredAt)}</time>
               {order.metadata?.chatId && <p className={subtext + ' break-all'}>Chat {order.metadata.chatId}</p>}
+              {order.reservationExpiresAt && <p className={subtext}>Reserva hasta <time dateTime={order.reservationExpiresAt}>{orderDate(order.reservationExpiresAt)}</time></p>}
+              {order.reservationExpiredAt && <p className={subtext}>Disponibilidad liberada el <time dateTime={order.reservationExpiredAt}>{orderDate(order.reservationExpiredAt)}</time></p>}
             </div>
             <OrderStatus order={order} />
           </header>
@@ -234,7 +276,7 @@ function OrderDetail({ id }: { id: number }) {
             ))}
           </div>
           {working && <p role="status" className={subtext}>Guardando el estado…</p>}
-          {action && <OrderActionDialog order={order} action={action} onCancel={() => setAction(undefined)} onConfirm={() => void update()} />}
+          {action && <OrderActionDialog order={order} action={action} onCancel={() => setAction(undefined)} onConfirm={(minutes) => void update(minutes)} />}
         </>
       )}
     </div>
