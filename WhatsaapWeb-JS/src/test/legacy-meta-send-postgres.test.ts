@@ -265,13 +265,34 @@ test('legacy HTTP routes never send or persist free-form Meta text and preserve 
   assert.equal(JSON.parse(attempts[1].payload).image.caption, 'caption retained');
   await assertCleanUploadDir();
 
+  let lastTemplateId: string | undefined;
   for (const path of [chat, jsChat, whatsappAlias]) {
     const template = await send(path, { chatId: phone, template: 'approved_fixture', language: 'es' });
     assert.equal(template.status, 200);
     assert.equal(template.body.data.sentType, 'template');
     assert.equal(attempts[attempts.length - 1].type, 'template');
     assert.equal(JSON.parse(attempts[attempts.length - 1].payload).template.name, 'approved_fixture');
+    lastTemplateId = template.body.data.messageId;
   }
+  await t.test('a late sent receipt keeps the template delivered and preserves its receipt history', async () => {
+    assert.ok(lastTemplateId);
+    const messageId = lastTemplateId;
+    const store = whatsapp.getMetaStore(tenantA)!;
+    const timestamp = Math.floor(Date.now() / 1000);
+    for (const [status, offset] of [['delivered', 1], ['sent', 0]] as const) {
+      await store.persistStatus({
+        status: { id: messageId, status, timestamp: String(timestamp + offset), recipient_id: phone },
+        metadata: { phone_number_id: graphPhoneId },
+      });
+    }
+    const { rows: [message] } = await uow.run(tenantA, (client) => client.query(`
+      SELECT m.status, m.delivered_at IS NOT NULL AS delivered,
+        (SELECT count(*)::integer FROM whatsapp_webhook_events w
+         WHERE w.company_id = m.company_id AND w.provider_message_id = m.provider_message_id) AS receipts
+      FROM messages m WHERE m.company_id = $1 AND m.provider_message_id = $2
+    `, [tenantA, messageId]));
+    assert.deepEqual(message, { status: 'delivered', delivered: true, receipts: 2 });
+  });
   assert.deepEqual(coreCalls, []);
   assert.equal((await send('/api/media/send-media', multipart({ chatId: phone }))).status, 200);
   assert.equal((await send('/api/media/send-document', multipart({ chatId: phone }, 'application/pdf', 'doc.pdf'))).status, 200);

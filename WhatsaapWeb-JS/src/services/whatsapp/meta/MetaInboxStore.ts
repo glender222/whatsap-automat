@@ -3,7 +3,7 @@ import { Pool } from 'pg';
 import pool from '../../../config/database';
 import { TenantScopedUoW } from '../../../db/TenantScopedUoW';
 import { Queryable } from '../../../shared/UnitOfWorkPort';
-import { applyCanonicalMetaStatuses, correlateCanonicalMetaStatus, lockMetaReceipt } from './MetaCanonicalReceipt';
+import { applyCanonicalMetaStatuses, correlateCanonicalMetaStatus, isMetaDeliveryStatusAdvance, lockMetaReceipt } from './MetaCanonicalReceipt';
 import { applyCampaignMetaReceipt, campaignCallbackPrefix } from '../../campaigns/CampaignMetaReceipt';
 
 function toUnixSeconds(value: unknown): number | null {
@@ -604,32 +604,35 @@ export class MetaInboxStore {
         await applyCanonicalMetaStatuses(client, this.companyId, providerMessageId, eventId);
       if (!canonical && !campaignCallback) {
         const messageResult = await client.query(
-          `SELECT * FROM messages WHERE company_id = $1 AND channel = 'whatsapp' AND provider_message_id = $2 LIMIT 1`,
+          `SELECT id, status FROM messages WHERE company_id = $1 AND channel = 'whatsapp' AND provider_message_id = $2 LIMIT 1`,
           [this.companyId, providerMessageId]
         );
         const messageRow = messageResult.rows[0];
         if (messageRow) {
+          const nextStatus = status.status || 'unknown';
+          const advances = isMetaDeliveryStatusAdvance(messageRow.status, nextStatus);
           await client.query(
             `INSERT INTO message_statuses (message_id, status, source, occurred_at, metadata_json, provider, provider_message_id, raw_payload_json)
              VALUES ($1, $2, 'meta-cloud', $3, $4, 'meta-cloud', $5, $6)
              ON CONFLICT DO NOTHING`,
-            [messageRow.id, status.status || 'unknown', occurredAt, json(status), providerMessageId, json(status)]
+            [messageRow.id, nextStatus, occurredAt, json(status), providerMessageId, json(status)]
           );
           await client.query(
             `UPDATE messages
-             SET status = $1::varchar,
+             SET status = CASE WHEN $6::boolean THEN $1::varchar ELSE status END,
                  delivered_at = CASE WHEN $1::varchar = 'delivered' THEN COALESCE(delivered_at, $2) ELSE delivered_at END,
                  read_at = CASE WHEN $1::varchar = 'read' THEN COALESCE(read_at, $2) ELSE read_at END,
                  failed_at = CASE WHEN $1::varchar = 'failed' THEN COALESCE(failed_at, $2) ELSE failed_at END,
-                 error_code = $3,
-                 error_message = $4
+                 error_code = CASE WHEN $6::boolean THEN $3 ELSE error_code END,
+                 error_message = CASE WHEN $6::boolean THEN $4 ELSE error_message END
              WHERE id = $5`,
             [
-              status.status || 'unknown',
+              nextStatus,
               occurredAt,
               status.errors?.[0]?.code ? String(status.errors[0].code) : null,
               status.errors?.[0]?.title || status.errors?.[0]?.message || null,
               messageRow.id,
+              advances,
             ]
           );
         }
@@ -676,7 +679,6 @@ export class MetaInboxStore {
          )
          VALUES ($1, $2, 'outbound', 'whatsapp', 'meta-cloud', $3, $4, $5, $6, 'sent', NOW(), $7, $8, $9, $10)
          ON CONFLICT (company_id, channel, provider_message_id) DO UPDATE SET
-           status = EXCLUDED.status,
            raw_payload_json = EXCLUDED.raw_payload_json
          RETURNING *`,
         [

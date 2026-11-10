@@ -7,6 +7,11 @@ function deliveryStatus(value: unknown): value is Exclude<CanonicalMetaStatus, '
   return value === 'sent' || value === 'failed' || value === 'delivered' || value === 'read';
 }
 
+export function isMetaDeliveryStatusAdvance(current: unknown, next: unknown): boolean {
+  if (!deliveryStatus(next)) return false;
+  return !deliveryStatus(current) || statusPriority[next] > statusPriority[current];
+}
+
 // The HTTP acknowledgement and the signed webhook can arrive in either order.
 export async function lockMetaReceipt(db: Queryable, tenantId: number, providerId: string): Promise<void> {
   await db.query("SELECT pg_advisory_xact_lock(hashtextextended('meta-receipt:' || $1::text || ':' || $2::text, 0))",
@@ -102,7 +107,7 @@ export async function applyCanonicalMetaStatuses(
           failed_at = CASE WHEN $3 = 'failed' THEN LEAST(failed_at, $4) ELSE failed_at END
       WHERE company_id = $1 AND id = $2
     `, [tenantId, claim.message_id, nextStatus, occurredAt]);
-    if (statusPriority[nextStatus] > (statusPriority[best] ?? -1)) best = nextStatus;
+    if (isMetaDeliveryStatusAdvance(best, nextStatus)) best = nextStatus;
   }
   if (best !== claim.status) {
     await db.query('UPDATE messages SET status = $3 WHERE company_id = $1 AND id = $2', [tenantId, claim.message_id, best]);
