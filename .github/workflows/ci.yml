@@ -199,6 +199,20 @@ jobs:
         run: |
           npm ci
           npx playwright install --with-deps chromium
+      - name: Probar recuperación de WhatsApp tras cortes de proceso
+        timeout-minutes: 4
+        env:
+          DB_NAME: meta_inbound_recovery_ci_smoke
+          META_INBOUND_CRASH_TEST: '1'
+          PGPASSWORD: ci-postgres-only
+        run: |
+          psql -X -v ON_ERROR_STOP=1 -h "$DB_HOST" -U postgres -d postgres \
+            -c 'CREATE DATABASE meta_inbound_recovery_ci_smoke OWNER whatsap_smoke'
+          npm run db:migrate
+          node --import tsx --test --test-concurrency=1 \
+            src/test/meta-inbound-crash.integration.test.ts \
+            src/test/meta-inbound-worker-crash.integration.test.ts \
+            src/test/meta-inbound-work-postgres.test.ts
       - name: Probar renovación de sesión y reconexión Socket.IO del cliente
         working-directory: Frontend_py_whatsaapweb
         run: npm run test:socket-session
