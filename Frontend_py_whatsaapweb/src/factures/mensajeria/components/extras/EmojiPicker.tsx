@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import Picker from '@emoji-mart/react';
 import type { EmojiMartData } from '@emoji-mart/data';
+import { useTheme } from '../../../../shared/theme/useTheme';
 
 interface EmojiPickerProps {
   id: string;
@@ -11,6 +12,7 @@ interface EmojiPickerProps {
 type EmojiMartEmoji = { native: string };
 
 const EmojiPicker: React.FC<EmojiPickerProps> = ({ id, open, onSelect }) => {
+  const { resolvedTheme } = useTheme();
   const [data, setData] = useState<EmojiMartData>();
   const [loadFailed, setLoadFailed] = useState(false);
 
@@ -31,7 +33,7 @@ const EmojiPicker: React.FC<EmojiPickerProps> = ({ id, open, onSelect }) => {
       id={id}
       role="dialog"
       aria-label="Selector de emojis"
-      className="absolute bottom-full left-2 right-2 z-30 mb-2 max-h-[50vh] max-w-[380px] overflow-y-auto rounded-lg border border-gray-200 bg-white p-2 shadow-lg"
+      className="absolute bottom-full left-2 right-2 z-30 mb-2 max-h-[50vh] max-w-[380px] overflow-y-auto rounded-lg border border-subtle bg-surface p-2 shadow-lg"
     >
       {data ? (
         <Picker
@@ -41,11 +43,11 @@ const EmojiPicker: React.FC<EmojiPickerProps> = ({ id, open, onSelect }) => {
           navPosition="top"
           searchPosition="top"
           emojiButtonSize={36}
-          theme="light"
+          theme={resolvedTheme}
           dynamicWidth
         />
       ) : (
-        <p role={loadFailed ? 'alert' : 'status'} className="p-2 text-sm text-gray-700">
+        <p role={loadFailed ? 'alert' : 'status'} className="p-2 text-sm text-secondary">
           {loadFailed ? 'No se pudieron cargar los emojis.' : 'Cargando emojis…'}
         </p>
       )}

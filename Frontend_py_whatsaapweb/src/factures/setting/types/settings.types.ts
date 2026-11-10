@@ -22,7 +22,6 @@ export interface WhatsAppConnectionState {
 }
 
 export interface SettingsState {
-  // NOTA: 'tema' ahora se maneja con Jotai (useTheme hook)
   autoDownloadImagesFiles: boolean;
   autoDownloadDocuments: boolean;
   botModality: 'options' | 'words' | null;

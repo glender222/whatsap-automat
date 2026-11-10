@@ -11,7 +11,6 @@ import type { SettingsState } from '../types/settings.types';
 
 /**
  * Hook para manejar las preferencias de configuración
- * NOTA: El tema ahora se maneja con Jotai (useTheme hook)
  */
 export const useSettings = () => {
   const [settings, setSettings] = useState<SettingsState>({

@@ -11,6 +11,7 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
+    "test:e2e": "playwright test",
     "test": "npm run test:tokens && npm run test:campaigns && npm run test:extensions && npm run test:admin && npm run test:marketplace && npm run test:workflows && npm run test:agent-graphs && npm run test:canonical-inbox && npm run test:pdf-media && npm run test:operation-executions && npm run test:auth-session && npm run test:commercial-orders && npm run test:approvals",
     "test:auth-session": "node --import tsx --test src/__tests__/auth-session.test.ts",
     "test:socket-session": "node --import tsx --test src/__tests__/socket-session.integration.mjs",
@@ -49,6 +50,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.33.0",
+    "@playwright/test": "1.65.0",
     "@types/node": "^24.5.1",
     "@types/qrcode": "^1.5.5",
     "@types/react": "^19.1.13",

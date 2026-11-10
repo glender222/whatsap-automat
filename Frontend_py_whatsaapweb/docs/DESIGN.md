@@ -21,7 +21,7 @@ Principios:
 - Tailwind CSS como sistema principal de estilos.
 - `lucide-react` para iconos.
 - CSS global solo para utilidades compartidas, animaciones y tokens base.
-- Modo oscuro soportado con la clase `dark`.
+- La preferencia Claro, Oscuro o Sistema se aplica antes de mostrar la aplicación. Persiste al cambiar de módulo, recargar o cambiar de sesión y se sincroniza entre pestañas del mismo navegador. Solo Sistema sigue cambios del tema del dispositivo. El tema efectivo se aplica al documento y a controles como el selector de emojis.
 
 ## Paleta Base
 
