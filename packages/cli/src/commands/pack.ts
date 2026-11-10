@@ -1,8 +1,8 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { logger } from '../utils/logger';
-import { validateManifestFile } from '../utils/validator';
-import { packDirectoryToTarGz, calculateSha256 } from '../utils/tar';
+import { validateManifestContents } from '../utils/validator';
+import { packDirectoryToTarGz, calculateSha256, readRegularPackageFile } from '../utils/tar';
 
 export interface PackOptions {
   pluginDir?: string;
@@ -14,8 +14,8 @@ export async function handlePack(options: PackOptions): Promise<number> {
   const { pluginDir, out, dryRun } = options;
   const rootDir = path.resolve(process.cwd(), pluginDir || '.');
 
-  if (!fs.existsSync(rootDir) || !fs.statSync(rootDir).isDirectory()) {
-    logger.error(`Target directory not found: ${rootDir}`);
+  if (!fs.existsSync(rootDir) || !fs.lstatSync(rootDir).isDirectory()) {
+    logger.error(`Expected an existing package directory: ${rootDir}`);
     return 1;
   }
 
@@ -25,7 +25,14 @@ export async function handlePack(options: PackOptions): Promise<number> {
     return 1;
   }
 
-  const valResult = validateManifestFile(manifestPath);
+  let manifestContents: string;
+  try {
+    manifestContents = readRegularPackageFile(manifestPath).content.toString('utf8');
+  } catch {
+    logger.error('Cannot pack extension: expected a regular, readable manifest.json.');
+    return 1;
+  }
+  const valResult = validateManifestContents(manifestContents);
   if (!valResult.valid) {
     logger.error(`Cannot pack extension: manifest validation failed.`);
     for (const err of valResult.errors) logger.error(`  - ${err}`);

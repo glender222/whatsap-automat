@@ -53,16 +53,18 @@ export interface ValidationOutput {
 }
 
 export function validateManifestFile(filePath: string, _options: { strict?: boolean } = {}): ValidationOutput {
-  const errors: string[] = [];
-  const warnings: string[] = [];
-
   let rawContent: string;
   try {
     rawContent = fs.readFileSync(filePath, 'utf8');
   } catch (err: any) {
-    return { valid: false, errors: [`Could not read file: ${err.message}`], warnings };
+    return { valid: false, errors: [`Could not read file: ${err.message}`], warnings: [] };
   }
+  return validateManifestContents(rawContent);
+}
 
+export function validateManifestContents(rawContent: string): ValidationOutput {
+  const errors: string[] = [];
+  const warnings: string[] = [];
   let parsedJson: unknown;
   try {
     parsedJson = JSON.parse(rawContent);

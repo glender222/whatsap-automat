@@ -4,6 +4,8 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import * as crypto from 'node:crypto';
+import { once } from 'node:events';
+import { createServer } from 'node:net';
 import { runCli } from '../src/index';
 import { readTarGzEntries } from '../src/utils/tar';
 
@@ -205,6 +207,54 @@ describe('Developer CLI Tool (automat)', () => {
       // Verify strict security exclusions
       assert.ok(!entryNames.some((n) => n.startsWith('.env')), 'Forbidden .env file was bundled');
       assert.ok(!entryNames.some((n) => n.includes('node_modules')), 'node_modules directory was bundled');
+    });
+
+    it('rejects symbolic links for source files, directories, the manifest, and the root', { skip: process.platform === 'win32' }, async () => {
+      const pluginDir = path.join(tmpRoot, 'link-test');
+      await runCli(['init', 'link-test', '--type=tool', `--dir=${pluginDir}`]);
+      const outsideDir = path.join(tmpRoot, 'outside');
+      fs.mkdirSync(outsideDir);
+      const outsideFile = path.join(outsideDir, 'fixture.txt');
+      fs.writeFileSync(outsideFile, 'Outside the package directory');
+      const manifestPath = path.join(pluginDir, 'manifest.json');
+      const externalManifest = path.join(outsideDir, 'manifest.json');
+      fs.copyFileSync(manifestPath, externalManifest);
+      const outTar = path.join(tmpRoot, 'link-test.tgz');
+
+      const fileLink = path.join(pluginDir, 'file-link');
+      fs.symlinkSync(outsideFile, fileLink);
+      assert.equal(await runCli(['pack', pluginDir, `--out=${outTar}`]), 1);
+      fs.unlinkSync(fileLink);
+
+      const directoryLink = path.join(pluginDir, 'directory-link');
+      fs.symlinkSync(outsideDir, directoryLink);
+      assert.equal(await runCli(['pack', pluginDir, `--out=${outTar}`]), 1);
+      fs.unlinkSync(directoryLink);
+
+      const rootLink = path.join(tmpRoot, 'root-link');
+      fs.symlinkSync(pluginDir, rootLink);
+      assert.equal(await runCli(['pack', rootLink, `--out=${outTar}`]), 1);
+
+      fs.unlinkSync(manifestPath);
+      fs.symlinkSync(externalManifest, manifestPath);
+      assert.equal(await runCli(['pack', pluginDir, `--out=${outTar}`]), 1);
+      assert.ok(!fs.existsSync(outTar));
+      assert.ok(!fs.existsSync(`${outTar}.sha256`));
+    });
+
+    it('rejects special files in the included source tree', { skip: process.platform === 'win32' }, async (t) => {
+      const pluginDir = path.join(tmpRoot, 'socket-test');
+      await runCli(['init', 'socket-test', '--type=tool', `--dir=${pluginDir}`]);
+      const server = createServer();
+      t.after(() => new Promise<void>((resolve, reject) => {
+        server.close((error) => { if (error) reject(error); else resolve(); });
+      }));
+      server.listen(path.join(pluginDir, 'fixture.sock'));
+      await once(server, 'listening');
+      const outTar = path.join(tmpRoot, 'socket-test.tgz');
+      assert.equal(await runCli(['pack', pluginDir, `--out=${outTar}`]), 1);
+      assert.ok(!fs.existsSync(outTar));
+      assert.ok(!fs.existsSync(`${outTar}.sha256`));
     });
 
     it('fails to pack if manifest.json is missing in directory', async () => {

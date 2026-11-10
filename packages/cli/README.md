@@ -29,6 +29,10 @@ automat inspect extension.tgz --proof extension.proof.json --trust release-trust
 automat doctor
 ```
 
+`automat pack` expects a source directory under the developer's control. It accepts regular
+files and directories in the included tree. Symbolic links and special files cause packing
+to fail before the archive is written.
+
 ## Offline package verification
 
 The verifier checks the exact archive bytes, registry, publisher tenant, listing, extension identity, and version. It reads a detached proof from the publisher and a separate local release authorization obtained through a trusted administrator channel. Treat the authorization file as a trust root and keep it under local administrative control. Use a fresh authorization to reflect publisher key revocation or listing withdrawal. Offline verification uses the supplied authorization and the local clock.

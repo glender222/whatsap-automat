@@ -67,11 +67,24 @@ export function createUStarHeader(
   return buf;
 }
 
+export function readRegularPackageFile(filePath: string): { content: Buffer; stat: fs.Stats } {
+  if (!fs.lstatSync(filePath).isFile()) throw new Error('Expected a regular package file.');
+  const fd = fs.openSync(filePath, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
+  try {
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile()) throw new Error('Expected a regular package file.');
+    return { content: fs.readFileSync(fd), stat };
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 export function packDirectoryToTarGz(dir: string): PackedResult {
   const includedFiles: string[] = [];
   const buffers: Buffer[] = [];
 
   function walk(currentDir: string, baseDir: string) {
+    if (!fs.lstatSync(currentDir).isDirectory()) throw new Error('Expected a real package directory.');
     const items = fs.readdirSync(currentDir);
     for (const item of items) {
       const fullPath = path.join(currentDir, item);
@@ -81,11 +94,11 @@ export function packDirectoryToTarGz(dir: string): PackedResult {
         continue;
       }
 
-      const stat = fs.statSync(fullPath);
-      if (stat.isDirectory()) {
+      const entry = fs.lstatSync(fullPath);
+      if (entry.isDirectory()) {
         walk(fullPath, baseDir);
-      } else if (stat.isFile()) {
-        const fileContent = fs.readFileSync(fullPath);
+      } else if (entry.isFile()) {
+        const { content: fileContent, stat } = readRegularPackageFile(fullPath);
         const header = createUStarHeader(relPath, fileContent.length, stat.mode & 0o777, Math.floor(stat.mtimeMs / 1000));
         buffers.push(header);
         buffers.push(fileContent);
@@ -94,6 +107,8 @@ export function packDirectoryToTarGz(dir: string): PackedResult {
           buffers.push(Buffer.alloc(512 - remainder));
         }
         includedFiles.push(relPath);
+      } else {
+        throw new Error(`Cannot package "${relPath}": only regular files and directories are supported.`);
       }
     }
   }
