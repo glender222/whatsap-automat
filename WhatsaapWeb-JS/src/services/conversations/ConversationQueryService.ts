@@ -149,7 +149,8 @@ export class ConversationQueryService {
       const { rows } = await client.query(
         `SELECT m.id, m.direction, m.status, m.external_contact_id,
                 m.client_request_id, m.body, COALESCE(m.occurred_at, m.created_at) AS created_at,
-                send.actor_id AS canonical_actor_id, send.connection_id AS canonical_connection_id,
+                send.actor_id AS canonical_actor_id, send.actor_type AS canonical_actor_type,
+                send.agent_identity AS canonical_agent_identity, send.connection_id AS canonical_connection_id,
                 COALESCE((SELECT jsonb_agg(jsonb_build_object(
                   'id', a.id::text, 'filename', a.filename, 'mimeType', COALESCE(a.mime_type, 'application/octet-stream'),
                   'sizeBytes', a.size_bytes
@@ -176,6 +177,7 @@ export class ConversationQueryService {
         })),
         causedBy: row.direction === 'inbound'
           ? { type: 'customer', id: conversation.contactIdentityId ?? row.external_contact_id ?? conversation.externalConversationId }
+          : row.canonical_actor_type === 'ai_agent' ? { type: 'agent', id: row.canonical_agent_identity }
           : row.canonical_actor_id ? { type: 'human', id: String(row.canonical_actor_id) } : { type: 'system', id: 'legacy' },
         createdAt: row.created_at.toISOString(),
       })), page);

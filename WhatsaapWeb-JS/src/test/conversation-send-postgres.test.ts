@@ -1,8 +1,10 @@
 import './fixtures/testEnv';
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { createHmac, randomInt } from 'node:crypto';
 import { once } from 'node:events';
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { createServer, type Server, type ServerResponse } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -16,7 +18,7 @@ import config from '../config/index';
 import { TenantScopedUoW } from '../db/TenantScopedUoW';
 import createConversationV1Routes from '../routes/conversationV1Routes';
 import createMetaWebhookRoutes from '../routes/metaWebhookRoutes';
-import { ConversationSendService } from '../services/conversations/ConversationSendService';
+import { ConversationSendService, type SendAgentText } from '../services/conversations/ConversationSendService';
 import { ConversationQueryService } from '../services/conversations/ConversationQueryService';
 import { ConversationCasService } from '../services/conversations/ConversationCasService';
 import WhatsAppService from '../services/whatsappService';
@@ -612,5 +614,204 @@ test('durable CAS sends one Graph POST per text or attachment intent and reconci
     assert.equal(await (await nativeFetch(outgoingPath, authorized)).text(), 'Fixture attachment');
     assert.equal(downloadGraph.mock.callCount(), 4);
     downloadGraph.mock.restore();
+  });
+
+  await t.test('automatic replies bind durable effects to verified inbound messages, preserve authorship and reconcile signed receipts', async () => {
+    const initialPosts = graphRequests.length;
+    let sequence = 30;
+    async function anchor(tenantId = tenantA, phoneNumberId = phoneA, timestamp = now()): Promise<SendAgentText> {
+      const recipient = `12025550${++sequence}`.padEnd(11, '0');
+      await inbound(phoneNumberId, recipient, timestamp);
+      const conversationId = await conversation(tenantId, recipient, null);
+      const message = await uow.run(tenantId, async (sql) => (await sql.query(`
+        SELECT id FROM messages WHERE company_id = $1 AND conversation_id = $2 AND direction = 'inbound' ORDER BY id DESC LIMIT 1
+      `, [tenantId, conversationId])).rows[0]);
+      return { tenantId, conversationId, inboundMessageId: message.id, phoneNumberId, effect: 'reply', text: 'Automatic fixture reply' };
+    }
+    const rejects = async (command: SendAgentText, reasonCode: string) => {
+      await assert.rejects(sender().sendAgentText(command), (error: any) => error.reasonCode === reasonCode);
+    };
+    const command = await anchor();
+    await rejects({ ...command, tenantId: tenantB }, 'CONVERSATION_NOT_FOUND');
+    await rejects({ ...command, phoneNumberId: phoneB }, 'AGENT_INBOUND_UNVERIFIED');
+    const different = await anchor();
+    await rejects({ ...command, inboundMessageId: different.inboundMessageId }, 'AGENT_INBOUND_UNVERIFIED');
+    await rejects({ ...command, effect: 'card:../bad' }, 'AGENT_SEND_INVALID');
+    await rejects({ ...command, text: '' }, 'AGENT_TEXT_INVALID');
+    await rejects({ ...command, authority: { isCurrent: async () => false } }, 'AGENT_WORK_EXPIRED');
+    const paused = await anchor();
+    await uow.run(tenantA, (sql) => sql.query('UPDATE conversations SET ia_paused = true WHERE id = $1', [paused.conversationId]));
+    await rejects(paused, 'AGENT_REPLY_DISABLED');
+    const taken = await anchor();
+    await new ConversationCasService(uow).takeoverConversation({ tenantId: tenantA, conversationId: taken.conversationId, userId: actor, expectedVersion: 1 });
+    await rejects(taken, 'AGENT_REPLY_DISABLED');
+    const closed = await anchor();
+    await uow.run(tenantA, (sql) => sql.query("UPDATE conversations SET status = 'closed' WHERE id = $1", [closed.conversationId]));
+    await rejects(closed, 'CONVERSATION_CLOSED');
+    const expired = await anchor(tenantA, phoneA, String(Number(now()) - 86_401));
+    await rejects(expired, 'SERVICE_WINDOW_CLOSED');
+    const unverified = await anchor();
+    await uow.run(tenantA, (sql) => sql.query(`
+      UPDATE whatsapp_webhook_events SET payload_json = jsonb_set(payload_json, '{message,from}', '"12025559999"'::jsonb)
+      WHERE company_id = $1 AND provider_message_id = (SELECT provider_message_id FROM messages WHERE id = $2)
+    `, [tenantA, unverified.inboundMessageId]));
+    await rejects(unverified, 'AGENT_INBOUND_UNVERIFIED');
+    await uow.run(tenantA, (sql) => sql.query("UPDATE channel_connections SET status = 'inactive' WHERE tenant_id = $1 AND account_id = $2", [tenantA, phoneA]));
+    await rejects(command, 'SENDING_ACCOUNT_UNAVAILABLE');
+    await uow.run(tenantA, (sql) => sql.query("UPDATE channel_connections SET status = 'active' WHERE tenant_id = $1 AND account_id = $2", [tenantA, phoneA]));
+    assert.equal(graphRequests.length, initialPosts);
+
+    // Lost HTTP acknowledgement: every concurrent/restarted caller sees the durable
+    // unknown state. No runtime cache or fresh worker may authorize another POST.
+    reply = (_request, response) => response.destroy();
+    const [first, concurrent] = await Promise.all([sender().sendAgentText(command), sender().sendAgentText(command)]);
+    assert.equal(first.deliveryState, 'unknown_delivery');
+    assert.deepEqual(first, concurrent);
+    assert.ok(first.messageId);
+    assert.equal(graphRequests.length, initialPosts + 1);
+    const captured = graphRequests.at(-1)!;
+    assert.equal(captured.url, `/v25.0/${phoneA}/messages`);
+    assert.equal(captured.auth, 'Bearer fixture-rotated-token');
+    const freshProcess = await promisify(execFile)(process.execPath, ['--import', 'tsx', '-e', `
+      require('./src/test/fixtures/testEnv.ts');
+      const {Pool} = require('pg');
+      const {TenantScopedUoW} = require('./src/db/TenantScopedUoW.ts');
+      const {ConversationSendService} = require('./src/services/conversations/ConversationSendService.ts');
+      const MetaAccountStore = require('./src/services/whatsapp/meta/MetaAccountStore.ts').default;
+      (async () => {
+        const db = new Pool({connectionString: process.env.CONVERSATION_SEND_TEST_DATABASE_URL});
+        try {
+          let attempts = 0;
+          const service = new ConversationSendService(new TenantScopedUoW(db), new MetaAccountStore(db), true,
+            async () => { attempts++; throw new Error('A restarted replay attempted Graph'); });
+          const result = await service.sendAgentText(JSON.parse(process.env.AGENT_SEND_FIXTURE));
+          process.stdout.write(JSON.stringify({ result, attempts }));
+        } finally { await db.end(); }
+      })().catch(() => { process.exitCode = 1; });
+    `], { env: { ...process.env, AGENT_SEND_FIXTURE: JSON.stringify(command) }, timeout: 15_000 });
+    assert.deepEqual(JSON.parse(freshProcess.stdout), { result: first, attempts: 0 });
+    await rejects({ ...command, text: 'Changed reply' }, 'IDEMPOTENCY_KEY_CONFLICT');
+    await rejects({ ...command, effect: 'card:product-1' }, 'DELIVERY_UNRESOLVED');
+    const metadata = await uow.run(tenantA, async (sql) => (await sql.query(`
+      SELECT c.actor_type, c.actor_id, c.inbound_message_id, c.effect, m.metadata_json
+      FROM conversation_send_claims c JOIN messages m ON m.id = c.message_id WHERE c.tenant_id = $1 AND c.request_key = $2
+    `, [tenantA, first.clientRequestId])).rows[0]);
+    assert.deepEqual(metadata, { actor_type: 'ai_agent', actor_id: null, inbound_message_id: command.inboundMessageId, effect: 'reply',
+      metadata_json: { actorType: 'ai_agent', agentId: 'default', inboundMessageId: command.inboundMessageId, effect: 'reply' } });
+    const history = await new ConversationQueryService(uow).messages(tenantA, command.conversationId, { cursor: null, limit: 10 }, first.clientRequestId);
+    assert.deepEqual(history?.items[0]?.causedBy, { type: 'agent', id: 'default' });
+    assert.equal(await new ConversationQueryService(uow).messages(tenantB, command.conversationId, { cursor: null, limit: 10 }), null);
+    const receipt = { id: 'wamid.agent-recovered', status: 'delivered', timestamp: now(), recipient_id: captured.body.to,
+      biz_opaque_callback_data: captured.body.biz_opaque_callback_data };
+    assert.equal((await signedWebhook(url, phoneA, { statuses: [receipt] }, 'wrong-signature')).status, 403);
+    for (const [phone, status] of [
+      [phoneB, receipt], [secondPhone, receipt], [phoneA, { ...receipt, recipient_id: '12025559999' }],
+      [phoneA, { ...receipt, biz_opaque_callback_data: `automat:${crypto.randomUUID()}` }],
+    ] as const) {
+      assert.equal((await signedWebhook(url, phone, { statuses: [status] })).status, 200);
+      assert.equal((await sender().sendAgentText(command)).deliveryState, 'unknown_delivery');
+    }
+    assert.equal((await signedWebhook(url, phoneA, { statuses: [receipt] })).status, 200);
+    const recovered = await sender().sendAgentText(command);
+    assert.equal(recovered.deliveryState, 'delivered');
+    assert.equal(recovered.providerMessageId, receipt.id);
+    assert.equal(recovered.messageId, first.messageId);
+    assert.equal(graphRequests.length, initialPosts + 1);
+
+    const companyB = await anchor(tenantB, phoneB);
+    reply = (_request, response) => response.end(JSON.stringify({ messages: [{ id: 'wamid.agent-company-b' }] }));
+    const otherSent = await sender().sendAgentText(companyB);
+    assert.equal(otherSent.accepted, true);
+    assert.equal(graphRequests.at(-1)?.url, `/v25.0/${phoneB}/messages`);
+    assert.equal(graphRequests.at(-1)?.auth, 'Bearer fixture-other-tenant-token');
+    assert.notEqual(otherSent.clientRequestId, first.clientRequestId);
+    assert.equal((await uow.run(tenantB, (sql) => sql.query('SELECT 1 FROM conversation_send_claims WHERE message_id = $1', [first.messageId]))).rows.length, 0);
+    await assert.rejects(uow.run(tenantA, (sql) => sql.query(
+      'UPDATE conversation_send_claims SET inbound_message_id = $1 WHERE request_key = $2',
+      [companyB.inboundMessageId, first.clientRequestId],
+    )), (error: any) => error.code === '42501');
+    await assert.rejects(uow.run(tenantA, (sql) => sql.query(
+      'UPDATE conversation_send_claims SET actor_id = $1 WHERE request_key = $2', [actor, first.clientRequestId],
+    )), (error: any) => error.code === '23514');
+
+    // A second verified line in the same conversation does not redirect this
+    // reply: its exact inbound cause chooses the line and its tenant credential.
+    const lineBound = await anchor();
+    const lineRecipient = await uow.run(tenantA, async (sql) => (await sql.query(
+      'SELECT external_contact_id FROM messages WHERE id = $1', [lineBound.inboundMessageId],
+    )).rows[0].external_contact_id);
+    await inbound(secondPhone, lineRecipient);
+    reply = (_request, response) => response.end(JSON.stringify({ messages: [{ id: 'wamid.agent-line-bound' }] }));
+    assert.equal((await sender().sendAgentText(lineBound)).accepted, true);
+    assert.equal(graphRequests.at(-1)?.url, `/v25.0/${phoneA}/messages`);
+    assert.equal(graphRequests.at(-1)?.auth, 'Bearer fixture-rotated-token');
+
+    // Admission commits before the network: a human can take over while an admitted
+    // POST is in flight. The claim remains the sole authority for that one send.
+    const admitted = await anchor();
+    reply = async (_request, response) => {
+      await new ConversationCasService(uow).takeoverConversation({ tenantId: tenantA, conversationId: admitted.conversationId, userId: actor, expectedVersion: 2 });
+      response.end(JSON.stringify({ messages: [{ id: 'wamid.agent-admitted-before-takeover' }] }));
+    };
+    assert.equal((await sender().sendAgentText(admitted)).accepted, true);
+    await rejects({ ...admitted, effect: 'card:later' }, 'AGENT_REPLY_DISABLED');
+
+    // An expired worker after the claim is terminally failed without a Graph POST.
+    const leaseCommand = await anchor();
+    let leaseChecks = 0;
+    const beforeLease = graphRequests.length;
+    const leaseResult = await sender().sendAgentText({ ...leaseCommand, authority: { isCurrent: async (sql) => {
+      leaseChecks++;
+      if (leaseChecks === 1) { assert.ok(sql); return true; }
+      assert.equal(sql, undefined); return false;
+    } } });
+    assert.equal(leaseResult.deliveryState, 'failed');
+    assert.equal((await sender().sendAgentText(leaseCommand)).deliveryState, 'failed');
+    assert.equal(graphRequests.length, beforeLease);
+
+    const file = { path: join(uploadDir, 'agent-card.txt'), mimetype: 'text/plain', originalname: 'agent-card.txt' };
+    await writeFile(file.path, 'Fixture product card');
+    uploadReply = (_request, response) => response.end(JSON.stringify({ id: `agent-media-${mediaRequests.length}` }));
+    const mediaCommand = await anchor();
+    const mediaInput = { ...mediaCommand, file, caption: 'Card response', forceDocument: true };
+    reply = (_request, response) => response.destroy();
+    const mediaResult = await sender().sendAgentAttachment(mediaInput);
+    assert.equal(mediaResult.deliveryState, 'unknown_delivery');
+    const uploads = mediaRequests.length;
+    const posts = graphRequests.length;
+    assert.deepEqual(await sender().sendAgentAttachment(mediaInput), mediaResult);
+    await rejects(mediaCommand, 'IDEMPOTENCY_KEY_CONFLICT');
+    assert.equal(mediaRequests.length, uploads);
+    assert.equal(graphRequests.length, posts);
+    assert.equal(graphRequests.at(-1)?.body.type, 'document');
+    const mediaRequest = graphRequests.at(-1)!;
+    const agentMediaReceipt = { id: 'wamid.agent-media-recovered', status: 'read', timestamp: now(),
+      recipient_id: mediaRequest.body.to, biz_opaque_callback_data: mediaRequest.body.biz_opaque_callback_data };
+    assert.equal((await signedWebhook(url, phoneB, { statuses: [agentMediaReceipt] })).status, 200);
+    assert.equal((await sender().sendAgentAttachment(mediaInput)).deliveryState, 'unknown_delivery');
+    assert.equal((await signedWebhook(url, phoneA, { statuses: [agentMediaReceipt] })).status, 200);
+    const recoveredMedia = await sender().sendAgentAttachment(mediaInput);
+    assert.equal(recoveredMedia.deliveryState, 'read');
+    assert.equal(recoveredMedia.messageId, mediaResult.messageId);
+    assert.equal(mediaRequests.length, uploads);
+    assert.equal(graphRequests.length, posts);
+
+    for (const change of ['pause', 'takeover', 'lease', 'credential'] as const) {
+      const blocked = await anchor();
+      let current = true;
+      uploadReply = async (_request, response) => {
+        if (change === 'pause') await uow.run(tenantA, (sql) => sql.query('UPDATE conversations SET ia_paused = true WHERE id = $1', [blocked.conversationId]));
+        if (change === 'takeover') await new ConversationCasService(uow).takeoverConversation({ tenantId: tenantA, conversationId: blocked.conversationId, userId: actor, expectedVersion: 1 });
+        if (change === 'lease') current = false;
+        if (change === 'credential') await accounts.upsertConnection(tenantA, { phoneNumberId: phoneA, accessToken: 'fixture-new-rotation', graphVersion: 'v25.0' });
+        response.end(JSON.stringify({ id: 'uploaded-before-change' }));
+      };
+      await assert.rejects(sender().sendAgentAttachment({ ...blocked, file, caption: 'No stale card', forceDocument: true,
+        authority: { isCurrent: async () => current } }), (error: any) => error.reasonCode ===
+          (change === 'lease' ? 'AGENT_WORK_EXPIRED' : change === 'credential' ? 'SENDING_ACCOUNT_CHANGED' : 'AGENT_REPLY_DISABLED'));
+      assert.equal(graphRequests.length, posts);
+      assert.equal((await uow.run(tenantA, (sql) => sql.query('SELECT 1 FROM conversation_send_claims WHERE inbound_message_id = $1', [blocked.inboundMessageId]))).rows.length, 0);
+    }
+    await rm(file.path);
   });
 });
