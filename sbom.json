@@ -21,7 +21,7 @@
       },
       {
         "name": "whatsap:lock-sha256:apps/mobile",
-        "value": "18cd11e990289ee28c75b51fb492c613f632d8c5493030d4305d7b747da286ea"
+        "value": "061252baddef692e0fc619e282f67e72bdcc94b44d5825b9c22f7ef6da6f97e4"
       },
       {
         "name": "whatsap:lock-sha256:packages/cli",
@@ -36809,6 +36809,35 @@
       ]
     },
     {
+      "bom-ref": "whatsap:apps/mobile#node_modules/expo-blob",
+      "type": "library",
+      "name": "expo-blob",
+      "version": "58.0.3",
+      "purl": "pkg:npm/expo-blob@58.0.3",
+      "scope": "required",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "whatsap:workspace",
+          "value": "apps/mobile"
+        },
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/expo-blob"
+        },
+        {
+          "name": "whatsap:npm:scope",
+          "value": "runtime"
+        }
+      ]
+    },
+    {
       "bom-ref": "whatsap:apps/mobile#node_modules/expo-constants",
       "type": "library",
       "name": "expo-constants",
@@ -36830,6 +36859,35 @@
         {
           "name": "cdx:npm:package:path",
           "value": "node_modules/expo-constants"
+        },
+        {
+          "name": "whatsap:npm:scope",
+          "value": "runtime"
+        }
+      ]
+    },
+    {
+      "bom-ref": "whatsap:apps/mobile#node_modules/expo-document-picker",
+      "type": "library",
+      "name": "expo-document-picker",
+      "version": "58.0.4",
+      "purl": "pkg:npm/expo-document-picker@58.0.4",
+      "scope": "required",
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "whatsap:workspace",
+          "value": "apps/mobile"
+        },
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/expo-document-picker"
         },
         {
           "name": "whatsap:npm:scope",
@@ -55218,6 +55276,8 @@
         "whatsap:apps/mobile#node_modules/@types/react",
         "whatsap:apps/mobile#node_modules/base64-js",
         "whatsap:apps/mobile#node_modules/expo",
+        "whatsap:apps/mobile#node_modules/expo-blob",
+        "whatsap:apps/mobile#node_modules/expo-document-picker",
         "whatsap:apps/mobile#node_modules/expo-file-system",
         "whatsap:apps/mobile#node_modules/expo-image",
         "whatsap:apps/mobile#node_modules/expo-secure-store",
@@ -57090,12 +57150,24 @@
       ]
     },
     {
+      "ref": "whatsap:apps/mobile#node_modules/expo-blob",
+      "dependsOn": [
+        "whatsap:apps/mobile#node_modules/expo"
+      ]
+    },
+    {
       "ref": "whatsap:apps/mobile#node_modules/expo-constants",
       "dependsOn": [
         "whatsap:apps/mobile#node_modules/@expo/env",
         "whatsap:apps/mobile#node_modules/@expo/require-utils",
         "whatsap:apps/mobile#node_modules/expo",
         "whatsap:apps/mobile#node_modules/react-native"
+      ]
+    },
+    {
+      "ref": "whatsap:apps/mobile#node_modules/expo-document-picker",
+      "dependsOn": [
+        "whatsap:apps/mobile#node_modules/expo"
       ]
     },
     {
