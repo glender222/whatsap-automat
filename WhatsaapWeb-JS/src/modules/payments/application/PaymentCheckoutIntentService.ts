@@ -6,9 +6,17 @@ import { OrderRepositoryPg } from '../../orders/infra/db/OrderRepositoryPg';
 import type { CheckoutIntentSnapshot, PaymentCheckoutIntent } from '../domain/paymentCheckoutIntent.types';
 import { PaymentCheckoutIntentRepositoryPg } from '../infra/db/PaymentCheckoutIntentRepositoryPg';
 
-type CheckoutActor = { companyId: number; actorUserId: number; sessionRole: string | undefined };
+export type CheckoutActor = { companyId: number; actorUserId: number; sessionRole: string | undefined };
 type PrepareCheckout = CheckoutActor & { orderId: number; gatewayId: number; idempotencyKey: string };
 type CheckoutItems = Awaited<ReturnType<OrderRepositoryPg['checkoutItems']>>;
+type LockedOrder = NonNullable<Awaited<ReturnType<OrderRepositoryPg['lockForCheckout']>>>;
+type ReadyOrder = LockedOrder & { status: CheckoutIntentSnapshot['orderStatus'] };
+type LockedCheckout = {
+  intent: PaymentCheckoutIntent;
+  order: LockedOrder;
+  intents: PaymentCheckoutIntentRepositoryPg;
+  orders: OrderRepositoryPg;
+};
 const requestKey = /^[A-Za-z0-9_.:-]{1,128}$/;
 const intentIdPattern = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 const maxDatabaseInt = 2_147_483_647;
@@ -78,6 +86,80 @@ function assertSnapshot(intent: PaymentCheckoutIntent, snapshot: CheckoutIntentS
   }
 }
 
+export async function requireCheckoutAdmin(client: Queryable, actor: CheckoutActor) {
+  const workspace = await readCurrentWorkspace(client, actor.companyId, actor.actorUserId, actor.sessionRole, true);
+  if (!workspace?.capabilities.includes('approvals.review')) {
+    throw new PaymentCheckoutIntentError(403, 'CHECKOUT_ADMIN_REQUIRED', 'El cobro requiere un administrador activo.');
+  }
+}
+
+export async function lockCheckoutIntent(client: Queryable, companyId: number, intentId: string): Promise<LockedCheckout> {
+  const intents = new PaymentCheckoutIntentRepositoryPg(client);
+  const orders = new OrderRepositoryPg(client);
+  const prior = await intents.get(companyId, intentId);
+  const order = prior && await orders.lockForCheckout(companyId, Number(prior.orderId));
+  const intent = order && await intents.get(companyId, intentId);
+  if (!intent || intent.orderId !== prior?.orderId || !order) {
+    throw new PaymentCheckoutIntentError(404, 'CHECKOUT_INTENT_NOT_FOUND', 'Intención de cobro no encontrada.');
+  }
+  return { intent, order, orders, intents };
+}
+
+export async function assertCurrentCheckout(companyId: number, checkout: LockedCheckout): Promise<void> {
+  const { intent, order, intents, orders } = checkout;
+  if (intent.state !== 'prepared') {
+    throw new PaymentCheckoutIntentError(409, 'CHECKOUT_INTENT_VOIDED', 'La intención de cobro fue anulada.');
+  }
+  const orderId = Number(intent.orderId);
+  const ready = await requireReadyOrder(intents, companyId, orderId, order);
+  assertSnapshot(intent, await readSnapshot(orders, intents, companyId, orderId, Number(intent.gatewayId), ready));
+}
+
+async function requireReadyOrder(
+  intents: PaymentCheckoutIntentRepositoryPg, companyId: number, orderId: number, order: LockedOrder,
+): Promise<ReadyOrder> {
+  const voucher = await intents.voucherStatus(companyId, orderId);
+  if (voucher === 'validated') {
+    throw new PaymentCheckoutIntentError(409, 'CHECKOUT_PAYMENT_ALREADY_VALIDATED', 'El pedido ya tiene un comprobante validado.');
+  }
+  if (voucher === 'pending') {
+    throw new PaymentCheckoutIntentError(409, 'CHECKOUT_VOUCHER_PENDING', 'Hay un comprobante pendiente de revisión para el pedido.');
+  }
+  if (order.expired) throw expiredReservation();
+  if (!order.confirmed || (order.status !== 'confirmed' && order.status !== 'reserved')) {
+    throw new PaymentCheckoutIntentError(409, 'CHECKOUT_ORDER_NOT_READY', 'El pedido requiere una confirmación vigente.');
+  }
+  return { ...order, status: order.status };
+}
+
+async function readSnapshot(
+  orders: OrderRepositoryPg, intents: PaymentCheckoutIntentRepositoryPg,
+  companyId: number, orderId: number, gatewayId: number, order: ReadyOrder,
+): Promise<CheckoutIntentSnapshot> {
+  const gatewayRevision = await intents.lockGateway(companyId, gatewayId);
+  if (!gatewayRevision) {
+    throw new PaymentCheckoutIntentError(404, 'CHECKOUT_GATEWAY_UNAVAILABLE', 'La pasarela Mercado Pago no está disponible.');
+  }
+  const snapshot: CheckoutIntentSnapshot = {
+    ...amountAndItems(await orders.checkoutItems(companyId, orderId), order.status),
+    currency: 'PEN', orderStatus: order.status, orderRevision: order.revision,
+    reservationExpiresAt: order.deadline, gatewayRevision,
+  };
+  if (!await intents.deadlineIsLive(order.deadline)) throw expiredReservation();
+  return snapshot;
+}
+
+function expiredReservation() {
+  return new PaymentCheckoutIntentError(409, 'CHECKOUT_RESERVATION_EXPIRED', 'El plazo de reserva del pedido terminó.');
+}
+
+export function assertCheckoutIntentRequest(actor: CheckoutActor, intentId: string, expectedVersion: number) {
+  if (!validActor(actor) || typeof intentId !== 'string' || !intentIdPattern.test(intentId) ||
+      !Number.isInteger(expectedVersion) || expectedVersion < 1 || expectedVersion > maxDatabaseInt) {
+    throw new PaymentCheckoutIntentError(422, 'CHECKOUT_INPUT_INVALID', 'La intención y la versión deben ser válidas.');
+  }
+}
+
 export class PaymentCheckoutIntentService {
   constructor(private readonly uow: TenantScopedUoW = tenantScopedUoW) {}
 
@@ -88,7 +170,7 @@ export class PaymentCheckoutIntentService {
       throw new PaymentCheckoutIntentError(422, 'CHECKOUT_INPUT_INVALID', 'La orden, la pasarela y la clave deben ser válidas.');
     }
     return this.uow.run(companyId, async (client) => {
-      await this.requireAdmin(client, input);
+      await requireCheckoutAdmin(client, input);
       const orders = new OrderRepositoryPg(client);
       const order = await orders.lockForCheckout(companyId, orderId);
       if (!order) throw new PaymentCheckoutIntentError(404, 'CHECKOUT_ORDER_NOT_FOUND', 'Pedido comercial no encontrado.');
@@ -98,35 +180,16 @@ export class PaymentCheckoutIntentService {
         assertKeyScope(existing, input);
         if (existing.state === 'voided') return existing;
       }
-      const voucher = await intents.voucherStatus(companyId, orderId);
-      if (voucher === 'validated') {
-        throw new PaymentCheckoutIntentError(409, 'CHECKOUT_PAYMENT_ALREADY_VALIDATED', 'El pedido ya tiene un comprobante validado.');
-      }
-      if (voucher === 'pending') {
-        throw new PaymentCheckoutIntentError(409, 'CHECKOUT_VOUCHER_PENDING', 'Hay un comprobante pendiente de revisión para el pedido.');
-      }
-      if (order.expired) throw this.expiredReservation();
-      if (!order.confirmed || (order.status !== 'confirmed' && order.status !== 'reserved')) {
-        throw new PaymentCheckoutIntentError(409, 'CHECKOUT_ORDER_NOT_READY', 'El pedido requiere una confirmación vigente.');
-      }
+      const ready = await requireReadyOrder(intents, companyId, orderId, order);
       if (!existing && await intents.hasPrepared(companyId, orderId)) throw this.preparedConflict();
-      const gatewayRevision = await intents.lockGateway(companyId, gatewayId);
-      if (!gatewayRevision) {
-        throw new PaymentCheckoutIntentError(404, 'CHECKOUT_GATEWAY_UNAVAILABLE', 'La pasarela Mercado Pago no está disponible.');
-      }
-      const snapshot: CheckoutIntentSnapshot = {
-        ...amountAndItems(await orders.checkoutItems(companyId, orderId), order.status),
-        currency: 'PEN', orderStatus: order.status, orderRevision: order.revision,
-        reservationExpiresAt: order.deadline, gatewayRevision,
-      };
-      if (!await intents.deadlineIsLive(order.deadline)) throw this.expiredReservation();
+      const snapshot = await readSnapshot(orders, intents, companyId, orderId, gatewayId, ready);
       if (existing) {
         assertSnapshot(existing, snapshot);
         return existing;
       }
       const intent = await intents.insert({ ...input, id: randomUUID(), externalReference: randomUUID(), snapshot });
       if (intent) return intent;
-      if (!await intents.deadlineIsLive(order.deadline)) throw this.expiredReservation();
+      if (!await intents.deadlineIsLive(order.deadline)) throw expiredReservation();
       const conflict = await intents.byKey(companyId, actorUserId, idempotencyKey);
       if (conflict) assertKeyScope(conflict, input);
       throw this.preparedConflict();
@@ -134,17 +197,10 @@ export class PaymentCheckoutIntentService {
   }
 
   async void(input: CheckoutActor & { intentId: string; expectedVersion: number }): Promise<PaymentCheckoutIntent> {
-    if (!validActor(input) || typeof input.intentId !== 'string' || !intentIdPattern.test(input.intentId) ||
-        !Number.isInteger(input.expectedVersion) || input.expectedVersion < 1 || input.expectedVersion > maxDatabaseInt) {
-      throw new PaymentCheckoutIntentError(422, 'CHECKOUT_INPUT_INVALID', 'La intención y la versión deben ser válidas.');
-    }
+    assertCheckoutIntentRequest(input, input.intentId, input.expectedVersion);
     return this.uow.run(input.companyId, async (client) => {
-      await this.requireAdmin(client, input);
-      const intents = new PaymentCheckoutIntentRepositoryPg(client);
-      const intent = await intents.get(input.companyId, input.intentId);
-      if (!intent || !await new OrderRepositoryPg(client).lockForCheckout(input.companyId, Number(intent.orderId))) {
-        throw new PaymentCheckoutIntentError(404, 'CHECKOUT_INTENT_NOT_FOUND', 'Intención de cobro no encontrada.');
-      }
+      await requireCheckoutAdmin(client, input);
+      const { intents } = await lockCheckoutIntent(client, input.companyId, input.intentId);
       const updated = await intents.void(input.companyId, input.intentId, input.expectedVersion);
       if (!updated) {
         throw new PaymentCheckoutIntentError(409, 'CHECKOUT_VERSION_CONFLICT', 'El estado o la versión de la intención cambiaron.');
@@ -153,19 +209,8 @@ export class PaymentCheckoutIntentService {
     });
   }
 
-  private async requireAdmin(client: Queryable, actor: CheckoutActor) {
-    const workspace = await readCurrentWorkspace(client, actor.companyId, actor.actorUserId, actor.sessionRole, true);
-    if (!workspace?.capabilities.includes('approvals.review')) {
-      throw new PaymentCheckoutIntentError(403, 'CHECKOUT_ADMIN_REQUIRED', 'Preparar el cobro requiere un administrador activo.');
-    }
-  }
-
   private preparedConflict() {
     return new PaymentCheckoutIntentError(409, 'CHECKOUT_ALREADY_PREPARED', 'El pedido ya tiene una intención de cobro vigente.');
-  }
-
-  private expiredReservation() {
-    return new PaymentCheckoutIntentError(409, 'CHECKOUT_RESERVATION_EXPIRED', 'El plazo de reserva del pedido terminó.');
   }
 }
 
