@@ -3,7 +3,7 @@ import { handleInit } from './commands/init';
 import { handleValidate } from './commands/validate';
 import { handlePack } from './commands/pack';
 import { handleDoctor } from './commands/doctor';
-import { handleVerify } from './commands/verify';
+import { handlePackageCheck } from './commands/verify';
 import { logger } from './utils/logger';
 
 export const VERSION = '0.4.0';
@@ -24,6 +24,8 @@ Commands:
                     Options: --out=<path>, --dry-run
   verify <archive>  Verify an archive against a signed proof and local release authorization
                     Options: --proof=<file>, --trust=<file>, --json
+  inspect <archive> Verify a signed archive and inspect its packaged manifest and files
+                    Options: --proof=<file>, --trust=<file>, --json
   doctor            Inspect developer environment and system diagnostics
                     Options: --json, --verbose
 
@@ -34,12 +36,13 @@ Global Options:
 }
 
 export async function runCli(args: string[]): Promise<number> {
-  if (args[0]?.toLowerCase() === 'verify') {
+  const packageCommand = args[0]?.toLowerCase();
+  if (packageCommand === 'verify' || packageCommand === 'inspect') {
     if (args.length === 2 && ['--help', '-h'].includes(args[1]!)) {
       printHelp();
       return 0;
     }
-    return handleVerify(args.slice(1));
+    return handlePackageCheck(packageCommand, args.slice(1));
   }
   const options = {
     help: { type: 'boolean' as const, short: 'h' },

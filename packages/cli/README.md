@@ -22,6 +22,9 @@ automat pack .
 # Verify a signed archive against a separately obtained administrator authorization
 automat verify extension.tgz --proof extension.proof.json --trust release-trust.json --json
 
+# Inspect the contents of the same signed archive before staging
+automat inspect extension.tgz --proof extension.proof.json --trust release-trust.json --json
+
 # System environment diagnostics
 automat doctor
 ```
@@ -56,4 +59,27 @@ The release authorization has `format` equal to `automat-extension-trust-v1`, th
 
 Use regular local files. Verification reads at most 64 MiB for the archive, 8 KiB for the proof, and 64 KiB for the authorization, with up to 32 keys. A successful check exits with code `0`. Failures exit with code `1` and provide a stable error code. `--json` returns the release identity and authorized key fingerprint on success.
 
-A verified package remains an opaque archive. Manifest safety, executable isolation, and installation permissions are separate gates. A subsequent staging workflow must verify the same bytes it stages, since the local path can change after verification.
+## Signed package inspection
+
+`automat inspect` verifies the release with the same proof and authorization as `automat verify`.
+It inspects a snapshot of the bytes that passed verification and reports the extension type,
+entrypoints, number of files, and expanded size. With `--json`, success returns
+`inspected: true` and the signed release identity. Failure exits with code `1` and reports
+`inspected: false` with a stable error code.
+
+The inspection accepts gzip-compressed POSIX USTAR with regular files and implicit
+directories, as emitted by `automat pack`. It checks tar headers and archive termination.
+Paths must use safe relative UTF-8 names in NFC with at most 32 components. Duplicate paths,
+case collisions, file/directory collisions, symlinks, hard links, and special tar records
+are rejected. The tar may expand to at most 64 MiB, contain up to 4,096 files, and hold
+individual files of at most 32 MiB.
+
+The archive needs a root `manifest.json` of at most 64 KiB. The manifest must match the
+canonical schema and signed extension ID and version, pass the existing forbidden-scope
+checks, and name entrypoints included in the archive. Build the extension before packing
+if the manifest points to generated files.
+
+Inspection is an offline format and identity check. It keeps the archive inert and creates
+no staging files. Installation permissions and executable isolation remain separate gates.
+A future staging workflow must consume the same verified snapshot because the local path can
+change after inspection.

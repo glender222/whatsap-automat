@@ -92,7 +92,12 @@ async function readJson<T>(path: string, limit: number, label: 'PROOF' | 'TRUST'
   }
 }
 
-export async function verifyLocalPackage(archivePath: string, proofPath: string, trustPath: string) {
+async function verifyPackage(
+  archivePath: string,
+  proofPath: string,
+  trustPath: string,
+  capture?: (sizeBytes: number) => (chunk: Buffer) => void,
+) {
   const trust = await readJson(trustPath, 64 * 1024, 'TRUST', trustSchema);
   const proof = await readJson(proofPath, 8 * 1024, 'PROOF', proofSchema);
   const expiresAt = Date.parse(trust.expiresAt);
@@ -127,9 +132,31 @@ export async function verifyLocalPackage(archivePath: string, proofPath: string,
     throw new PackageVerificationError('SIGNATURE_INVALID', 'The publisher signature could not be verified.');
   }
   const hash = createHash('sha256');
-  await readLocalFile(archivePath, archiveLimit, 'ARCHIVE', (chunk) => hash.update(chunk), trust.artifact.sizeBytes);
+  const consume = capture?.(trust.artifact.sizeBytes);
+  await readLocalFile(archivePath, archiveLimit, 'ARCHIVE', (chunk) => {
+    hash.update(chunk);
+    consume?.(chunk);
+  }, trust.artifact.sizeBytes);
   if (hash.digest('hex') !== trust.artifact.sha256) {
     throw new PackageVerificationError('ARCHIVE_DIGEST_MISMATCH', 'Archive SHA-256 differs from the authorized release.');
   }
   return { artifact: trust.artifact, keyId: key.keyId, trustExpiresAt: trust.expiresAt };
+}
+
+
+export function verifyLocalPackage(archivePath: string, proofPath: string, trustPath: string) {
+  return verifyPackage(archivePath, proofPath, trustPath);
+}
+
+export async function loadVerifiedArchive(archivePath: string, proofPath: string, trustPath: string) {
+  let bytes = Buffer.alloc(0);
+  let offset = 0;
+  const verified = await verifyPackage(archivePath, proofPath, trustPath, (sizeBytes) => {
+    bytes = Buffer.alloc(sizeBytes);
+    return (chunk) => {
+      // The verifier checks the exact length before it returns this snapshot.
+      if (offset < bytes.length) offset += chunk.copy(bytes, offset);
+    };
+  });
+  return { verified, bytes };
 }
