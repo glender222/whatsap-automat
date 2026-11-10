@@ -209,6 +209,12 @@ El ejemplo inicial del editor validaba estructura, pero no preparaba el modelo n
 - **Después.** La migración 061 vincula la clave a la empresa, la ejecución, la herramienta y los argumentos. Solo el proceso que confirma el reclamo puede invocar el efecto y guardar el resultado. El broker conserva un resultado incierto para inspección cuando falta el acuse.
 - **Validación.** La regresión con PostgreSQL y procesos separados conserva un recibo por clave en ambas reproducciones. También comprueba permiso revocado, parámetros distintos con la misma clave, acuse perdido antes y después del commit, fallo de PostgreSQL y aislamiento de resultados entre Alfa y Bravo. Los registros históricos se conservan para inspección. [Pruebas, despliegue y recuperación](../../WhatsaapWeb-JS/docs/tool-effect-claims.md).
 
+## IA-09. Acuse de ejecución perdido al recargar Studio
+
+- **Antes.** El backend completaba una ejecución de la revisión publicada. Si se perdía la respuesta HTTP y la página se recargaba, el navegador olvidaba el identificador. Enviar de nuevo el mismo texto podía reservar cuota y llamar al proveedor otra vez.
+- **Después.** La pestaña conserva solo el identificador y el plazo del intento por usuario, empresa, revisión y modo. Studio pide reintroducir el mismo texto y reutiliza ese identificador. La nueva ejecución es una acción explícita que prepara el formulario y devuelve el foco al campo. Las solicitudes del panel también se vinculan a la sesión que abrió Studio.
+- **Validación.** Chromium dejó que la API completara el intento de Alfa y descartó su respuesta. Tras recargar, Alfa reenvió el mismo identificador y la API devolvió `not_dispatched`. El texto no quedó en el almacenamiento de la pestaña y la interfaz de Bravo no mostró ese intento. La reserva de cuota conserva la evidencia del despacho. La salida de texto original solo está disponible si su primera respuesta llega al navegador.
+
 ## WF-01. Ingreso mientras se revierte una revisión publicada
 
 - **Antes.** CI devolvió `WORKFLOW_NOT_PUBLISHED` durante una reversión válida. La regresión local mantuvo la reversión abierta hasta observar en PostgreSQL que un webhook esperaba su bloqueo. El ingreso falló al intentar fijar la revisión mediante una consulta que también bloqueaba la definición.

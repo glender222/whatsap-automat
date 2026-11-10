@@ -10,6 +10,7 @@ import {
 const control = 'w-full rounded-md border border-subtle bg-canvas px-3 py-2 text-sm';
 const button = 'min-h-11 rounded-md border border-subtle px-3 text-sm font-semibold disabled:opacity-55';
 type Attempt = { runId: string; suiteId: string };
+type ExecutionAttempt = { attemptId: string; timeoutMs: number };
 type Case = { id: string; input: string; pattern: string };
 const firstCase: Case = { id: 'case-1', input: '', pattern: '' };
 const outcomes = { passed: 'Aprobado', assertion_failed: 'Aserción incumplida', uncertain: 'Resultado incierto', blocked: 'Bloqueado' };
@@ -26,12 +27,28 @@ function attemptKey(draft: GraphDraft, mode: StudioExecutionMode) {
   return `studio-${mode}/${draft.tenantId}/${draft.graphId}/${draft.version}/${draft.specHash}`;
 }
 
+function executionAttemptKey(draft: GraphDraft, mode: StudioExecutionMode, userId: string) {
+  return `studio-execution/${encodeURIComponent(userId)}/${attemptKey(draft, mode)}`;
+}
+
+function readExecutionAttempt(key: string): ExecutionAttempt | null {
+  try {
+    const value = JSON.parse(sessionStorage.getItem(key) ?? 'null');
+    if (typeof value?.attemptId !== 'string' || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value.attemptId) ||
+        !Number.isSafeInteger(value.timeoutMs) || value.timeoutMs < 1 || value.timeoutMs > 30_000) return null;
+    return { attemptId: value.attemptId, timeoutMs: value.timeoutMs };
+  } catch { return null; }
+}
+
 function providerTimeout(draft: GraphDraft, count = 1) {
   return Math.min(10000, Math.floor(Math.min(60000, draft.limits.maxDurationSeconds * 1000) / count));
 }
 
 export default function AgentGraphExecutionPanel({ draft }: { draft: GraphDraft }) {
-  const [sessionGeneration] = useState(() => readSession().generation);
+  const [{ sessionGeneration, userId }] = useState(() => {
+    const session = readSession();
+    return { sessionGeneration: session.generation, userId: session.user?.id ?? null };
+  });
   const [status, setStatus] = useState<Awaited<ReturnType<typeof readStudioExecution>>>();
   const [statusAttempt, setStatusAttempt] = useState(0);
   const [problem, setProblem] = useState<GraphProblem>();
@@ -43,25 +60,29 @@ export default function AgentGraphExecutionPanel({ draft }: { draft: GraphDraft 
   const [suiteName, setSuiteName] = useState('');
   const [cases, setCases] = useState([firstCase]);
   const [executionInput, setExecutionInput] = useState('');
+  const [pendingExecution, setPendingExecution] = useState<ExecutionAttempt | null>(null);
   const [output, setOutput] = useState<string>();
   const [credentialSaved, setCredentialSaved] = useState(false);
   const action = useRef<AbortController>(null);
   const cancellation = useRef<AbortController>(null);
   const suiteSave = useRef<{ id: string; signature: string } | null>(null);
-  const executionAttempt = useRef<{ attemptId: string; input: string } | null>(null);
+  const executionField = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     const request = new AbortController();
-    readStudioExecution(draft, request.signal).then((value) => {
+    readStudioExecution(draft, { signal: request.signal, sessionGeneration }).then((value) => {
       if (request.signal.aborted) return;
       setStatus(value);
       setAttempt(value.mode ? readAttempt(attemptKey(draft, value.mode)) : null);
+      setPendingExecution(value.mode && userId !== null ? readExecutionAttempt(executionAttemptKey(draft, value.mode, userId)) : null);
       setResult((current) => current?.mode === value.mode ? current : undefined);
     }).catch((cause: unknown) => {
       if (!request.signal.aborted) setProblem(graphProblem(cause, 'No pudimos consultar la disponibilidad de ejecución.'));
     });
     return () => { request.abort(); action.current?.abort(); cancellation.current?.abort(); };
-  }, [draft, statusAttempt]);
+  }, [draft, sessionGeneration, statusAttempt, userId]);
+
+  const forSession = (signal: AbortSignal) => ({ signal, sessionGeneration });
 
   async function perform(label: string, work: (signal: AbortSignal) => Promise<void>) {
     if (action.current || cancellation.current) return;
@@ -87,7 +108,7 @@ export default function AgentGraphExecutionPanel({ draft }: { draft: GraphDraft 
     if (suiteSave.current?.signature !== signature) suiteSave.current = { id: crypto.randomUUID(), signature };
     const { id } = suiteSave.current;
     void perform('Guardando suite…', async (signal) => {
-      const saved = await saveStudioSuite(draft, { ...suite, id }, signal);
+      const saved = await saveStudioSuite(draft, { ...suite, id }, forSession(signal));
       if (signal.aborted) return;
       setStatus((value) => value && { ...value, suites: [saved, ...value.suites.filter((item) => item.id !== saved.id)].slice(0, 20) });
       setSelected(saved.id);
@@ -105,11 +126,11 @@ export default function AgentGraphExecutionPanel({ draft }: { draft: GraphDraft 
     if (!key) return;
     setCredentialSaved(false);
     void perform('Guardando credencial…', async (signal) => {
-      await saveStudioOpenAiCredential(key, sessionGeneration, signal);
+      await saveStudioOpenAiCredential(key, forSession(signal));
       if (signal.aborted) return;
       form.reset();
       setCredentialSaved(true);
-      const value = await readStudioExecution(draft, signal);
+      const value = await readStudioExecution(draft, forSession(signal));
       if (!signal.aborted) setStatus(value);
     });
   }
@@ -130,7 +151,7 @@ export default function AgentGraphExecutionPanel({ draft }: { draft: GraphDraft 
     setResult(undefined);
     try { sessionStorage.setItem(attemptKey(draft, mode), JSON.stringify(next)); } catch { /* Browser storage is optional. */ }
     void perform(evaluating, async (signal) => {
-      const evaluation = await studioEvaluation(draft, next, mode, signal, verification ? 1000 : providerTimeout(draft, suite.scenarioCount));
+      const evaluation = await studioEvaluation(draft, next, mode, forSession(signal), verification ? 1000 : providerTimeout(draft, suite.scenarioCount));
       if (!signal.aborted) {
         setResult((current) => current?.status === 'cancelled' && evaluation.status === 'running' ? current : evaluation);
       }
@@ -144,7 +165,7 @@ export default function AgentGraphExecutionPanel({ draft }: { draft: GraphDraft 
     setCancelling(true);
     setProblem(undefined);
     try {
-      const evaluation = await cancelStudioEvaluation(draft, attempt, mode, request.signal);
+      const evaluation = await cancelStudioEvaluation(draft, attempt, mode, forSession(request.signal));
       if (!request.signal.aborted) {
         setResult((current) => current?.runId === evaluation.runId && current.scenarios.length > evaluation.scenarios.length
           ? current : evaluation);
@@ -160,25 +181,32 @@ export default function AgentGraphExecutionPanel({ draft }: { draft: GraphDraft 
   function publish() {
     if (!mode || !canDispatch || !result || result.mode !== mode) return;
     void perform('Publicando revisión…', async (signal) => {
-      const publication = await publishStudioRevision(draft, result.runId, mode, signal);
+      const publication = await publishStudioRevision(draft, result.runId, mode, forSession(signal));
       if (!signal.aborted) setStatus((value) => value && { ...value, active: publication });
     });
   }
 
+  function savePendingExecution(next: ExecutionAttempt | null) {
+    setPendingExecution(next);
+    if (!mode || userId === null) return;
+    const key = executionAttemptKey(draft, mode, userId);
+    try {
+      if (next) sessionStorage.setItem(key, JSON.stringify(next));
+      else sessionStorage.removeItem(key);
+    } catch { /* Browser storage is optional. */ }
+  }
+
   function execute(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!mode || !canDispatch) return;
-    const next = executionAttempt.current?.input === executionInput ? executionAttempt.current
-      : { attemptId: crypto.randomUUID(), input: executionInput };
-    executionAttempt.current = next;
-    setOutput(undefined);
+    if (!mode || !canDispatch || !executionInput.trim()) return;
     void perform('Ejecutando prueba…', async (signal) => {
-      const text = await executeStudioRevision(draft, {
-        ...next, timeoutMs: verification ? 1000 : providerTimeout(draft),
-      }, mode, signal);
+      const attempt = pendingExecution ?? { attemptId: crypto.randomUUID(), timeoutMs: verification ? 1000 : providerTimeout(draft) };
+      savePendingExecution(attempt);
+      setOutput(undefined);
+      const text = await executeStudioRevision(draft, { ...attempt, input: executionInput }, mode, forSession(signal));
       if (signal.aborted) return;
       setOutput(text);
-      executionAttempt.current = null;
+      savePendingExecution(null);
     });
   }
 
@@ -244,7 +272,7 @@ export default function AgentGraphExecutionPanel({ draft }: { draft: GraphDraft 
         <div className="flex flex-wrap gap-2">
           <button className={button} type="button" disabled={controlsBusy || !canDispatch || !status.profile?.compatible || !suite} onClick={evaluate}>Evaluar revisión</button>
           {attempt && <button className={button} type="button" disabled={controlsBusy} onClick={() => void perform('Consultando evaluación…', async (signal) => {
-            const evaluation = await studioEvaluation(draft, attempt, mode, signal);
+            const evaluation = await studioEvaluation(draft, attempt, mode, forSession(signal));
             if (!signal.aborted) {
               setSelected(evaluation.suiteId);
               setResult(evaluation);
@@ -271,9 +299,25 @@ export default function AgentGraphExecutionPanel({ draft }: { draft: GraphDraft 
         </div>}
         {active && <p role="status" className="text-sm font-medium">{verification ? 'Revisión activa en verificación' : 'Revisión activa para proveedor'} · {active.version}</p>}
         {active?.version === draft.version && <form className="space-y-2" onSubmit={execute}>
-          <label className="block text-sm">Entrada para la revisión publicada<textarea className={control} required maxLength={4096}
+          {pendingExecution && !controlsBusy && <div id="published-execution-recovery" className="space-y-1 text-sm text-secondary">
+            <p role="status">Hay una ejecución sin confirmar.</p>
+            <p>Vuelve a introducir el mismo texto para reintentar con el identificador anterior. Preparar una ejecución nueva puede generar otro consumo.</p>
+          </div>}
+          <label className="block text-sm">Entrada para la revisión publicada<textarea ref={executionField} className={control} required maxLength={4096}
+            aria-describedby={pendingExecution && !controlsBusy ? 'published-execution-recovery' : undefined}
+            disabled={controlsBusy}
             value={executionInput} onChange={(event) => setExecutionInput(event.target.value)} /></label>
-          <button className={button} disabled={controlsBusy || !canDispatch}>Ejecutar revisión publicada</button>
+          <div className="flex flex-wrap gap-2">
+            <button className={button} disabled={controlsBusy || !canDispatch}>
+              {pendingExecution ? 'Reintentar la misma ejecución' : 'Ejecutar revisión publicada'}
+            </button>
+            {pendingExecution && <button type="button" className={button} disabled={controlsBusy} onClick={() => {
+              savePendingExecution(null);
+              setExecutionInput('');
+              setProblem(undefined);
+              executionField.current?.focus();
+            }}>Preparar una ejecución nueva</button>}
+          </div>
           {output !== undefined && <p role="status" className="whitespace-pre-wrap break-words text-sm">{output}</p>}
         </form>}
         {busy && !(busy === evaluating && result?.status === 'cancelled') && <p role="status" className="text-sm text-secondary">{busy}</p>}

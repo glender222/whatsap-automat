@@ -125,6 +125,7 @@ test('two workspaces evaluate, publish and execute only their verified revision'
 
 if (process.env.STUDIO_PROVIDER_FIXTURE === '1') {
   test('provider mode requires a company credential and runs its published revision from Studio', async ({ browser, request }) => {
+    test.setTimeout(60_000);
     const companies = provisionCompanies('--studio');
     const graphId = 'qa-provider-' + randomUUID();
     const apiPath = `${backend}/api/v1/agent-graphs`;
@@ -198,12 +199,44 @@ if (process.env.STUDIO_PROVIDER_FIXTURE === '1') {
       await alpha.panel.getByRole('button', { name: 'Ejecutar revisión publicada' }).press('Enter');
       await expect(alpha.panel.getByText('Resultado de prueba: Publicación Alfa')).toBeVisible();
 
+      const executeUrl = `${apiPath}/${graphId}/execute?version=1`;
+      const executeInput = alpha.panel.getByRole('textbox', { name: 'Entrada para la revisión publicada' });
+      const lostInput = 'Prueba con acuse perdido Alfa';
+      let originalAttempt: string | undefined;
+      await alpha.page.route(executeUrl, async (route) => {
+        originalAttempt = route.request().postDataJSON().attemptId;
+        const response = await route.fetch();
+        expect((await response.json()).execution.status).toBe('completed');
+        await route.abort();
+      }, { times: 1 });
+      await executeInput.fill(lostInput);
+      await alpha.panel.getByRole('button', { name: 'Ejecutar revisión publicada' }).press('Enter');
+      await expect(alpha.panel.getByRole('alert')).toContainText('No pudimos confirmar la operación.');
+      expect(originalAttempt).toBeTruthy();
+      expect(await alpha.page.evaluate(() => JSON.stringify(sessionStorage))).not.toContain(lostInput);
+      await alpha.page.reload();
+      await expect(executeInput).toHaveValue('');
+      await expect(alpha.panel.getByText('Hay una ejecución sin confirmar.')).toBeVisible();
+      await executeInput.fill(lostInput);
+      const replayed = alpha.page.waitForResponse((response) => response.url() === executeUrl &&
+        response.request().method() === 'POST', { timeout: 8000 });
+      await alpha.panel.getByRole('button', { name: 'Reintentar la misma ejecución' }).press('Enter');
+      const replay = await replayed;
+      expect(replay.request().postDataJSON().attemptId).toBe(originalAttempt);
+      expect((await replay.json()).execution.status).toBe('not_dispatched');
+      await expect(alpha.panel.getByRole('alert')).toContainText('Esta solicitud no generó otro envío.');
+      await alpha.panel.getByRole('button', { name: 'Preparar una ejecución nueva' }).press('Enter');
+      await expect(executeInput).toBeFocused();
+      await expect(executeInput).toHaveValue('');
+      await expect(alpha.panel.getByText('Hay una ejecución sin confirmar.')).toHaveCount(0);
+
       const foreign = await request.get(`${apiPath}/${graphId}/evaluations/${runId}?version=1`, { headers: bravo.headers });
       expect(foreign.status()).toBe(404);
       await bravo.page.reload();
       await expect(bravo.panel.getByText(/Configura una credencial de OpenAI/)).toBeVisible();
       await expect(bravo.panel.getByRole('button', { name: 'Evaluar revisión' })).toBeDisabled();
       await expect(bravo.panel.getByText(/Revisión activa para proveedor/)).toHaveCount(0);
+      await expect(bravo.panel.getByText('Hay una ejecución sin confirmar.')).toHaveCount(0);
 
       await alpha.panel.getByText('Credencial de OpenAI', { exact: true }).click();
       await key.fill('fixture-studio-provider');

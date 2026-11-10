@@ -238,8 +238,10 @@ export interface ExecutionEvaluation {
   scenarios: { scenarioId: string; outcome: 'passed' | 'assertion_failed' | 'uncertain' | 'blocked' }[];
 }
 
-function executionConfig(draft: GraphDraft, signal: AbortSignal) {
-  return { params: { version: draft.version }, signal };
+type StudioRequest = { signal: AbortSignal; sessionGeneration: number };
+
+function executionConfig(draft: GraphDraft, request: StudioRequest): AuthRequestConfig {
+  return { params: { version: draft.version }, ...request };
 }
 
 function verifiedPublication(publication: StudioPublication | undefined, draft: GraphDraft, mode: StudioExecutionMode | null) {
@@ -248,13 +250,13 @@ function verifiedPublication(publication: StudioPublication | undefined, draft: 
     (publication.version !== draft.version || publication.specHash === draft.specHash);
 }
 
-export async function readStudioExecution(draft: GraphDraft, signal: AbortSignal) {
+export async function readStudioExecution(draft: GraphDraft, request: StudioRequest) {
   const { data } = await api.get<{
     mode: StudioExecutionMode | null; suites: ExecutionSuite[]; active: StudioPublication | null;
     availability?: 'ready' | 'paused' | 'credential_required';
     profile?: { compatible: boolean; issue: string | null; model: string };
   }>(
-    graphEndpoint(draft.graphId) + '/execution', executionConfig(draft, signal),
+    graphEndpoint(draft.graphId) + '/execution', executionConfig(draft, request),
   );
   if ((data?.mode !== 'verification' && data?.mode !== 'provider' && data?.mode !== null) || !Array.isArray(data.suites) ||
       !data.suites.every((suite) => typeof suite.id === 'string' && typeof suite.name === 'string' && Number.isSafeInteger(suite.scenarioCount)) ||
@@ -266,16 +268,16 @@ export async function readStudioExecution(draft: GraphDraft, signal: AbortSignal
   return data;
 }
 
-export async function saveStudioOpenAiCredential(apiKey: string, sessionGeneration: number, signal: AbortSignal) {
-  const config: AuthRequestConfig = { signal, sessionGeneration };
+export async function saveStudioOpenAiCredential(apiKey: string, request: StudioRequest) {
+  const config: AuthRequestConfig = request;
   const { data } = await api.post<{ success: boolean }>('/v1/ai/providers', { provider: 'openai', apiKey }, config);
   if (data?.success !== true) throw new Error('El servidor no confirmó el guardado de la credencial.');
 }
 
 export async function saveStudioSuite(draft: GraphDraft, suite: {
   id: string; name: string; scenarios: { id: string; name: string; mockInput: string; expectedTextPatterns: string[] }[];
-}, signal: AbortSignal) {
-  const { data } = await api.post<ExecutionSuite>(graphEndpoint(draft.graphId) + '/evaluation-suites', suite, executionConfig(draft, signal));
+}, request: StudioRequest) {
+  const { data } = await api.post<ExecutionSuite>(graphEndpoint(draft.graphId) + '/evaluation-suites', suite, executionConfig(draft, request));
   if (data?.id !== suite.id || data.name !== suite.name || data.scenarioCount !== suite.scenarios.length) {
     throw new Error('El servidor no confirmó la suite guardada.');
   }
@@ -283,9 +285,9 @@ export async function saveStudioSuite(draft: GraphDraft, suite: {
 }
 
 export async function studioEvaluation(draft: GraphDraft, attempt: { runId: string; suiteId: string },
-  mode: StudioExecutionMode, signal: AbortSignal, timeoutMs?: number) {
+  mode: StudioExecutionMode, request: StudioRequest, timeoutMs?: number) {
   const endpoint = graphEndpoint(draft.graphId) + '/evaluations';
-  const config = executionConfig(draft, signal);
+  const config = executionConfig(draft, request);
   const { data } = timeoutMs === undefined
     ? await api.get<ExecutionEvaluation>(endpoint + '/' + encodeURIComponent(attempt.runId), config)
     : await api.post<ExecutionEvaluation>(endpoint, { ...attempt, timeoutMs }, { ...config, timeout: 65000 });
@@ -293,9 +295,9 @@ export async function studioEvaluation(draft: GraphDraft, attempt: { runId: stri
 }
 
 export async function cancelStudioEvaluation(draft: GraphDraft, attempt: { runId: string; suiteId: string },
-  mode: StudioExecutionMode, signal: AbortSignal) {
+  mode: StudioExecutionMode, request: StudioRequest) {
   const endpoint = graphEndpoint(draft.graphId) + '/evaluations/' + encodeURIComponent(attempt.runId) + '/cancel';
-  const { data } = await api.post<ExecutionEvaluation>(endpoint, {}, executionConfig(draft, signal));
+  const { data } = await api.post<ExecutionEvaluation>(endpoint, {}, executionConfig(draft, request));
   return confirmEvaluation(data, draft, attempt, mode);
 }
 
@@ -309,9 +311,9 @@ function confirmEvaluation(data: ExecutionEvaluation, draft: GraphDraft, attempt
   return data;
 }
 
-export async function publishStudioRevision(draft: GraphDraft, evaluationId: string, mode: StudioExecutionMode, signal: AbortSignal) {
+export async function publishStudioRevision(draft: GraphDraft, evaluationId: string, mode: StudioExecutionMode, request: StudioRequest) {
   const { data } = await api.post<StudioPublication>(
-    graphEndpoint(draft.graphId) + '/publish', { evaluationId }, executionConfig(draft, signal),
+    graphEndpoint(draft.graphId) + '/publish', { evaluationId }, executionConfig(draft, request),
   );
   if (!verifiedPublication(data, draft, mode) || data.version !== draft.version || data.evaluationId !== evaluationId) {
     throw new Error('El servidor no confirmó la publicación de esta revisión.');
@@ -320,9 +322,9 @@ export async function publishStudioRevision(draft: GraphDraft, evaluationId: str
 }
 
 export async function executeStudioRevision(draft: GraphDraft, attempt: { attemptId: string; input: string; timeoutMs: number },
-  mode: StudioExecutionMode, signal: AbortSignal) {
+  mode: StudioExecutionMode, request: StudioRequest) {
   const { data } = await api.post<{ publication: StudioPublication; execution: { status: string; output?: { text: string } } }>(
-    graphEndpoint(draft.graphId) + '/execute', attempt, { ...executionConfig(draft, signal), timeout: attempt.timeoutMs + 5000 },
+    graphEndpoint(draft.graphId) + '/execute', attempt, { ...executionConfig(draft, request), timeout: attempt.timeoutMs + 5000 },
   );
   if (!verifiedPublication(data?.publication, draft, mode) || data.publication.version !== draft.version || typeof data.execution?.status !== 'string') {
     throw new Error('El servidor no confirmó la ejecución de esta revisión.');
