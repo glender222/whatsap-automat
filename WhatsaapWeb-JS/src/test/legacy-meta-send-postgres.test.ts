@@ -46,6 +46,9 @@ function multipart(
 test('legacy HTTP routes never send or persist free-form Meta text and preserve authorized sends', {
   skip: !connectionString && 'LEGACY_META_TEST_DATABASE_URL is required',
 }, async (t) => {
+  // Keep application logs out of the Node 22 test runner's serialized stdout stream (nodejs/node#65934).
+  t.mock.method(console, 'log', console.error.bind(console));
+
   // Use the same connection as the production route middleware, including forced RLS.
   const database = new URL(connectionString!);
   process.env.DB_HOST = database.hostname;
