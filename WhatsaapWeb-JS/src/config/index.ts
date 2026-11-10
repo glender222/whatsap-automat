@@ -159,8 +159,8 @@ const config = {
     persistWrites: process.env.CONVERSATIONS_PERSIST_WRITES === 'true',
   },
 
-  // defaultCompanyId es EXCLUSIVAMENTE para inicialización de esquema y seed de base de datos.
-  // Queda estrictamente PROHIBIDO su uso como fallback en autenticación o autorización operativa.
+  // Empresa de inicialización y propietaria del dispositivo Web.js de desarrollo.
+  // Las operaciones autenticadas deben recibir la empresa del token.
   defaultCompanyId: parseInteger('DEFAULT_COMPANY_ID', 1) || 1,
 };
 

@@ -28,9 +28,13 @@ export class WhatsappWebAdapter implements MessageChannelPort {
       // El servicio legacy envía texto plano; adjuntos se delegarán en futuras iteraciones.
       const sentMessage = await this.legacyService.sendMessage(
         dto.externalConversationId,
-        dto.body
+        dto.body,
+        null,
+        { companyId: dto.companyId },
       );
-      const providerMessageId = sentMessage?.id?._serialized as string | undefined;
+      const id = sentMessage?.id;
+      const providerMessageId = typeof id === 'string' ? id : id?._serialized;
+
       if (!providerMessageId) {
         throw new Error('Provider did not return a message ID');
       }

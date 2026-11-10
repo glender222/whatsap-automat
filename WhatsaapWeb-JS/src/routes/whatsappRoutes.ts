@@ -5,6 +5,7 @@ import { JwtRequest, resolveWhatsappCompanyId } from '../middleware/jwtAuth';
 import { requireChatTenantAccess } from '../middleware/resourceAuth';
 import { cleanRejectedUpload, explicitTemplateName, legacyHumanSend } from '../middleware/legacyHumanSend';
 
+const { requireAdmin } = require('../middleware/authMiddleware');
 const multer = require('multer') as any;
 
 export function createWhatsAppRoutes(whatsappService: WhatsAppService): Router {
@@ -23,8 +24,17 @@ export function createWhatsAppRoutes(whatsappService: WhatsAppService): Router {
     }
   });
 
-  router.get('/qr', (_req: Request, res: Response) => {
-    res.json({ qr: whatsappService.getQR() || null, provider: whatsappService.provider });
+  router.get('/qr', (req: JwtRequest, res: Response, next: NextFunction) => {
+    if (whatsappService.provider !== 'webjs') return res.json({ qr: null, provider: whatsappService.provider });
+    return requireAdmin(req, res, () => {
+      try {
+        const qr = whatsappService.getQR(resolveWhatsappCompanyId(req));
+        res.setHeader('Cache-Control', 'no-store');
+        res.json({ qr, provider: whatsappService.provider });
+      } catch (error) {
+        next(error);
+      }
+    });
   });
 
   router.get('/me', async (req: Request, res: Response, next: NextFunction) => {
@@ -42,22 +52,23 @@ export function createWhatsAppRoutes(whatsappService: WhatsAppService): Router {
     }
   });
 
-  router.post('/init', async (req: Request, res: Response, next: NextFunction) => {
+  router.post('/init', requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
     try {
-      await whatsappService.initialize();
+      const companyId = resolveWhatsappCompanyId(req as JwtRequest);
+      await whatsappService.initialize(companyId);
       res.json({
         success: true,
         provider: whatsappService.provider,
-        status: await whatsappService.getCompanyStatus(resolveWhatsappCompanyId(req as JwtRequest)),
+        status: await whatsappService.getCompanyStatus(companyId),
       });
     } catch (error) {
       next(error);
     }
   });
 
-  router.post('/logout', async (_req: Request, res: Response, next: NextFunction) => {
+  router.post('/logout', requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
     try {
-      await whatsappService.logout();
+      await whatsappService.logout(resolveWhatsappCompanyId(req as JwtRequest));
       res.json({ success: true, provider: whatsappService.provider });
     } catch (error) {
       next(error);

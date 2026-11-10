@@ -1,6 +1,6 @@
 import type { HandoffTicket, HandoffTicketSummary } from '../domain/runtime.types';
 import { HandoffTicketRepositoryPg } from '../infra/db/HandoffTicketRepositoryPg';
-import { emitDashboard, emitToRoom } from '../../../sockets/socketEmitter';
+import { emitDashboard, emitConversation } from '../../../sockets/socketEmitter';
 
 export class AgentHandoffService {
   constructor(private readonly repository: HandoffTicketRepositoryPg) {}
@@ -38,7 +38,7 @@ export class AgentHandoffService {
       priority: ticket.priority,
     });
     if (input.chatId) {
-      emitToRoom(input.chatId, 'agent:handoff', { ticketId: ticket.id, reason: ticket.reason, priority: ticket.priority });
+      emitConversation(input.companyId, input.chatId, 'agent:handoff', { ticketId: ticket.id, reason: ticket.reason, priority: ticket.priority });
     }
     return ticket;
   }

@@ -1,6 +1,7 @@
 const { asyncHandler } = require('../middleware/errorHandler');
 const AuthService = require('../services/authService');
 const User = require('../models/User');
+const { resolveWhatsappCompanyId } = require('../middleware/jwtAuth');
 
 class AuthController {
   constructor(whatsappService) {
@@ -12,39 +13,24 @@ class AuthController {
   // ========================
 
   getQRLegacy = asyncHandler(async (req, res) => {
-    const qr = this.whatsappService.getQR();
+    const qr = this.whatsappService.getQR(resolveWhatsappCompanyId(req));
+    res.setHeader('Cache-Control', 'no-store');
     res.json({ qr: qr || null });
   });
 
   getStatusLegacy = asyncHandler(async (req, res) => {
-    const status = await (this.whatsappService.getCompanyStatus
-      ? this.whatsappService.getCompanyStatus(require('../middleware/jwtAuth').resolveWhatsappCompanyId(req))
-      : this.whatsappService.getStatus());
-    res.json(status);
+    res.json(await this.whatsappService.getCompanyStatus(resolveWhatsappCompanyId(req)));
   });
 
   getMeLegacy = asyncHandler(async (req, res) => {
-    const info = await (this.whatsappService.getCompanyStatus
-      ? this.whatsappService.getMyInfo(require('../middleware/jwtAuth').resolveWhatsappCompanyId(req))
-      : this.whatsappService.getMyInfo());
-    
-    if (!info) {
-      return res.status(503).json({ error: "No disponible aún" });
-    }
-    
+    const info = await this.whatsappService.getMyInfo(resolveWhatsappCompanyId(req));
+    if (!info) return res.status(503).json({ error: 'No disponible aún' });
     res.json(info);
   });
 
   logoutLegacy = asyncHandler(async (req, res) => {
-    console.log("🔴 Iniciando cierre de sesión...");
-    
-    await this.whatsappService.logout();
-    
-    console.log("Sesión cerrada exitosamente - Dispositivo desvinculado");
-    res.json({ 
-      success: true, 
-      message: "Sesión cerrada exitosamente - Dispositivo desvinculado de WhatsApp" 
-    });
+    await this.whatsappService.logout(resolveWhatsappCompanyId(req));
+    res.json({ success: true, message: 'Dispositivo desvinculado de WhatsApp' });
   });
 
   // ========================
@@ -216,29 +202,6 @@ class AuthController {
     res.json({
       success: true,
       message: 'Estación eliminada exitosamente'
-    });
-  });
-
-  // ========================
-  // API endpoints (nuevos)
-  // ========================
-
-  getQR = asyncHandler(async (req, res) => {
-    const qr = this.whatsappService.getQR();
-    res.json({ qr: qr || null });
-  });
-
-  getStatus = this.getStatusLegacy;
-
-  logoutWhatsapp = asyncHandler(async (req, res) => {
-    console.log("🔴 Iniciando cierre de sesión...");
-    
-    await this.whatsappService.logout();
-    
-    console.log("Sesión cerrada exitosamente - Dispositivo desvinculado");
-    res.json({ 
-      success: true, 
-      message: "Sesión cerrada exitosamente - Dispositivo desvinculado de WhatsApp" 
     });
   });
 }

@@ -1,4 +1,4 @@
-import { emitDashboard, emitToRoom } from '../../../sockets/socketEmitter';
+import { emitDashboard, emitConversation } from '../../../sockets/socketEmitter';
 import { AiSessionRepositoryPg } from '../infra/db/AiSessionRepositoryPg';
 import { AiSessionEventService } from './AiSessionEventService';
 
@@ -65,7 +65,7 @@ export class AiChatSessionService {
       status: 'running' as const,
     };
     emitDashboard('agent:activity_turn', turnPayload);
-    emitToRoom(input.chatId, 'agent:activity_turn', turnPayload);
+    emitConversation(input.companyId, input.chatId, 'agent:activity_turn', turnPayload);
     const sessionPayload = {
       companyId: input.companyId,
       chatId: input.chatId,
@@ -75,7 +75,7 @@ export class AiChatSessionService {
       domainKey: input.domainKey,
     };
     emitDashboard('agent:session_updated', sessionPayload);
-    emitToRoom(input.chatId, 'agent:session_updated', sessionPayload);
+    emitConversation(input.companyId, input.chatId, 'agent:session_updated', sessionPayload);
     return { sessionId: session.id, turnId: turn.id };
   }
 
@@ -135,7 +135,7 @@ export class AiChatSessionService {
       commandCount: input.commandCount ?? 0,
     };
     emitDashboard('agent:activity_turn', event);
-    emitToRoom(input.chatId, 'agent:activity_turn', event);
+    emitConversation(input.companyId, input.chatId, 'agent:activity_turn', event);
   }
 
   async markSessionStatus(input: {
@@ -157,7 +157,7 @@ export class AiChatSessionService {
         domainKey: input.domainKey || 'gestion_web',
       };
       emitDashboard('agent:session_updated', payload);
-      emitToRoom(input.chatId, 'agent:session_updated', payload);
+      emitConversation(input.companyId, input.chatId, 'agent:session_updated', payload);
     }
   }
 }

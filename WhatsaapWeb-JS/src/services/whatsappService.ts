@@ -2,6 +2,7 @@ import path from 'path';
 import { existsSync } from 'fs';
 import { promises as fs } from 'fs';
 import { randomUUID } from 'node:crypto';
+import type { Server } from 'socket.io';
 import { MetaCloudClient, MetaMediaMessageType } from './whatsapp/meta/MetaCloudClient';
 import { MetaAccountStore } from './whatsapp/meta/MetaAccountStore';
 import { MetaInboxStore, type MetaMediaAttachment } from './whatsapp/meta/MetaInboxStore';
@@ -13,7 +14,7 @@ import pool from '../config/database';
 import type { AgentRuntimeLogInput } from '../modules/ai/domain/runtime.types';
 import { AiRuntimeOrchestrator, getAiRuntimeOrchestrator } from '../modules/ai';
 import type { ProductCardSender, ProductCardSendPayload } from '../modules/ai';
-import { emitDashboard, emitToRoom } from '../sockets/socketEmitter';
+import { emitDashboard, emitConversation } from '../sockets/socketEmitter';
 
 
 type Provider = 'webjs' | 'meta-cloud';
@@ -86,7 +87,6 @@ export class WhatsAppService {
   readonly metaAccountStore: MetaAccountStore | null;
   private readonly agentService: AgentService;
   private conversationCore: any;
-  private io: any = null;
 
   constructor() {
     this.provider = (config.whatsapp.provider || 'webjs') as Provider;
@@ -99,9 +99,15 @@ export class WhatsAppService {
       : null;
   }
 
-  setSocketIO(io: any): void {
-    this.io = io;
-    if (this.whatsappClient) this.whatsappClient.setSocketIO(io);
+  setSocketIO(io: Server): void {
+    if (this.whatsappClient) {
+      const companyId = config.defaultCompanyId;
+      this.whatsappClient.setSocketIO({
+        emit: (event: string, payload: unknown) =>
+          io.to(event === 'qr' ? `whatsapp-link-admin:${companyId}` : `tenant:${companyId}`).emit(event, payload),
+        to: (chatId: string) => io.to(`conversation:${companyId}:${chatId}`),
+      });
+    }
     if (this.metaStore) this.metaStore.setSocketIO(io);
   }
 
@@ -118,19 +124,29 @@ export class WhatsAppService {
     return this.conversationCore || null;
   }
 
-  async initialize(): Promise<boolean> {
+  private webClientForCompany(companyId: number) {
+    if (companyId !== config.defaultCompanyId) {
+      throw Object.assign(new Error('WhatsApp Web.js solo está disponible para la empresa configurada.'), {
+        code: 'WEBJS_COMPANY_FORBIDDEN', statusCode: 403,
+      });
+    }
+    return this.whatsappClient;
+  }
+
+  async initialize(companyId = config.defaultCompanyId): Promise<boolean> {
     if (this.provider === 'meta-cloud') {
-      await this.metaAccountStore?.ensureEnvAccount(config.defaultCompanyId || 1, config.meta);
+      if (companyId !== config.defaultCompanyId) return true;
+      await this.metaAccountStore?.ensureEnvAccount(companyId, config.meta);
       console.log('✅ WhatsApp provider meta-cloud inicializado sin QR');
       return true;
     }
-    await this.whatsappClient.initialize();
+    await this.webClientForCompany(companyId).initialize();
     return true;
   }
 
-  getQR(): string | null {
+  getQR(companyId: number): string | null {
     if (this.provider === 'meta-cloud') return null;
-    return this.whatsappClient.getQR();
+    return this.webClientForCompany(companyId).getQR();
   }
 
   async getStatus(): Promise<Record<string, unknown>> {
@@ -138,7 +154,16 @@ export class WhatsAppService {
   }
 
   async getCompanyStatus(companyId = config.defaultCompanyId || 1): Promise<Record<string, unknown>> {
-    if (this.provider !== 'meta-cloud') return this.whatsappClient.getStatus();
+    if (this.provider === 'webjs') {
+      if (companyId !== config.defaultCompanyId) {
+        return {
+          provider: 'webjs', status: 'DISCONNECTED', accountStatus: 'unavailable_for_company',
+          configured: false, connected: false, isReady: false, isConnected: false, hasQR: false,
+        };
+      }
+      const status = this.whatsappClient.getStatus();
+      return { ...status, provider: 'webjs', configured: Boolean(status.isReady), connected: Boolean(status.isConnected) };
+    }
 
     const account = await this.metaAccountStore?.getAccountForCompany(companyId);
     const clientConfig = this.metaAccountStore?.toClientConfig(account || null, true);
@@ -235,12 +260,15 @@ export class WhatsAppService {
         wabaId: status.wabaId,
       };
     }
-    return this.whatsappClient.getMyInfo();
+    return this.webClientForCompany(companyId).getMyInfo();
   }
 
-  async logout(): Promise<boolean> {
-    if (this.provider === 'meta-cloud') return true;
-    return this.whatsappClient.logout();
+  async logout(companyId: number): Promise<boolean> {
+    if (this.provider === 'meta-cloud') {
+      await this.disconnectCompanyConnection(companyId);
+      return true;
+    }
+    return this.webClientForCompany(companyId).logout();
   }
 
   async destroy(): Promise<boolean> {
@@ -249,26 +277,18 @@ export class WhatsAppService {
     return true;
   }
 
-  getChats(): unknown[] {
-    if (this.provider === 'meta-cloud') return [];
-    return this.whatsappClient.getChats();
-  }
-
   async getChatsList(companyId = config.defaultCompanyId || 1): Promise<unknown[]> {
     if (this.provider === 'meta-cloud') {
       return this.getMetaStore(companyId)?.getChats() || [];
     }
-    if (typeof this.whatsappClient.getChatsList === 'function') {
-      return this.whatsappClient.getChatsList();
-    }
-    return this.getChats();
+    return this.webClientForCompany(companyId).getChats();
   }
 
   async getChatMessages(chatId: string, limit = 50, before = 0, companyId = config.defaultCompanyId || 1): Promise<unknown[]> {
     if (this.provider === 'meta-cloud') {
       return this.getMetaStore(companyId)?.getMessages(chatId, limit, before) || [];
     }
-    return this.whatsappClient.messageHandler.getChatMessages(chatId, limit, before);
+    return this.webClientForCompany(companyId).messageHandler.getChatMessages(chatId, limit, before);
   }
 
   async getChatSessionStatus(chatId: string, companyId = config.defaultCompanyId || 1): Promise<any> {
@@ -283,6 +303,7 @@ export class WhatsAppService {
       };
     }
 
+    this.webClientForCompany(companyId);
     return {
       hasActiveSession: true,
       status: 'open',
@@ -411,7 +432,7 @@ export class WhatsAppService {
       };
     }
 
-    return this.whatsappClient.messageHandler.sendMessage(chatId, message, media, options);
+    return this.webClientForCompany(options.companyId ?? config.defaultCompanyId).messageHandler.sendMessage(chatId, message, media, options);
   }
 
   async getMediaInfo(messageId: string, companyId = config.defaultCompanyId || 1): Promise<unknown | null> {
@@ -432,16 +453,18 @@ export class WhatsAppService {
         storageStatus: attachment.storage_status,
       };
     }
-    if (typeof this.whatsappClient.mediaHandler.getMediaInfo === 'function') {
-      return this.whatsappClient.mediaHandler.getMediaInfo(messageId);
+    const { mediaHandler } = this.webClientForCompany(companyId);
+    if (typeof mediaHandler.getMediaInfo === 'function') {
+      return mediaHandler.getMediaInfo(messageId);
     }
     return null;
   }
 
-  async getMediaThumbnail(messageId: string): Promise<unknown | null> {
+  async getMediaThumbnail(messageId: string, companyId: number): Promise<unknown | null> {
     if (this.provider === 'meta-cloud') return null;
-    if (typeof this.whatsappClient.mediaHandler.getMediaThumbnail === 'function') {
-      return this.whatsappClient.mediaHandler.getMediaThumbnail(messageId);
+    const { mediaHandler } = this.webClientForCompany(companyId);
+    if (typeof mediaHandler.getMediaThumbnail === 'function') {
+      return mediaHandler.getMediaThumbnail(messageId);
     }
     return null;
   }
@@ -463,7 +486,7 @@ export class WhatsAppService {
       await store?.markConversationRead(chatId);
       return;
     }
-    await this.whatsappClient.messageHandler.markAsRead(chatId);
+    await this.webClientForCompany(companyId).messageHandler.markAsRead(chatId);
   }
 
   async downloadMedia(messageId: string, companyId = config.defaultCompanyId || 1): Promise<unknown> {
@@ -492,7 +515,7 @@ export class WhatsAppService {
 
       return this.loadMetaAttachment(store, attachment, attachment.provider_media_id);
     }
-    return this.whatsappClient.mediaHandler.downloadMedia(messageId);
+    return this.webClientForCompany(companyId).mediaHandler.downloadMedia(messageId);
   }
 
   async downloadConversationAttachment(companyId: number, conversationId: number, messageId: number, attachmentId: number) {
@@ -543,11 +566,11 @@ export class WhatsAppService {
     };
   }
 
-  async getProfilePhoto(chatId: string): Promise<unknown> {
+  async getProfilePhoto(chatId: string, companyId: number): Promise<unknown> {
     if (this.provider === 'meta-cloud') {
       throw new Error('Foto de perfil no disponible via Meta Cloud API');
     }
-    return this.whatsappClient.mediaHandler.getProfilePhoto(chatId);
+    return this.webClientForCompany(companyId).mediaHandler.getProfilePhoto(chatId);
   }
 
   verifyMetaWebhook(mode: unknown, verifyToken: unknown, challenge: unknown): unknown | null {
@@ -921,7 +944,7 @@ export class WhatsAppService {
       reply: result.reply,
       confidence: result.confidence,
     });
-    emitToRoom(to, 'agent:auto_reply_sent', {
+    emitConversation(companyId, to, 'agent:auto_reply_sent', {
       chatId: to,
       agentId,
       messageId: sent?.id || null,

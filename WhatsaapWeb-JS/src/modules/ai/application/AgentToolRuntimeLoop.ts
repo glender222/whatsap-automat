@@ -4,7 +4,7 @@ import { AgentToolLogger } from './AgentToolLogger';
 import { AgentToolRegistry } from './AgentToolRegistry';
 import { getHandoffToolService } from './tools';
 import { getAiProviderFactory } from '../infra/provider/AiProviderFactory';
-import { emitDashboard, emitToRoom } from '../../../sockets/socketEmitter';
+import { emitDashboard, emitConversation } from '../../../sockets/socketEmitter';
 import type { AiAgent, AutomatorMode } from '../domain/agent.types';
 import type {
   AgentToolContext,
@@ -93,7 +93,7 @@ export class AgentToolRuntimeLoop {
     while (rounds < MAX_TOOL_ROUNDS && totalCalls < MAX_TOOL_CALLS_PER_MESSAGE) {
       rounds++;
       const provider = getAiProviderFactory().create(agent.provider || 'opencode');
-      if (ctx.chatId) emitToRoom(ctx.chatId, 'agent:typing', { chatId: ctx.chatId, agentId: agent.id });
+      if (ctx.chatId) emitConversation(ctx.companyId, ctx.chatId, 'agent:typing', { chatId: ctx.chatId, agentId: agent.id });
 
       const raw = await provider.complete(conversation as any, { model: String(agent.model || '') });
       const parsed = tryParseJson(raw);
@@ -153,7 +153,7 @@ export class AgentToolRuntimeLoop {
           continue;
         }
         if (ctx.chatId) {
-          emitToRoom(ctx.chatId, 'agent:final', { chatId: ctx.chatId, agentId: agent.id, action: adjusted.action, confidence: adjusted.confidence });
+          emitConversation(ctx.companyId, ctx.chatId, 'agent:final', { chatId: ctx.chatId, agentId: agent.id, action: adjusted.action, confidence: adjusted.confidence });
         }
         emitDashboard('agent:final', { companyId: ctx.companyId, chatId: ctx.chatId, agentId: agent.id, action: adjusted.action, confidence: adjusted.confidence });
         return { final: adjusted, handoffTicketId, toolResults, rounds, fallbackReason: null };

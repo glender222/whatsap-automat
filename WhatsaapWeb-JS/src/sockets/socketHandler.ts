@@ -1,5 +1,6 @@
 import { Server, Socket } from 'socket.io';
 import pool from '../config/database';
+import config from '../config/index';
 import { DbQueryable, isInternalChatId, normalizeChatIdCandidates, queryTenantResource } from '../middleware/resourceAuth';
 import { socketJwtAuthMiddleware, AuthenticatedSocketData } from './socketAuth';
 import { SocketSessionMonitor } from './SocketSessionMonitor';
@@ -37,6 +38,11 @@ export class SocketHandler {
 
       // 2. Unirse automáticamente a salas autorizadas del tenant
       socket.join(`tenant:${tenantId}`);
+      const isWebJs = this.whatsappService?.provider === 'webjs';
+      const hasChannelAccess = !isWebJs || companyId === config.defaultCompanyId;
+      if (isWebJs && hasChannelAccess && data.user?.rol === 'ADMIN') {
+        socket.join(`whatsapp-link-admin:${tenantId}`);
+      }
       if (workspaceId) {
         socket.join(`workspace:${tenantId}:${workspaceId}`);
       }
@@ -212,12 +218,11 @@ export class SocketHandler {
             }
           }
 
-          // Chat verificado: unir a sala acotada por tenant y sala raw por compatibilidad
+          // Chat verificado: unir a la sala de la empresa.
           const scopedRoom = `conversation:${tenantId}:${chatId}`;
           socket.join(scopedRoom);
-          socket.join(chatId);
 
-          if (!chatId.includes('@newsletter') && this.whatsappService && typeof this.whatsappService.markAsRead === 'function') {
+          if (hasChannelAccess && !chatId.includes('@newsletter') && this.whatsappService && typeof this.whatsappService.markAsRead === 'function') {
             try {
               await this.whatsappService.markAsRead(chatId, companyId);
             } catch (err) {
@@ -253,9 +258,10 @@ export class SocketHandler {
           const obj = roomOrChatId as Record<string, unknown>;
           target = String(obj.chatId || obj.conversationId || obj.room || '').trim();
         }
-        if (!target) return;
-        socket.leave(`conversation:${tenantId}:${target}`);
-        socket.leave(target);
+        const prefix = `conversation:${tenantId}:`;
+        if (target.startsWith('conversation:') && !target.startsWith(prefix)) return;
+        const chatId = target.startsWith(prefix) ? target.slice(prefix.length) : target;
+        if (CHAT_ID_REGEX.test(chatId)) socket.leave(prefix + chatId);
       };
 
       socket.on('leave_conversation', handleLeave);
@@ -263,6 +269,10 @@ export class SocketHandler {
 
       // Solicitar chats acotados por tenant
       socket.on('request-chats', async () => {
+        if (!hasChannelAccess) {
+          socket.emit('chats-updated', []);
+          return;
+        }
         if (this.whatsappService && typeof this.whatsappService.getChatsList === 'function') {
           try {
             const chats = await this.whatsappService.getChatsList(companyId);

@@ -222,9 +222,9 @@ function createAuthRoutes(whatsappService) {
   // WhatsApp Routes (Legacy protegidas)
   // ========================
 
-  router.get('/qr', validateJWT, authController.getQR);
-  router.get('/status', validateJWT, authController.getStatus);
-  router.post('/logout-whatsapp', validateJWT, authController.logoutWhatsapp);
+  router.get('/qr', validateJWT, requireAdmin, authController.getQRLegacy);
+  router.get('/status', validateJWT, authController.getStatusLegacy);
+  router.post('/logout-whatsapp', validateJWT, requireAdmin, authController.logoutLegacy);
 
   return router;
 }

@@ -25,7 +25,9 @@ const GeneralSettingsPage: React.FC = () => {
     try {
       const overview = await CompanyService.getOverview();
       setCompanyOverview(overview);
-      if (overview.whatsapp.provider === 'webjs') void connection.fetchNumeroAfiliado();
+      if (overview.whatsapp.provider === 'webjs' && overview.whatsapp.accountStatus !== 'unavailable_for_company') {
+        void connection.fetchNumeroAfiliado();
+      }
     } catch {
       setCompanyOverview(null);
       setOverviewError(true);

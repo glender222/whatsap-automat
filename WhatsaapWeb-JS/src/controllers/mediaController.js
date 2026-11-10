@@ -351,7 +351,7 @@ class MediaController {
   getMediaThumbnail = asyncHandler(async (req, res) => {
     const { messageId } = req.params;
 
-    const thumb = await this.whatsappService.getMediaThumbnail(messageId);
+    const thumb = await this.whatsappService.getMediaThumbnail(messageId, getWhatsappCompanyId(req));
     // Implementar:
     // - msg.body para stickers?
     // - msg._data.previewE2E / msg._data.thumbnail if available
@@ -383,7 +383,7 @@ class MediaController {
     }
 
     try {
-      const photoPath = await this.whatsappService.getProfilePhoto(chatId);
+      const photoPath = await this.whatsappService.getProfilePhoto(chatId, getWhatsappCompanyId(req));
       res.setHeader('Access-Control-Allow-Origin', '*');
       res.setHeader('Content-Type', 'image/jpeg');
       return res.sendFile(photoPath, (err) => {

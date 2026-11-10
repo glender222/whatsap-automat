@@ -14,7 +14,7 @@ process.env.DB_PASSWORD ||= 'test-only-database-password';
 const { SocketHandler } = require('../sockets/socketHandler') as typeof import('../sockets/socketHandler');
 const {
   emitDashboard,
-  emitToRoom,
+  emitConversation,
   emitToTenant,
   setSocketIo,
 } = require('../sockets/socketEmitter') as typeof import('../sockets/socketEmitter');
@@ -37,7 +37,10 @@ interface MockConversation {
   external_conversation_id: string;
 }
 
+const sharedChat = '5491177777777@c.us';
 const mockConversations: MockConversation[] = [
+  { id: 43, company_id: 1, external_conversation_id: sharedChat },
+  { id: 98, company_id: 2, external_conversation_id: sharedChat },
   { id: 42, company_id: 1, external_conversation_id: '5491111111111@c.us' },
   { id: 99, company_id: 2, external_conversation_id: '5491199999999@c.us' },
 ];
@@ -361,7 +364,7 @@ describe('PR-F1-01: Socket.IO Fail-Closed Security & Room Isolation', () => {
 
       const serverSocket = io.sockets.sockets.get(client.id!);
       assert.ok(serverSocket!.rooms.has('conversation:1:5491111111111@c.us'));
-      assert.ok(serverSocket!.rooms.has('5491111111111@c.us'));
+      assert.ok(!serverSocket!.rooms.has('5491111111111@c.us'));
     });
 
     test('evento legacy join ejecuta la misma validación de tenant', async () => {
@@ -518,33 +521,27 @@ describe('PR-F1-01: Socket.IO Fail-Closed Security & Room Isolation', () => {
       assert.equal(anyReceived, false, 'Emisión sin tenant debe ser descartada fail-closed sin fugas');
     });
 
-    test('emitToRoom entrega eventos solo a los sockets unidos a dicha sala', async () => {
+    test('un mismo identificador de WhatsApp mantiene los eventos separados por empresa', async () => {
       const clientA = createClient(createTenantAToken(1));
       const clientB = createClient(createTenantBToken(2));
-
       await Promise.all([waitForConnect(clientA), waitForConnect(clientB)]);
 
-      // Client A se une a sala específica
-      await new Promise<any>((resolve) => {
-        clientA.emit('join_conversation', '5491111111111@c.us', (res: any) => resolve(res));
-      });
+      for (const [client, companyId] of [[clientA, 1], [clientB, 2]] as const) {
+        const result = await client.timeout(1000).emitWithAck('join_conversation', sharedChat);
+        assert.equal(result.success, true);
+        assert.equal(result.room, `conversation:${companyId}:${sharedChat}`);
+      }
 
-      let clientAMsg: any = null;
-      let clientBMsg: any = null;
-
-      clientA.on('new-message', (m) => {
-        clientAMsg = m;
-      });
-      clientB.on('new-message', (m) => {
-        clientBMsg = m;
-      });
-
-      emitToRoom('conversation:1:5491111111111@c.us', 'new-message', { text: 'hola tenant 1' });
+      const receivedA: unknown[] = [];
+      const receivedB: unknown[] = [];
+      clientA.on('agent:typing', (event) => receivedA.push(event));
+      clientB.on('agent:typing', (event) => receivedB.push(event));
+      emitConversation(1, sharedChat, 'agent:typing', { agentId: 1 });
+      emitConversation(2, sharedChat, 'agent:typing', { agentId: 2 });
 
       await new Promise((resolve) => setTimeout(resolve, 150));
-
-      assert.ok(clientAMsg, 'Client A debe recibir el mensaje');
-      assert.equal(clientBMsg, null, 'Client B no debe recibir el mensaje');
+      assert.deepEqual(receivedA, [{ agentId: 1 }]);
+      assert.deepEqual(receivedB, [{ agentId: 2 }]);
     });
   });
 

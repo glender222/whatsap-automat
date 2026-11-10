@@ -46,11 +46,12 @@ const WhatsAppConnectionSection: React.FC<WhatsAppConnectionSectionProps> = ({
   const [saveError, setSaveError] = useState<string | null>(null);
   const whatsapp = companyOverview?.whatsapp;
   const isMetaCloud = whatsapp?.provider === 'meta-cloud';
-  const isLegacy = whatsapp?.provider === 'webjs' && !loadingOverview;
-  const displayNumber = whatsapp?.displayPhoneNumber || numeroAfiliado;
+  const legacyUnavailable = whatsapp?.accountStatus === 'unavailable_for_company';
+  const isLegacy = whatsapp?.provider === 'webjs' && !legacyUnavailable && !loadingOverview;
+  const displayNumber = legacyUnavailable ? null : whatsapp?.displayPhoneNumber || numeroAfiliado;
   const statusLabel = isMetaCloud
     ? whatsapp?.accountStatus === 'disconnected' ? 'Desconectado' : whatsapp?.configured ? 'Configurado' : 'Pendiente'
-    : whatsapp?.connected ? 'Conectado' : 'Pendiente';
+    : legacyUnavailable ? 'No disponible' : whatsapp?.connected ? 'Conectado' : 'Pendiente';
   const statusClass = statusLabel === 'Conectado' || statusLabel === 'Configurado'
     ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800'
     : 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800';
@@ -160,6 +161,12 @@ const WhatsAppConnectionSection: React.FC<WhatsAppConnectionSectionProps> = ({
           )}
         </div>
       </div>
+
+      {legacyUnavailable && (
+        <p className="mt-3 text-sm text-gray-600 dark:text-gray-300">
+          El dispositivo de desarrollo está reservado para la empresa configurada en el servidor.
+        </p>
+      )}
 
       {isMetaCloud && whatsapp && (
         <div className="mt-4 grid gap-3 md:grid-cols-2">

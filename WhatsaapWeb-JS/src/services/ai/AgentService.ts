@@ -37,7 +37,7 @@ import {
   getDefaultToolRegistry,
 } from '../../modules/ai';
 import { PaymentRepositoryPg } from '../../modules/payments';
-import { emitDashboard, emitToRoom } from '../../sockets/socketEmitter';
+import { emitDashboard, emitConversation } from '../../sockets/socketEmitter';
 
 type UploadedAgentFile = {
   originalname: string;
@@ -460,7 +460,7 @@ export class AgentService {
     const executor = new AgentToolExecutor(pool, registry, logger);
     const loop = new AgentToolRuntimeLoop(pool, registry, logger, executor);
 
-    if (input.chatId) emitToRoom(input.chatId, 'agent:typing', { chatId: input.chatId, agentId });
+    if (input.chatId) emitConversation(companyId, input.chatId, 'agent:typing', { chatId: input.chatId, agentId });
 
     const loopResult = await loop.run({
       ctx,
@@ -554,7 +554,7 @@ export class AgentService {
     );
 
     if (decision.action === 'suggest' && input.chatId) {
-      emitToRoom(input.chatId, 'agent:suggestion', {
+      emitConversation(companyId, input.chatId, 'agent:suggestion', {
         chatId: input.chatId,
         agentId,
         reply: output.reply,
@@ -575,7 +575,7 @@ export class AgentService {
     }
 
     if (decision.action === 'block' && input.chatId) {
-      emitToRoom(input.chatId, 'agent:blocked', {
+      emitConversation(companyId, input.chatId, 'agent:blocked', {
         chatId: input.chatId,
         agentId,
         reason: output.reason,

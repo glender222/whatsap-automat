@@ -13,7 +13,7 @@ export function getSocketIo(): Server | null {
 /**
  * Emite un evento a una sala Socket.IO arbitraria.
  */
-export function emitToRoom(room: string, event: string, payload: unknown): void {
+function emitToRoom(room: string, event: string, payload: unknown): void {
   if (!ioInstance) return;
   if (!room || typeof room !== 'string') return;
   try {

@@ -65,9 +65,7 @@ class ChatController {
         await this._logFallback('fallback_legacy_read', 'chats', 'list', err, 'getChatsLegacy', req);
       }
     }
-    const chats = typeof this.whatsappService.getChatsList === 'function'
-      ? await this.whatsappService.getChatsList(companyId)
-      : this.whatsappService.getChats();
+    const chats = await this.whatsappService.getChatsList(companyId);
     res.json(chats);
   });
 
@@ -141,9 +139,7 @@ class ChatController {
         await this._logFallback('fallback_legacy_read', 'chats', 'list', err, 'getChats', req);
       }
     }
-    const chats = typeof this.whatsappService.getChatsList === 'function'
-      ? await this.whatsappService.getChatsList(companyId)
-      : this.whatsappService.getChats();
+    const chats = await this.whatsappService.getChatsList(companyId);
     res.json({ success: true, data: chats });
   });
 

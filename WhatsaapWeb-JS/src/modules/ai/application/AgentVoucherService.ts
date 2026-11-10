@@ -1,5 +1,5 @@
 import { PaymentRepositoryPg } from '../../payments';
-import { emitDashboard, emitToRoom } from '../../../sockets/socketEmitter';
+import { emitDashboard, emitConversation } from '../../../sockets/socketEmitter';
 
 const PAYMENT_METHOD_REGEX = /(yape|plin|banco|bcp|interbank|bbva|transferencia|deposito)/i;
 const PAYMENT_TEXT_REGEX = /\b(comprobante|pago enviado|adjunto el pago|realic.*pago|transferencia realizada|envie el dinero)\b/i;
@@ -91,7 +91,7 @@ export class AgentVoucherService {
       chatId: input.chatId,
       agentId: input.agentId,
     });
-    if (input.chatId) emitToRoom(input.chatId, 'payment-created', { voucherId: voucher.id });
+    if (input.chatId) emitConversation(input.companyId, input.chatId, 'payment-created', { voucherId: voucher.id });
     return { voucherId: voucher.id };
   }
 

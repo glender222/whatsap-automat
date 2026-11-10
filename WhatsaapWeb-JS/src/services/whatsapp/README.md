@@ -6,7 +6,7 @@ El servicio de WhatsApp ha sido refactorizado de un archivo monolítico de 774 l
 
 ```
 src/services/
-├── whatsappService.js              # Facade principal (85 líneas)
+├── whatsappService.ts              # Fachada principal
 └── whatsapp/
     ├── WhatsAppClient.js           # Cliente principal (~180 líneas)
     ├── ChatManager.js              # Gestión de chats (~240 líneas)
@@ -18,7 +18,7 @@ src/services/
 
 ## 🎯 Responsabilidades de Cada Componente
 
-### 1. **whatsappService.js** (Facade)
+### 1. **whatsappService.ts** (Facade)
 - **Responsabilidad**: Punto de entrada único que delega a los componentes especializados
 - **Líneas**: ~85
 - **Métodos principales**:
@@ -83,7 +83,7 @@ src/services/
 ```
 API Request
     ↓
-whatsappService.js (Facade)
+whatsappService.ts (Facade)
     ↓
 WhatsAppClient.js (Coordinator)
     ↓
@@ -107,7 +107,7 @@ ChatValidator.js (Utilities)
 El uso desde otros módulos **no cambia**, el facade mantiene la misma interfaz:
 
 ```javascript
-const WhatsAppService = require('./services/whatsappService');
+import WhatsAppService from './services/whatsappService';
 const service = new WhatsAppService();
 
 // Mismo uso que antes
@@ -127,7 +127,7 @@ async searchMessages(chatId, query) {
 }
 ```
 
-2. **Exponer en whatsappService.js**:
+2. **Exponer en whatsappService.ts**:
 ```javascript
 async searchMessages(chatId, query) {
   return await this.whatsappClient.messageHandler.searchMessages(chatId, query);
@@ -148,7 +148,7 @@ async searchMessages(chatId, query) {
 
 Esta refactorización implementa varios patrones:
 
-- **Facade Pattern**: `whatsappService.js` simplifica el acceso a subsistemas
+- **Facade Pattern**: `whatsappService.ts` simplifica el acceso a subsistemas
 - **Single Responsibility**: Cada clase tiene una única responsabilidad
 - **Dependency Injection**: Componentes reciben referencia al WhatsAppClient
 - **Strategy Pattern**: Validadores pueden intercambiarse fácilmente

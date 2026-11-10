@@ -1,4 +1,4 @@
-import { emitDashboard, emitToRoom } from '../../../sockets/socketEmitter';
+import { emitDashboard, emitConversation } from '../../../sockets/socketEmitter';
 import {
   AiSessionRepositoryPg,
   CreateSessionEventInput,
@@ -44,7 +44,7 @@ export class AiSessionEventService {
       event,
     };
     emitDashboard('agent:activity_event', socketPayload);
-    if (input.chatId) emitToRoom(input.chatId, 'agent:activity_event', socketPayload);
+    if (input.chatId) emitConversation(input.companyId, input.chatId, 'agent:activity_event', socketPayload);
   }
 
   private sanitizeValue(value: unknown, depth: number): unknown {

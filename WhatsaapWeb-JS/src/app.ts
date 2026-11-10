@@ -49,6 +49,7 @@ import { SocketHandler } from './sockets/socketHandler';
 const swaggerUi = require('swagger-ui-express');
 const { errorHandler, notFound } = require('./middleware/errorHandler');
 const User = require('./models/User');
+const { requireAdmin } = require('./middleware/authMiddleware');
 const createAuthRoutes = require('./routes/authRoutes');
 const createChatRoutes = require('./routes/chatRoutes');
 const createMediaRoutes = require('./routes/mediaRoutes');
@@ -298,10 +299,10 @@ export class App {
     const mediaController = new MediaController(this.whatsappService);
 
     // Rutas legacy bajo autenticación estricta (P0)
-    this.app.get('/qr', requireJwt as any, authController.getQRLegacy);
+    this.app.get('/qr', requireJwt, requireAdmin, authController.getQRLegacy);
     this.app.get('/status', requireJwt as any, authController.getStatusLegacy);
     this.app.get('/me', requireJwt as any, authController.getMeLegacy);
-    this.app.post('/logout', requireJwt as any, authController.logoutLegacy);
+    this.app.post('/logout', requireJwt, requireAdmin, authController.logoutLegacy);
     this.app.get('/chats', requireJwt as any, chatController.getChatsLegacy);
     this.app.get('/messages/:chatId', requireJwt as any, requireChatTenantAccess as any, chatController.getMessagesLegacy);
     this.app.post('/send-message', requireJwt as any, upload.single('file'), cleanRejectedUpload(requireChatTenantAccess), chatController.sendMessageLegacy);

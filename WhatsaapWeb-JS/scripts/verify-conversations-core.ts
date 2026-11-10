@@ -14,7 +14,7 @@
  * 2) npm run start:legacy conserva un alias al backend compilado después de migrar la base.
  * 3) coreModel.createTablesIfNotExists() es additive-only; nunca borra ni altera destructivamente.
  * 4) Eliminar código nuevo (src/core/, dist/core/) no rompe endpoints legacy ni el frontend.
- * 5) company_id default está documentado en src/config/index.js (DEFAULT_COMPANY_ID env var, fallback 1).
+ * 5) company_id default está documentado en src/config/index.ts (DEFAULT_COMPANY_ID env var, fallback 1).
  * 6) Errores de persistencia se loguean en consola/auditLogRepository y nunca tumban flujo legacy.
  * 7) Fallback de lectura/escritura activa automáticamente cuando persistReads/persistWrites falla.
  */
