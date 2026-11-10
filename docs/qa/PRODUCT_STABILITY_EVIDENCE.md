@@ -67,6 +67,12 @@ Para reproducir UX-02 y UX-03, ejecutar `npm run test:e2e -- e2e/orders-navigati
 - **Después.** Los administradores comprueban, revocan y vuelven a conectar su línea desde Configuración. Un error explica cómo continuar y la pantalla descarta el valor secreto al cambiar de sesión. El operador conserva la lectura del estado.
 - **Validación.** Tres recorridos Chromium con API, PostgreSQL y Graph local comprobaron rechazo, indisponibilidad, reintento de revocación, reconexión, permisos y aislamiento entre dos empresas. [Reproducciones y resultados](WHATSAPP_CONNECTION_WORKFLOW.md).
 
+## UX-10. Conciliación de Mercado Pago desde el navegador
+
+- **Antes.** Al abrir la identificación manual en móvil se perdía el foco. Recuperar una liquidación guardada después de perder el acuse dejaba visible el error anterior.
+- **Después.** El foco llega al campo de ID y vuelve al control de conciliación al cancelar o completar. La alerta del intento anterior desaparece cuando llega una observación nueva.
+- **Validación.** Cuatro recorridos Chromium con API, PostgreSQL y Mercado Pago local comprueban pago parcial sin confirmar el pedido, liquidación única, devolución a revisión, recuperación del acuse y aislamiento de dos empresas. [Evidencia y reproducción](MERCADOPAGO_BROWSER_RECONCILIATION.md).
+
 ## MSG-01. Conversaciones nuevas y recuperación de la bandeja
 
 La traza de GitHub Actions mostró que el corte de red podía coincidir con la carga inicial de la conversación. La regresión ahora espera que aparezca el mensaje inicial en el historial antes de cortar la red. Así comprueba la recuperación después de una desconexión establecida.
@@ -227,4 +233,4 @@ El ejemplo inicial del editor validaba estructura, pero no preparaba el modelo n
 | Bandeja en tiempo real | Filtro por etiqueta, reconexión, reorden de webhooks e historial paginado cubiertos en MSG-04 y MSG-05. |
 | Envío y recepción | MSG-06 y MSG-07 cubren envíos humanos y automáticos, adjuntos, entrega incierta y recuperación tras reinicio con Graph local. Falta el recorrido en navegador con dos líneas Meta reales. |
 | Harness IA | IA-03 a IA-06 cubren Studio y su cuota. IA-07 e IA-08 cubren autorización de derivaciones y reclamo de efectos del broker. Faltan el piloto con proveedor real, la admisión estricta en el runtime con herramientas y la conciliación de efectos por proveedor. |
-| Flujo operativo y navegación | UX-07 a UX-09 cubren conversación, pedido, pago y regreso, aprobación y conexión. Falta el ensayo con una cuenta autorizada de Mercado Pago y la validación independiente del candidato completo. |
+| Flujo operativo y navegación | UX-07 a UX-10 cubren conversación, pedido, pago y regreso, aprobación, conexión y conciliación desde navegador con el proveedor local. Falta el ensayo con una cuenta autorizada de Mercado Pago y la validación independiente del candidato completo. |

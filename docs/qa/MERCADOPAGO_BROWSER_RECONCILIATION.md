@@ -54,7 +54,7 @@ npm run build
 
 `MERCADOPAGO_RECONCILIATION_ENABLED` sigue deshabilitado por defecto en producción. Este procedimiento activa únicamente el proceso de prueba; no modifica `.env`, rutas ni el despliegue. La fixture rechaza arrancar si falta el valor literal `true`.
 
-El spec requiere `PRODUCT_MERCADOPAGO_FIXTURE_URL` y ese servidor específico. Al integrarlo en CI se necesita un paso separado con este entorno y excluirlo del paso común, o componer el transporte local con el runner existente. El gate que prohíbe casos omitidos debe conservarse. Este cambio no edita CI.
+El spec requiere `PRODUCT_MERCADOPAGO_FIXTURE_URL` y ese servidor específico. CI ejecuta los cuatro casos en un paso separado, sobre una base aislada y con el flag activo únicamente durante la prueba. El paso falla si omite algún caso o el backend o el proveedor local no están disponibles.
 
 Las trazas y capturas ante fallos se guardan en `Frontend_py_whatsaapweb/test-results`. Los JWT sintéticos se capturan internamente para autenticar el navegador; no se imprimen en logs de prueba.
 

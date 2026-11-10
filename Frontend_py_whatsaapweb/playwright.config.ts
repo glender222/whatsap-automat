@@ -12,6 +12,7 @@ if (inboxApi && (inboxApi.protocol !== 'http:' || inboxApi.hostname !== '127.0.0
 
 export default defineConfig({
   testDir: './e2e',
+  testIgnore: process.env.PRODUCT_MERCADOPAGO_FIXTURE_URL ? [] : ['**/mercadopago.integration.spec.ts'],
   forbidOnly: Boolean(process.env.CI),
   workers: 1,
   projects: [{ name: 'chromium', use: {
