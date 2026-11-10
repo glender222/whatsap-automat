@@ -21,6 +21,7 @@ import {
   EmbeddingResult,
 } from './types';
 import { modelGatewayRequestSchema } from '@whatsap-automat/contracts';
+import { createTenantBoundedModelExecution } from './TenantBoundedModelExecution';
 
 export class ModelGateway implements IModelGateway {
   constructor(
@@ -52,7 +53,10 @@ export class ModelGateway implements IModelGateway {
     const startTime = Date.now();
     const strict = await this.resolveAdmission(tenantId);
     if (strict) return strict.complete(tenantId, request);
+    return this.withLegacyDispatch(tenantId, () => this.completeLegacy(tenantId, request, startTime));
+  }
 
+  private async completeLegacy(tenantId: number, request: ModelGatewayRequest, startTime: number): Promise<ModelCompletionResult> {
     // 1. Enforce atomic quota limit before dispatching
     await this.quotaManager.assertWithinQuota(tenantId);
 
@@ -165,40 +169,7 @@ export class ModelGateway implements IModelGateway {
     try {
       const strict = await this.resolveAdmission(tenantId);
       if (strict) return await strict.testConnection(tenantId, params);
-
-      let resolvedApiKey = params.apiKey;
-      let resolvedBaseUrl = params.baseUrl;
-
-      // If apiKey or baseUrl not provided in test request, load from tenant config
-      if (!resolvedApiKey && !resolvedBaseUrl) {
-        const creds = await this.byokService.resolveDecryptedCredential(tenantId, params.provider);
-        resolvedApiKey = creds.apiKey || undefined;
-        resolvedBaseUrl = creds.baseUrl || undefined;
-      }
-
-      const creds: ResolvedCredential = {
-        apiKey: resolvedApiKey || null,
-        baseUrl: resolvedBaseUrl || null,
-        defaultModel: params.model || null,
-        isByok: true,
-      };
-
-      const adapter = this.resolveAdapter(params.provider, creds);
-      await adapter.complete({
-        schemaVersion: 1,
-        tenantId,
-        provider: params.provider,
-        model: params.model || (params.provider === 'openai' ? 'gpt-4o-mini' : (params.provider === 'anthropic' ? 'claude-3-5-haiku-20241022' : 'default')),
-        messages: [{ role: 'user', content: 'ping' }],
-        maxTokens: 1,
-        timeoutMs: 10000,
-      });
-
-      return {
-        ok: true,
-        provider: params.provider,
-        latencyMs: Date.now() - startTime,
-      };
+      return await this.withLegacyDispatch(tenantId, () => this.testLegacyConnection(tenantId, params, startTime));
     } catch (err: any) {
       return {
         ok: false,
@@ -207,6 +178,44 @@ export class ModelGateway implements IModelGateway {
         errorMessage: err.message,
       };
     }
+  }
+
+  private async testLegacyConnection(
+    tenantId: number, params: TestByokConnectionRequestV1, startTime: number,
+  ): Promise<TestByokConnectionResultV1> {
+    let resolvedApiKey = params.apiKey;
+    let resolvedBaseUrl = params.baseUrl;
+
+    // If apiKey or baseUrl not provided in test request, load from tenant config
+    if (!resolvedApiKey && !resolvedBaseUrl) {
+      const creds = await this.byokService.resolveDecryptedCredential(tenantId, params.provider);
+      resolvedApiKey = creds.apiKey || undefined;
+      resolvedBaseUrl = creds.baseUrl || undefined;
+    }
+
+    const creds: ResolvedCredential = {
+      apiKey: resolvedApiKey || null,
+      baseUrl: resolvedBaseUrl || null,
+      defaultModel: params.model || null,
+      isByok: true,
+    };
+
+    const adapter = this.resolveAdapter(params.provider, creds);
+    await adapter.complete({
+      schemaVersion: 1,
+      tenantId,
+      provider: params.provider,
+      model: params.model || (params.provider === 'openai' ? 'gpt-4o-mini' : (params.provider === 'anthropic' ? 'claude-3-5-haiku-20241022' : 'default')),
+      messages: [{ role: 'user', content: 'ping' }],
+      maxTokens: 1,
+      timeoutMs: 10000,
+    });
+
+    return {
+      ok: true,
+      provider: params.provider,
+      latencyMs: Date.now() - startTime,
+    };
   }
 
   /**
@@ -219,6 +228,10 @@ export class ModelGateway implements IModelGateway {
     if (await this.resolveAdmission(tenantId)) {
       throw deniedStrictCapability('A bounded embedding profile is unavailable');
     }
+    return this.withLegacyDispatch(tenantId, () => this.embedLegacy(tenantId, request));
+  }
+
+  private async embedLegacy(tenantId: number, request: EmbeddingRequest): Promise<EmbeddingResult> {
     const provider = request.provider || 'openai';
     const model = request.model || (provider === 'local_openai' ? 'nomic-embed-text' : 'text-embedding-3-small');
     const startTime = Date.now();
@@ -330,6 +343,10 @@ export class ModelGateway implements IModelGateway {
     throw Object.assign(new Error('AI provider dispatch is unavailable for this tenant'), { code: 'AI_ADMISSION_UNAVAILABLE', statusCode: 503 });
   }
 
+  private withLegacyDispatch<T>(tenantId: number, operation: () => Promise<T>): Promise<T> {
+    return this.admission?.withLegacyDispatch?.(tenantId, operation) ?? operation();
+  }
+
   /**
    * Deterministically generates an L2-normalized 1536-dimensional vector for a string.
    */
@@ -372,4 +389,5 @@ export class ModelGateway implements IModelGateway {
   }
 }
 
-export const modelGateway = new ModelGateway();
+export const modelGateway = new ModelGateway(undefined, undefined, undefined, undefined, undefined,
+  createTenantBoundedModelExecution().admission);

@@ -7,6 +7,7 @@ import type { ModelCompletionResult, ModelGatewayRequest, TestByokConnectionRequ
 export interface ModelGatewayAdmission {
   readonly modeForTenant: (tenantId: number) => Promise<'legacy' | 'draining' | 'strict'>;
   readonly strict: StrictModelGateway;
+  readonly withLegacyDispatch?: <T>(tenantId: number, operation: () => Promise<T>) => Promise<T>;
 }
 
 type ResolveStrictTransport = (scope: { tenantId: number; probeApiKey?: string }) => Promise<{
@@ -17,7 +18,7 @@ export function deniedStrictCapability(message: string): Error {
   return Object.assign(new Error(message), { code: 'POLICY_DENIED', statusCode: 422 });
 }
 
-/** Strict capabilities are injected explicitly. The production gateway still uses legacy admission. */
+/** Strict capabilities use the same durable quota protocol as Studio. */
 export class StrictModelGateway {
   constructor(private readonly quota: BoundedTextQuota, private readonly resolveTransport: ResolveStrictTransport) {}
 

@@ -9,6 +9,7 @@ import { MetaInboxStore, type MetaMediaAttachment } from './whatsapp/meta/MetaIn
 import { MetaInboundWorker, type MetaInboundAuthority, type MetaInboundExecution, type MetaInboundOutcome } from './whatsapp/meta/MetaInboundWorker';
 import type { MetaInboundWorkRepository } from './whatsapp/meta/MetaInboundWorkRepository';
 import { ConversationSendError, conversationSendService, type AgentSendAnchor, type AgentSendResult } from './conversations/ConversationSendService';
+import { AiDispatchUnavailableError } from './ai/gateway/TenantAiDispatchPolicy';
 import { withCompatibleVideo } from './whatsapp/VideoTranscode';
 import { removeTemporaryUpload } from '../shared/temporaryUpload';
 import AgentService from './ai/AgentService';
@@ -810,9 +811,11 @@ export class WhatsAppService {
       }
       return { status: 'completed' };
     } catch (error: any) {
-      const safeErrorCode = error instanceof ConversationSendError ? error.reasonCode : 'AGENT_RUNTIME_FAILED';
-      const skipped = error instanceof ConversationSendError && (error.code === 'POLICY_DENIED' ||
-        ['SERVICE_WINDOW_CLOSED', 'CONVERSATION_CLOSED', 'DELIVERY_UNRESOLVED', 'SENDING_ACCOUNT_UNAVAILABLE'].includes(safeErrorCode));
+      const safeErrorCode = error instanceof AiDispatchUnavailableError ? error.code
+        : error instanceof ConversationSendError ? error.reasonCode : 'AGENT_RUNTIME_FAILED';
+      const skipped = error instanceof AiDispatchUnavailableError || (error instanceof ConversationSendError &&
+        (error.code === 'POLICY_DENIED' ||
+          ['SERVICE_WINDOW_CLOSED', 'CONVERSATION_CLOSED', 'DELIVERY_UNRESOLVED', 'SENDING_ACCOUNT_UNAVAILABLE'].includes(safeErrorCode)));
       await this.logAgentRuntime({
         companyId,
         agentId,

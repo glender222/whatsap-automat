@@ -14,6 +14,7 @@ import { emitDashboard } from '../../../sockets/socketEmitter';
 import type { AgentToolContext } from '../domain/tool.types';
 import type { AiAgent, AiDomainKey, AutomatorMode } from '../domain/agent.types';
 import { AiSessionRepositoryPg } from '../infra/db/AiSessionRepositoryPg';
+import { tenantAiDispatchPolicy, type TenantAiDispatchPolicy } from '../../../services/ai/gateway/TenantAiDispatchPolicy';
 
 export type OrchestratorInput = {
   companyId: number;
@@ -49,10 +50,17 @@ export class AiRuntimeOrchestrator {
     private readonly routerService: AgentRouterService,
     private readonly registry: AgentToolRegistry,
     private readonly logger: AgentToolLogger,
-    private readonly sessionService: AiChatSessionService
+    private readonly sessionService: AiChatSessionService,
+    private readonly dispatchPolicy?: Pick<TenantAiDispatchPolicy, 'withLegacyDispatch'>,
   ) {}
 
-  async processInbound(input: OrchestratorInput): Promise<OrchestratorResult> {
+  processInbound(input: OrchestratorInput): Promise<OrchestratorResult> {
+    return this.dispatchPolicy
+      ? this.dispatchPolicy.withLegacyDispatch(input.companyId, () => this.runInbound(input))
+      : this.runInbound(input);
+  }
+
+  private async runInbound(input: OrchestratorInput): Promise<OrchestratorResult> {
     const { companyId, chatId, message, history, inboundProviderMessageId, sender, signal } = input;
     signal?.throwIfAborted();
     const companyMode = await this.agentRepo.getAutomatorMode(companyId);
@@ -359,7 +367,7 @@ export function getAiRuntimeOrchestrator(pool: Queryable): AiRuntimeOrchestrator
     const routerService = new AgentRouterService(pool, agentRepo, logRepo);
     const registry = getDefaultToolRegistry();
     const logger = new AgentToolLogger(logRepo, sessionEventService);
-    instance = new AiRuntimeOrchestrator(pool, agentRepo, routerService, registry, logger, sessionService);
+    instance = new AiRuntimeOrchestrator(pool, agentRepo, routerService, registry, logger, sessionService, tenantAiDispatchPolicy);
   }
   return instance;
 }

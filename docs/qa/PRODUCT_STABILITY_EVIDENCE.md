@@ -49,7 +49,15 @@ Para reproducir UX-02 y UX-03, ejecutar `npm run test:e2e -- e2e/orders-navigati
 - **Antes.** La pantalla filtraba solo las primeras 100 filas ya paginadas. Chromium reprodujo la ausencia de un cobro fuera de esa página. PostgreSQL devolvió 106 registros para una consulta que debía devolver los 3 cobros pendientes del fixture.
 - **Después.** La API filtra antes de contar y paginar. La UI muestra el total filtrado, permite recorrer las páginas y vuelve a la última disponible si una operación elimina la página actual. Chromium verificó el filtro en escritorio y móvil, una respuesta tardía y la recuperación de una página vacía. La suite combinada pasó 18 recorridos sin omisiones. Las 12 pruebas HTTP y PostgreSQL incluyeron el filtro, el aislamiento por empresa y la conciliación interna de Mercado Pago.
 
+## UX-07. El recorrido entre la conversación, el pedido y el pago
+
+- **Antes.** El historial del cliente mostraba el pedido sin enlace. Desde el pedido había que localizar el cobro otra vez en Pagos.
+- **Después.** Se puede abrir el pedido desde el historial y volver a la conversación con el borrador y el foco. El administrador abre Pagos y conciliación con el pedido ya seleccionado. El regreso conserva la conversación y la página del listado. El operador conserva el acceso a su contexto y la pantalla explica el requisito de administrador.
+- **Validación.** Siete pruebas de Chromium recorren los módulos con respuestas HTTP controladas. Incluyen escritorio, pantalla estrecha, teclado, Escape, recarga y un identificador inválido. La suite completa pasó 25 recorridos. [Diseño del recorrido](../../Frontend_py_whatsaapweb/docs/DESIGN.md).
+
 ## MSG-01. Conversaciones nuevas y recuperación de la bandeja
+
+La traza de GitHub Actions mostró que el corte de red podía coincidir con la carga inicial de la conversación. La regresión ahora espera que aparezca el mensaje inicial en el historial antes de cortar la red. Así comprueba la recuperación después de una desconexión establecida.
 
 - **Antes.** Chrome abrió dos bandejas vacías conectadas por Socket.IO. El backend confirmó los webhooks firmados y el historial HTTP devolvió el texto correcto por empresa. La prueba falló porque el mensaje nuevo de Alfa seguía ausente de su bandeja.
 - **Cambio.** Socket.IO actualiza las filas existentes. Cuando llega un mensaje de una conversación ausente, la bandeja consulta el filtro activo por HTTP. Al conectar de nuevo, también consulta el historial seleccionado.
@@ -159,6 +167,13 @@ Con las mismas variables exportadas en el frontend, ejecutar `npm run test:e2e -
 - **Chrome.** Bravo canceló con teclado desde una pantalla de 390 px y vio la confirmación mientras el caso iniciado seguía pendiente de registro. Tras completarse ese registro, la pantalla y la consulta después de recargar mostraron un único caso aprobado. La publicación siguió deshabilitada. Alfa recibió `404` al intentar cancelar la ejecución de Bravo.
 - **Reproducción.** Ejecutar las suites de IA-01 a IA-03 contra la base local migrada y el proveedor HTTP de prueba. Pasaron 41 pruebas de backend de Studio y los 13 recorridos de Playwright, además de ambos builds, la comprobación de tipos del backend y las pruebas del cliente web.
 
+## IA-05. Una cuota por empresa para ejecución y evaluación
+
+- **Política.** La migración 060 registra la admisión por empresa. El modo por defecto conserva el proveedor anterior. El paso a `draining` bloquea operaciones nuevas del proveedor anterior. El paso a `strict` exige que terminen las operaciones en curso. Una caída con un permiso abierto conserva el registro para revisión.
+- **Prueba integrada.** La API autenticada de Alfa ocupó el presupuesto con una solicitud retenida por el proveedor HTTP local. Una evaluación de Studio de Alfa quedó bloqueada sin despachar. Bravo pudo ejecutar con su propio presupuesto y credencial. Al completar la primera solicitud, una evaluación nueva de Alfa pasó y el libro de consumo registró ambos usos. La publicación en modo proveedor no apareció en modo de verificación.
+- **Control.** PostgreSQL rechazó cambiar de modo mientras seguía activo el permiso anterior, incluso después de un `SIGKILL`. La API de credenciales rechazó guardar y probar una clave con rol de operador. La pausa impidió nuevas solicitudes de Alfa.
+- **Alcance.** El gateway de texto admite empresas configuradas con la política y una credencial BYOK de OpenAI. Studio usa esta composición en la prueba de integración. Quedan la exposición del modo proveedor en la interfaz y los perfiles del runtime con herramientas. [Política y prueba local](AI_PROVIDER_ADMISSION.md).
+
 ## WF-01. Ingreso mientras se revierte una revisión publicada
 
 - **Antes.** CI devolvió `WORKFLOW_NOT_PUBLISHED` durante una reversión válida. La regresión local mantuvo la reversión abierta hasta observar en PostgreSQL que un webhook esperaba su bloqueo. El ingreso falló al intentar fijar la revisión mediante una consulta que también bloqueaba la definición.
@@ -170,5 +185,5 @@ Con las mismas variables exportadas en el frontend, ejecutar `npm run test:e2e -
 | --- | --- |
 | Bandeja en tiempo real | Filtro por etiqueta, reconexión, reorden de webhooks e historial paginado cubiertos en MSG-04 y MSG-05. |
 | Envío y recepción | MSG-06 y MSG-07 cubren envíos humanos y automáticos, adjuntos, entrega incierta y recuperación tras reinicio con Graph local. Falta el recorrido en navegador con dos líneas Meta reales. |
-| Harness IA | IA-03 e IA-04 cubren publicación, ejecución de texto, cancelación y recuperación de resultados parciales en modo de verificación. Completar la admisión coordinada del proveedor de producción y los perfiles restantes. |
-| Flujo operativo y navegación | Atención, pedido, pago, aprobación y conexión. Recorrer como administrador y operador, con teclado y diferentes tamaños de pantalla. |
+| Harness IA | IA-03 e IA-04 cubren Studio en verificación. IA-05 comprueba la cuota común en el gateway y el evaluador de proveedor. Completar el modo proveedor en Studio y los perfiles de runtime con herramientas. |
+| Flujo operativo y navegación | UX-07 cubre conversación, pedido, pago y regreso. Quedan las pruebas integradas de aprobación y conexión. |

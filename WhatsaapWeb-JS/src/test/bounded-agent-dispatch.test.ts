@@ -1,6 +1,6 @@
 import './fixtures/testEnv';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { fork, spawn } from 'node:child_process';
 import { randomInt, randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
@@ -14,6 +14,8 @@ import { AiQuotaCapacityError, AiQuotaReservationConflictError, AiQuotaReservati
 import { boundedTextCapability } from '../services/ai/gateway/BoundedTextCompletion';
 import { dispatchBoundedText } from '../services/ai/gateway/BoundedTextDispatcher';
 import { ModelGateway } from '../services/ai/gateway/ModelGateway';
+import { createTenantBoundedModelExecution } from '../services/ai/gateway/TenantBoundedModelExecution';
+import { TenantAiDispatchPolicy } from '../services/ai/gateway/TenantAiDispatchPolicy';
 import { QuotaManager } from '../services/ai/gateway/QuotaManager';
 import { StrictModelGateway, type ModelGatewayAdmission } from '../services/ai/gateway/StrictModelGateway';
 import { TokenCostLedger } from '../services/ai/gateway/TokenCostLedger';
@@ -25,7 +27,8 @@ import { AgentExecutionEvaluator } from '../services/ai/studio/AgentExecutionEva
 import { executionAttemptId } from '../services/ai/studio/AgentExecutionEvidence';
 import { AgentStudioPublications, dispatchPublishedAgent } from '../services/ai/studio/AgentStudioPublications';
 import { saveDraft } from '../services/ai/studio/AgentStudioDrafts';
-import { createStudioVerification } from '../services/ai/studio/StudioVerification';
+import { createStudioProviderExecution, createStudioVerification } from '../services/ai/studio/StudioVerification';
+import createAiRoutes from '../routes/ai.routes';
 import createAgentStudioRoutes from '../routes/agentStudioRoutes';
 
 const databaseUrl = process.env.AI_QUOTA_RESERVATIONS_TEST_DATABASE_URL;
@@ -89,7 +92,7 @@ test('shared dispatcher fails closed if a caller underestimates the compiled bou
     isByok: false, started: performance.now() }), { status: 'capability_unavailable' });
 });
 
-async function startFixture(t: TestContext) {
+async function startFixture(t: TestContext, beforeResponse?: (input: string) => Promise<void>) {
   const requests: Record<string, unknown>[] = [];
   let stalledBodyClosed = false;
   const server = createServer(async (req, res) => {
@@ -99,6 +102,7 @@ async function startFixture(t: TestContext) {
       const body = JSON.parse(Buffer.concat(chunks).toString());
       requests.push(body);
       const input = body.messages[1].content;
+      if (beforeResponse) await beforeResponse(input);
       res.setHeader('Content-Type', 'application/json');
       if (input === 'stalled-body') {
         res.once('close', () => { stalledBodyClosed = true; });
@@ -740,4 +744,205 @@ test('injected strict ModelGateway admission shares quota with eval and preserve
     assert.equal(requests.length, initialCalls);
     assert.equal(legacyCalls.length, 3);
   });
+});
+
+test('tenant provider admission fences legacy work and shares the authenticated API budget with Studio', {
+  skip: !databaseUrl && 'AI_QUOTA_RESERVATIONS_TEST_DATABASE_URL is required',
+}, async (t) => {
+  const pool = new Pool({ connectionString: databaseUrl });
+  t.after(() => pool.end());
+  const uow = new TenantScopedUoW(pool);
+  const otherPolicy = new TenantAiDispatchPolicy(new TenantScopedUoW(pool));
+  const alpha = randomInt(500_000_000, 900_000_000);
+  const bravo = alpha + 1;
+  for (const id of [alpha, bravo]) {
+    await uow.run(id, async (db) => {
+      await db.query('INSERT INTO tenants (id, name, slug) VALUES ($1, $2, $3)', [id, 'Bounded provider QA', 'qa-' + randomUUID()]);
+      await db.query('INSERT INTO tenant_ai_quotas (tenant_id, monthly_token_limit, monthly_cost_limit_micro_usd) VALUES ($1, 400100, 301000)', [id]);
+    });
+  }
+
+  const received = Promise.withResolvers<void>();
+  const respond = Promise.withResolvers<void>();
+  const { endpoint, requests } = await startFixture(t, async (input) => {
+    if (input === 'Alfa en curso') {
+      received.resolve();
+      await respond.promise;
+    }
+  });
+  const transportHeaders: Array<{ input: string; authorization: string | null }> = [];
+  const execution = createTenantBoundedModelExecution(uow, (url, init) => {
+    assert.equal(url, 'https://api.openai.com/v1/chat/completions');
+    const headers = new Headers(init?.headers);
+    const payload = JSON.parse(String(init?.body));
+    transportHeaders.push({ input: payload.messages[1].content, authorization: headers.get('authorization') });
+    return fetch(endpoint, init);
+  });
+  const gateway = new ModelGateway(undefined, undefined, undefined, undefined, undefined, execution.admission);
+  const studio = createStudioProviderExecution(uow, execution);
+  const byok = new ByokService(undefined, uow);
+
+  const enteredLegacy = Promise.withResolvers<void>();
+  const finishLegacy = Promise.withResolvers<void>();
+  class LegacyFixtureCredential extends ByokService {
+    override async resolveDecryptedCredential() {
+      return { apiKey: 'fixture-legacy', baseUrl: null, defaultModel: null, isByok: true };
+    }
+  }
+  const legacyGateway = new ModelGateway(new LegacyFixtureCredential(), new QuotaManager(uow), new TokenCostLedger(uow), async () => {
+    enteredLegacy.resolve();
+    await finishLegacy.promise;
+    return Response.json({ choices: [{ message: { content: 'Legacy fixture' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 8, completion_tokens: 1, total_tokens: 9 } });
+  }, 'provider', execution.admission);
+  const legacy = legacyGateway.complete({
+    schemaVersion: 1, tenantId: alpha, provider: 'openai', model: 'gpt-4o-mini', timeoutMs: 5000,
+    messages: [{ role: 'user', content: 'Solicitud del perfil anterior' }],
+  });
+  try {
+    await Promise.race([enteredLegacy.promise, legacy.then(() => assert.fail('Legacy dispatch ended before the cutover'))]);
+    assert.equal(await otherPolicy.mode(bravo), 'legacy');
+    await otherPolicy.transition(alpha, 'draining');
+    await assert.rejects(execution.policy.withLegacyDispatch(alpha, async () => assert.fail('Draining admitted new legacy work')),
+      { code: 'AI_ADMISSION_UNAVAILABLE' });
+    await assert.rejects(otherPolicy.transition(alpha, 'strict'), { code: 'AI_LEGACY_DISPATCH_IN_FLIGHT' });
+    assert.equal((await uow.run(bravo, (db) => db.query('SELECT * FROM tenant_ai_legacy_dispatches WHERE tenant_id = $1', [alpha]))).rowCount, 0);
+  } finally {
+    finishLegacy.resolve();
+    assert.equal((await legacy).text, 'Legacy fixture');
+  }
+  await otherPolicy.transition(alpha, 'strict');
+  await otherPolicy.transition(bravo, 'draining');
+  await otherPolicy.transition(bravo, 'strict');
+
+  const graph = revision(alpha, { limits: { maxDurationSeconds: 10 } });
+  const { graphId, entryNodeId, nodes, edges, policyRef, limits } = graph;
+  await uow.run(alpha, (db) => saveDraft(db, alpha, 1, graphId, { entryNodeId, nodes, edges, policyRef, limits }, true));
+  const suiteId = randomUUID();
+  await uow.run(alpha, (db) => db.query(
+    'INSERT INTO agent_eval_suites (id, tenant_id, agent_graph_id, name, scenarios) VALUES ($1, $2, $3, $4, $5)',
+    [suiteId, alpha, graphId, 'Provider QA', JSON.stringify([{
+      id: 'real-case', name: 'Provider scenario', mockInput: 'Evaluación Alfa', expectedTextPatterns: ['^Fixture output$'],
+    }])],
+  ));
+  const app = express();
+  app.use(express.json());
+  app.use('/api/v1/ai', createAiRoutes({ gateway, byokService: byok }));
+  const server = app.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(() => new Promise<void>((resolve) => {
+    server.close(() => resolve());
+    server.closeAllConnections();
+  }));
+  const address = server.address();
+  assert.ok(address && typeof address === 'object');
+  const jwt = require('jsonwebtoken') as { sign(claims: object, key: string): string };
+  const post = async (tenantId: number, path: string, data: object, rol = 'ADMIN') => {
+    const response = await fetch(`http://127.0.0.1:${address.port}/api/v1/ai${path}`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer ' + jwt.sign({ companyId: tenantId, userId: 1, rol }, process.env.JWT_SECRET!),
+        'content-type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    return { status: response.status, body: await response.json() };
+  };
+  const complete = (tenantId: number, input: string) => post(tenantId, '/completions', {
+    schemaVersion: 1, tenantId: tenantId === alpha ? bravo : alpha, provider: 'openai', model, maxTokens: 40, timeoutMs: 5000,
+    messages: [{ role: 'system', content: 'Fixture prompt' }, { role: 'user', content: input }],
+  });
+  const fixtureKey = { provider: 'openai', apiKey: 'fixture-alpha' };
+  for (const path of ['/providers', '/providers/test']) {
+    const denied = await post(alpha, path, fixtureKey, 'EMPLEADO');
+    assert.equal(denied.status, 403);
+    assert.equal(denied.body.error, 'ADMIN_REQUIRED');
+  }
+  assert.equal(requests.length, 0);
+  assert.equal((await post(alpha, '/providers', fixtureKey)).status, 200);
+
+  const command = { tenantId: alpha, graphId, version: 1, suiteId, runId: randomUUID(), timeoutMs: 1000 };
+  const ordinary = complete(alpha, 'Alfa en curso');
+  try {
+    await Promise.race([received.promise, ordinary.then(({ status, body }) => assert.fail(`Completion ended before the provider: ${status} ${body.error}`))]);
+    const blocked = await studio.evaluator.evaluate(command);
+    assert.equal(blocked.mode, 'provider');
+    assert.equal(blocked.status, 'failed');
+    assert.deepEqual(blocked.scenarios.map(({ outcome }) => outcome), ['blocked']);
+    assert.equal(requests.length, 1);
+    const missing = await complete(bravo, 'Bravo sin credencial');
+    assert.equal(missing.status, 422);
+    assert.equal(missing.body.error, 'POLICY_DENIED');
+    assert.equal((await post(bravo, '/providers', { provider: 'openai', apiKey: 'fixture-bravo' })).status, 200);
+    assert.equal((await complete(bravo, 'Bravo independiente')).status, 200);
+    assert.equal(requests.length, 2);
+  } finally {
+    respond.resolve();
+    assert.equal((await ordinary).status, 200);
+  }
+
+  const evaluated = await studio.evaluator.evaluate({ ...command, runId: randomUUID() });
+  assert.equal(evaluated.passed, true);
+  assert.deepEqual(transportHeaders, [
+    { input: 'Alfa en curso', authorization: 'Bearer fixture-alpha' },
+    { input: 'Bravo independiente', authorization: 'Bearer fixture-bravo' },
+    { input: 'Evaluación Alfa', authorization: 'Bearer fixture-alpha' },
+  ]);
+  const ledger = new TokenCostLedger(uow);
+  const usageA = await ledger.query(alpha);
+  const usageB = await ledger.query(bravo);
+  assert.deepEqual(usageA.items.map(({ operation, totalTokens }) => [operation, totalTokens]),
+    [['eval', 16], ['completion', 16], ['completion', 9]]);
+  assert.deepEqual(usageB.items.map(({ operation, totalTokens }) => [operation, totalTokens]), [['completion', 16]]);
+  const publication = await uow.run(alpha, (db) => studio.publications.publish(db, {
+    tenantId: alpha, actorId: 1, graphId, version: 1, evaluationId: evaluated.runId,
+  }));
+  assert.equal(publication?.mode, 'provider');
+  assert.equal(await uow.run(alpha, (db) => new AgentStudioPublications('verification').loadActive(db, alpha, graphId)), null);
+  assert.equal(await studio.evaluator.read(bravo, graphId, 1, evaluated.runId), null);
+  const reservation = {
+    id: randomUUID(), requestHash: 'a'.repeat(64), operation: 'completion' as const, provider: 'openai', model,
+    maxTokens: 400040, maxCostMicroUsd: 300180,
+  };
+  await execution.quota.reserve(alpha, reservation);
+  await otherPolicy.transition(alpha, 'paused');
+  await assert.rejects(execution.quota.claim(alpha, reservation.id, reservation.requestHash), { code: 'AI_ADMISSION_UNAVAILABLE' });
+  assert.equal(await execution.quota.release(alpha, reservation.id, reservation.requestHash), true);
+  assert.equal((await complete(alpha, 'Alfa en pausa')).status, 503);
+  await assert.rejects(otherPolicy.transition(alpha, 'legacy'), { code: 'AI_ADMISSION_TRANSITION' });
+  assert.equal(requests.length, 3);
+});
+
+test('a killed legacy dispatcher leaves a company cutover blocked for reconciliation', {
+  skip: !databaseUrl && 'AI_QUOTA_RESERVATIONS_TEST_DATABASE_URL is required',
+}, async (t) => {
+  const pool = new Pool({ connectionString: databaseUrl });
+  t.after(() => pool.end());
+  const uow = new TenantScopedUoW(pool);
+  const tenantId = randomInt(500_000_000, 900_000_000);
+  await uow.run(tenantId, (db) => db.query(
+    'INSERT INTO tenants (id, name, slug) VALUES ($1, $2, $3)', [tenantId, 'AI legacy crash QA', 'qa-' + randomUUID()],
+  ));
+  const child = fork('src/test/fixtures/aiLegacyAdmissionWorker.ts', [String(tenantId)], {
+    execArgv: ['--import', 'tsx'], stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+  });
+  const stopped = once(child, 'exit');
+  try {
+    const [event] = await Promise.race([
+      once(child, 'message', { signal: AbortSignal.timeout(8000) }),
+      stopped.then(() => assert.fail('Legacy worker exited before committing its permit')),
+    ]);
+    assert.equal(event, 'legacy-admitted');
+    assert.equal(child.kill('SIGKILL'), true);
+    assert.deepEqual(await stopped, [null, 'SIGKILL']);
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+    await stopped;
+  }
+  const policy = new TenantAiDispatchPolicy(uow);
+  await policy.transition(tenantId, 'draining');
+  await assert.rejects(policy.transition(tenantId, 'strict'), { code: 'AI_LEGACY_DISPATCH_IN_FLIGHT' });
+  assert.equal(await policy.mode(tenantId), 'draining');
+  const permit = await uow.run(tenantId, (db) => db.query(
+    'SELECT id FROM tenant_ai_legacy_dispatches WHERE tenant_id = $1', [tenantId],
+  ));
+  assert.equal(permit.rowCount, 1);
 });

@@ -68,7 +68,10 @@ function invalidEvidence(): never {
 }
 
 export class AgentStudioPublications {
-  constructor(private readonly mode: ExecutionMode) {}
+  constructor(
+    private readonly mode: ExecutionMode,
+    private readonly authorize?: (db: Queryable, tenantId: number) => Promise<void>,
+  ) {}
 
   /** Call inside a tenant transaction. Publication is immutable and versions advance monotonically. */
   async publish(db: Queryable, command: PublishCommand) {
@@ -77,6 +80,7 @@ export class AgentStudioPublications {
         version > 2_147_483_647 || !/^[a-zA-Z0-9_-]{1,128}$/.test(graphId) || !executionRunIdPattern.test(evaluationId)) {
       throw new AgentPublicationConflict('Publication requires an explicit revision and evaluation UUID');
     }
+    await this.authorize?.(db, tenantId);
     const { rows: [locked] } = await db.query(
       'SELECT graph_id FROM agent_studio_graphs WHERE tenant_id = $1 AND graph_id = $2 FOR UPDATE', [tenantId, graphId],
     );

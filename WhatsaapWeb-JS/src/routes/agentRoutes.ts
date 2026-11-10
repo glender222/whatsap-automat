@@ -344,16 +344,16 @@ export default function createAgentRoutes(service = new AgentService()): Router 
     } catch (error) { next(error); }
   });
 
-  router.get('/provider/models', async (_req: JwtRequest, res: Response, next: NextFunction) => {
+  router.get('/provider/models', async (req: JwtRequest, res: Response, next: NextFunction) => {
     try {
-      res.json({ success: true, data: await service.listProviderModels() });
+      res.json({ success: true, data: await service.listProviderModels(resolveWhatsappCompanyId(req)) });
     } catch (error) { next(error); }
   });
 
   router.post('/provider/test', async (req: JwtRequest, res: Response, next: NextFunction) => {
     if (!requireAdmin(req, res)) return;
     try {
-      res.json({ success: true, data: await service.testProvider({ model: req.body?.model || null }) });
+      res.json({ success: true, data: await service.testProvider(resolveWhatsappCompanyId(req), { model: req.body?.model || null }) });
     } catch (error) { next(error); }
   });
 

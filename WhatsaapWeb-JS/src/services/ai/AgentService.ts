@@ -4,6 +4,7 @@ import path from 'path';
 import pool from '../../config/database';
 import { queryInTenantScope } from '../../db/TenantScopedUoW';
 import config from '../../config/index';
+import { tenantAiDispatchPolicy } from './gateway/TenantAiDispatchPolicy';
 import {
   AgentDecisionEngine,
   AgentHandoffService,
@@ -115,12 +116,13 @@ export class AgentService {
     return getAiProviderFactory().getDefault().getStatus();
   }
 
-  async listProviderModels(): Promise<Record<string, unknown>[]> {
-    return getAiProviderFactory().getDefault().listModels();
+  listProviderModels(companyId: number): Promise<Record<string, unknown>[]> {
+    return tenantAiDispatchPolicy.withLegacyDispatch(companyId, () => getAiProviderFactory().getDefault().listModels());
   }
 
-  async testProvider(input: { model?: string | null }): Promise<Record<string, unknown>> {
-    return getAiProviderFactory().getDefault().testConnection(input?.model || null);
+  testProvider(companyId: number, input: { model?: string | null }): Promise<Record<string, unknown>> {
+    return tenantAiDispatchPolicy.withLegacyDispatch(companyId, () =>
+      getAiProviderFactory().getDefault().testConnection(input?.model || null));
   }
 
   async logRuntimeEvent(input: AgentRuntimeLogInput): Promise<void> {
@@ -389,7 +391,11 @@ export class AgentService {
     }));
   }
 
-  async runAgent(companyId: number, agentId: number, input: RunAgentInput, userId: number | null): Promise<AgentRuntimeResult> {
+  runAgent(companyId: number, agentId: number, input: RunAgentInput, userId: number | null): Promise<AgentRuntimeResult> {
+    return tenantAiDispatchPolicy.withLegacyDispatch(companyId, () => this.runLegacyAgent(companyId, agentId, input, userId));
+  }
+
+  private async runLegacyAgent(companyId: number, agentId: number, input: RunAgentInput, userId: number | null): Promise<AgentRuntimeResult> {
     const agent = await this.agentRepo.get(companyId, agentId);
     const requestedMode = String(input.mode || agent.mode || 'suggest');
     const mode = (requestedMode === 'auto' || requestedMode === 'disabled' || requestedMode === 'suggest'

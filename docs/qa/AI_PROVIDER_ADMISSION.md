@@ -1,0 +1,22 @@
+# Admisión de proveedor IA por empresa
+
+La migración 060 añade la política y los permisos activos del proveedor anterior. Ambas tablas aplican RLS. El gateway, el runtime de WhatsApp, las ejecuciones manuales y las pruebas del proveedor anterior registran un permiso antes de iniciar una operación. El permiso se elimina cuando la operación termina. El estado de una empresa nunca habilita las operaciones de otra.
+
+| Estado | Admisión |
+| --- | --- |
+| `legacy` | Perfil anterior. Las empresas sin política explícita empiezan aquí. |
+| `draining` | Se rechazan operaciones nuevas. Las que ya obtuvieron permiso pueden finalizar. |
+| `strict` | Texto acotado con reserva de cuota. Requiere credencial OpenAI activa y cifrada de la empresa, sin URL personalizada. |
+| `paused` | Se rechazan operaciones nuevas. Los consumos admitidos pueden liquidarse. |
+
+El cambio de modo y el permiso del proveedor anterior toman el mismo bloqueo de PostgreSQL. Si el proceso muere antes de liberar el permiso, cambiar a `strict` requiere reconciliar ese registro. El gateway no cambia de proveedor si falla la política, falta una clave o se agota el presupuesto. La reserva y su permiso vuelven a comprobar el modo en la base. Para probar la conexión o guardar una clave se necesita el rol de administrador.
+
+La política puede ejercitarse con `TenantAiDispatchPolicy.transition` desde la prueba de integración. El despliegue no cambia automáticamente el modo de ninguna empresa. Antes de un piloto real, hay que actualizar todas las réplicas y los consumidores, verificar el consumo previo y resolver cualquier permiso que siga abierto. La pausa puede volver a `strict`. El retorno al proveedor anterior después de usar el modo acotado requiere una decisión de migración de cuotas.
+
+Para reproducir, aplicar las migraciones en PostgreSQL de prueba con un rol sin bypass de RLS. Exportar `AI_QUOTA_RESERVATIONS_TEST_DATABASE_URL` y ejecutar desde `WhatsaapWeb-JS`:
+
+```sh
+node --import tsx --test src/test/bounded-agent-dispatch.test.ts
+```
+
+El transporte de prueba apunta a HTTP local y comprueba el destino, la credencial de cada empresa, el número de solicitudes y la liquidación. No requiere una cuenta del proveedor.

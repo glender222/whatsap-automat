@@ -24,6 +24,7 @@ type DispatchPreflight = { readonly ok: false; readonly code: PreflightError } |
 
 type DispatchResult = { readonly publicationEvidence: false } & (
   { readonly status: 'preflight_rejected'; readonly code: PreflightError } |
+  { readonly status: 'provider_unavailable' } |
   Exclude<BoundedTextDispatchResult, { status: 'capability_unavailable' }>
 );
 

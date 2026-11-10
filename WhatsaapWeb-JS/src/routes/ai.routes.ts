@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, type NextFunction } from 'express';
 import { JwtRequest, requireJwt } from '../middleware/jwtAuth';
 import { resolveTenantContext, tenantContext } from '../middleware/tenantContext';
 import {
@@ -45,6 +45,14 @@ function resolveActor(req: JwtRequest) {
     .filter((role): role is string => typeof role === 'string' && role.trim().length > 0)
     .map((role) => role.trim().toLowerCase());
   return { id, roles: [...new Set(roles)] };
+}
+
+function requireProviderAdmin(req: JwtRequest, res: Response, next: NextFunction): void {
+  if (resolveActor(req).roles.includes('admin')) {
+    next();
+    return;
+  }
+  res.status(403).json({ success: false, error: 'ADMIN_REQUIRED', message: 'Provider configuration requires a company administrator.' });
 }
 
 export interface AiRoutesOptions {
@@ -98,7 +106,7 @@ export default function createAiRoutes(options: AiRoutesOptions = {}): Router {
   });
 
   // 2. POST /api/v1/ai/providers - Save or update BYOK credentials
-  router.post('/providers', requireJwt, tenantContext(), async (req: Request, res: Response) => {
+  router.post('/providers', requireJwt, requireProviderAdmin, tenantContext({ allowSandbox: false }), async (req: Request, res: Response) => {
     try {
       const tenantId = resolveTenantId(req);
       const parsed = registerByokCredentialCommandV1Schema.safeParse(req.body);
@@ -145,7 +153,7 @@ export default function createAiRoutes(options: AiRoutesOptions = {}): Router {
   });
 
   // 3. POST /api/v1/ai/providers/test - Test connection to provider
-  router.post('/providers/test', requireJwt, tenantContext(), async (req: Request, res: Response) => {
+  router.post('/providers/test', requireJwt, requireProviderAdmin, tenantContext({ allowSandbox: false }), async (req: Request, res: Response) => {
     try {
       const tenantId = resolveTenantId(req);
       const parsed = testByokConnectionRequestV1Schema.safeParse(req.body);

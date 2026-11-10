@@ -65,7 +65,8 @@ function isAmount(value: number, max = Number.MAX_SAFE_INTEGER): boolean {
 export class AiQuotaReservationStore {
   constructor(
     private readonly uow: TenantScopedUoW = tenantScopedUoW,
-    private readonly ledger = new TokenCostLedger(uow)
+    private readonly ledger = new TokenCostLedger(uow),
+    private readonly authorizeDispatch?: (db: Queryable, tenantId: number) => Promise<void>,
   ) {}
 
   async reserve(tenantId: number, reservation: AiQuotaReservation): Promise<void> {
@@ -77,6 +78,7 @@ export class AiQuotaReservationStore {
     }
 
     await this.uow.run(tenantId, async (client) => {
+      await this.authorizeDispatch?.(client, tenantId);
       const quota = await this.lockQuota(client, tenantId);
       const { rows: [existing] } = await client.query(
         `SELECT request_hash, operation, provider, model, max_cost_micro_usd, max_tokens
@@ -103,6 +105,7 @@ export class AiQuotaReservationStore {
   /** Only the caller that receives a token may dispatch the bound attempt. */
   async claim(tenantId: number, id: string, requestHash: string): Promise<{ token: string; dispatchBefore: Date } | null> {
     return this.uow.run(tenantId, async (client) => {
+      await this.authorizeDispatch?.(client, tenantId);
       const quota = await this.lockQuota(client, tenantId);
       const { rows: [claimed] } = await client.query(
         `UPDATE ai_quota_reservations SET status = 'claimed', claim_token = $5, claimed_at = clock_timestamp()
