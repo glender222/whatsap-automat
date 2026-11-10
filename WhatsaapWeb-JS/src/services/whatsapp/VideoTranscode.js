@@ -26,7 +26,14 @@ async function isReusableMp4(filePath) {
       'format=format_name:format_tags=major_brand:stream=codec_name,codec_type,pix_fmt,nb_frames,nb_read_frames:stream_disposition=attached_pic',
       '-of', 'json', filePath,
     ], { ...PROCESS_LIMITS, timeout: 15_000 });
-    if (!stderr.trim()) probe = JSON.parse(stdout);
+    const inspected = JSON.parse(stdout);
+    const diagnostic = stderr.trim();
+    // FFprobe 8 can report this Opus parser diagnostic for complete streamed WebM.
+    // Such input still goes through the strict transcode path. All other errors reject the upload.
+    const webmOpusDiagnostic = inspected.format?.format_name === 'matroska,webm' &&
+      inspected.streams?.some((stream) => stream.codec_name === 'opus' && Number(stream.nb_read_frames) > 0) &&
+      /^\[opus @ 0x[0-9a-f]+\] Error parsing Opus packet header\.$/i.test(diagnostic);
+    if (!diagnostic || webmOpusDiagnostic) probe = inspected;
   } catch (error) {
     if (error.code === 'ENOENT') {
       throw videoError('VIDEO_INSPECTION_UNAVAILABLE', 503, 'La inspección de video no está disponible.');

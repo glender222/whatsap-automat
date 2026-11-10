@@ -370,9 +370,10 @@ test('legacy HTTP routes never send or persist free-form Meta text and preserve 
     assert.deepEqual(probe(vp9Mp4).streams.map((stream) => stream.codec_name), ['vp9', 'aac']);
     const declaredMp4 = (bytes: Buffer) =>
       multipart({ chatId: phone }, 'video/mp4', 'declared.mp4', new Uint8Array(bytes));
-    for (const input of [compatibleMp4, vp9Mp4, source]) {
+    for (const [label, input] of [['H.264 MP4', compatibleMp4], ['VP9 MP4', vp9Mp4], ['streamed WebM', source]] as const) {
       const start = attempts.length;
-      assert.equal((await send(chat, declaredMp4(input))).status, 200);
+      const result = await send(chat, declaredMp4(input));
+      assert.equal(result.status, 200, label + ': ' + JSON.stringify(result.body));
       const actual = attempts[start].media;
       assert.equal(actual?.mimeType, 'video/mp4');
       assert.deepEqual(probe(actual!.bytes).streams.map((stream) => stream.codec_name), ['h264', 'aac']);
@@ -387,7 +388,7 @@ test('legacy HTTP routes never send or persist free-form Meta text and preserve 
     const corrupt = await send(chat, video({ chatId: phone }, Buffer.from('corrupt webm')));
     assert.equal(corrupt.status, 422);
     assert.equal(corrupt.body.error, 'VIDEO_CONVERSION_FAILED');
-    for (const input of [Buffer.from('not an mp4'), compatibleMp4.subarray(0, -1000)]) {
+    for (const input of [Buffer.from('not an mp4'), compatibleMp4.subarray(0, -1000), source.subarray(0, -1000)]) {
       const damaged = await send(chat, declaredMp4(input));
       assert.equal(damaged.status, 422);
       assert.equal(damaged.body.error, 'INVALID_VIDEO');
