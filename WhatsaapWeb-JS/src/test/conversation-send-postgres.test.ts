@@ -152,7 +152,7 @@ test('durable CAS sends one Graph POST per text or attachment intent and reconci
   const tenantToken = 'fixture-whatsapp-encrypted-token';
   for (const [tenantId, phoneNumberId, accessToken] of [
     [tenantA, phoneA, tenantToken], [tenantB, phoneB, 'fixture-other-tenant-token'],
-    [tenantA, secondPhone, 'fixture-second-account-token'], [tenantA, missingCredential, null],
+    [tenantA, secondPhone, 'fixture-second-account-token'], [tenantA, missingCredential, 'fixture-historical-token'],
   ] as const) {
     await accounts.upsertConnection(tenantId, { phoneNumberId, accessToken, graphVersion: 'v25.0' });
   }
@@ -269,6 +269,14 @@ test('durable CAS sends one Graph POST per text or attachment intent and reconci
   assert.equal((await send(url, ambiguousId, 'ambiguous-account', 1, accessA)).body.metadata.reasonCode, 'SENDING_ACCOUNT_UNVERIFIED');
   await inbound(missingCredential, '12025550104');
   const unavailableId = await conversation(tenantA, '12025550104');
+  await uow.run(tenantA, (sql) => sql.query(`
+    UPDATE whatsapp_business_accounts SET status = 'missing_token', access_token_encrypted = NULL
+    WHERE company_id = $1 AND phone_number_id = $2
+  `, [tenantA, missingCredential]));
+  const missingRoute = await signedWebhook(url, missingCredential, {
+    messages: [{ id: 'wamid.pending-fixture', from: '12025550104', timestamp: now(), type: 'text', text: { body: 'Pending line' } }],
+  });
+  assert.equal(missingRoute.status, 404);
   assert.equal((await send(url, unavailableId, 'missing-tenant-credential', 1, accessA)).body.metadata.reasonCode, 'SENDING_ACCOUNT_UNAVAILABLE');
   assert.equal(graphRequests.length, 0);
 
