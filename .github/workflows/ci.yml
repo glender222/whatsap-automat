@@ -42,6 +42,7 @@ jobs:
           cache: 'npm'
           cache-dependency-path: |
             packages/contracts/package-lock.json
+            packages/sdk/package-lock.json
             WhatsaapWeb-JS/package-lock.json
 
       - name: Compilar contratos compartidos
@@ -52,7 +53,9 @@ jobs:
 
       - name: Instalar dependencias
         working-directory: WhatsaapWeb-JS
-        run: npm ci
+        run: |
+          npm ci
+          npm --prefix ../packages/sdk ci
 
       - name: Auditar dependencias de producción
         working-directory: WhatsaapWeb-JS
@@ -76,7 +79,7 @@ jobs:
 
       - name: Autorización de herramientas, aprobaciones y marketplace
         working-directory: WhatsaapWeb-JS
-        run: node --import tsx --import ./src/test/fixtures/testEnv.ts --test src/test/ai-tool-routes.test.ts src/test/publication-gate.test.ts src/test/agent-eval-simulator.test.ts src/test/tool-broker.test.ts src/test/empirical-adversarial-challenge.test.ts src/test/m2-ssrf-adversarial-challenge.test.ts src/test/m4-ssrf-cas-adversarial.test.ts src/test/rag-knowledge-base.test.ts src/test/m3-adversarial-challenge.test.ts src/test/m3-rag-adversarial-challenge.test.ts src/test/marketplace-registry.test.ts src/test/openapi-routes.test.ts src/test/workflows-ingress-rollback.test.ts
+        run: node --import tsx --import ./src/test/fixtures/testEnv.ts --test src/test/ai-tool-routes.test.ts src/test/publication-gate.test.ts src/test/agent-eval-simulator.test.ts src/test/tool-broker.test.ts src/test/empirical-adversarial-challenge.test.ts src/test/m2-ssrf-adversarial-challenge.test.ts src/test/m4-ssrf-cas-adversarial.test.ts src/test/rag-knowledge-base.test.ts src/test/m3-adversarial-challenge.test.ts src/test/m3-rag-adversarial-challenge.test.ts src/test/marketplace-registry.test.ts src/test/openapi-routes.test.ts src/test/workflows-ingress-rollback.test.ts src/test/webjs-channel-scope.test.ts
 
   product-smoke:
     name: Flujo de producto con PostgreSQL y Socket.IO
@@ -123,11 +126,13 @@ jobs:
           cache: npm
           cache-dependency-path: |
             packages/contracts/package-lock.json
+            packages/sdk/package-lock.json
             WhatsaapWeb-JS/package-lock.json
       - name: Instalar contratos y backend
         run: |
           npm --prefix ../packages/contracts ci
           npm --prefix ../packages/contracts run build
+          npm --prefix ../packages/sdk ci
           npm ci
           npm run build
       - name: Crear base vacía y aplicar migraciones con RLS
@@ -151,7 +156,7 @@ jobs:
             if ! kill -0 "$app_pid" "$peer_pid" 2>/dev/null; then break; fi
             sleep 1
           done
-          if ! curl -fsS "$PRODUCT_SMOKE_URL/ready" || ! curl -fsS "$PRODUCT_SMOKE_PEER_URL/ready" || ! node --import tsx --test src/test/product-smoke.integration.test.ts; then
+          if ! curl -fsS "$PRODUCT_SMOKE_URL/ready" || ! curl -fsS "$PRODUCT_SMOKE_PEER_URL/ready" || ! node --import tsx --test --test-concurrency=1 src/test/product-smoke.integration.test.ts src/test/whatsapp-tenant-routing.integration.test.ts; then
             cat "$RUNNER_TEMP/product-smoke.log" "$RUNNER_TEMP/product-smoke-peer.log"
             exit 1
           fi
@@ -171,6 +176,7 @@ jobs:
           CATALOG_INVENTORY_TEST_DATABASE_URL: postgres://whatsap_smoke:ci-runtime-only@127.0.0.1:5432/whatsap_automat_smoke
           ORDERS_TEST_DATABASE_URL: postgres://whatsap_smoke:ci-runtime-only@127.0.0.1:5432/whatsap_automat_smoke
           PAYMENT_GATEWAY_TEST_DATABASE_URL: postgres://whatsap_smoke:ci-runtime-only@127.0.0.1:5432/whatsap_automat_smoke
+          PAYMENT_CHECKOUT_DISPATCH_TEST_DATABASE_URL: postgres://whatsap_smoke:ci-runtime-only@127.0.0.1:5432/whatsap_automat_smoke
           PAYMENT_CHECKOUT_TEST_DATABASE_URL: postgres://whatsap_smoke:ci-runtime-only@127.0.0.1:5432/whatsap_automat_smoke
           LEGACY_META_TEST_DATABASE_URL: postgres://whatsap_smoke:ci-runtime-only@127.0.0.1:5432/whatsap_automat_smoke
           LEGACY_META_TEST_VIDEO: '1'
@@ -179,7 +185,7 @@ jobs:
             sudo apt-get update
             sudo apt-get install --yes --no-install-recommends ffmpeg
           fi
-          node --import tsx --test --test-concurrency=3 src/test/campaign-persistence.integration.test.ts src/test/marketplace-postgres.test.ts src/test/agent-studio-postgres.test.ts src/test/ai-quota-reservations-postgres.test.ts src/test/bounded-agent-dispatch.test.ts src/test/agent-domains-postgres.test.ts src/test/channel-connections-postgres.test.ts src/test/workflow-console.integration.test.ts src/test/conversation-send-postgres.test.ts src/test/attachment-rls-postgres.test.ts src/test/challenger_f8_immutability_compliance.test.ts src/test/operation-executions-postgres.test.ts src/test/catalog-inventory-postgres.test.ts src/test/orders-postgres.test.ts src/test/payment-gateway-postgres.test.ts src/test/payment-checkout-intents-postgres.test.ts src/test/legacy-meta-send-postgres.test.ts
+          node --import tsx --test --test-concurrency=3 src/test/campaign-persistence.integration.test.ts src/test/marketplace-postgres.test.ts src/test/agent-studio-postgres.test.ts src/test/ai-quota-reservations-postgres.test.ts src/test/bounded-agent-dispatch.test.ts src/test/agent-domains-postgres.test.ts src/test/channel-connections-postgres.test.ts src/test/workflow-console.integration.test.ts src/test/conversation-send-postgres.test.ts src/test/attachment-rls-postgres.test.ts src/test/challenger_f8_immutability_compliance.test.ts src/test/operation-executions-postgres.test.ts src/test/catalog-inventory-postgres.test.ts src/test/orders-postgres.test.ts src/test/payment-gateway-postgres.test.ts src/test/payment-checkout-intents-postgres.test.ts src/test/payment-checkout-dispatch-postgres.test.ts src/test/payment-checkout-reconciliation-postgres.test.ts src/test/payment-checkout-reconciliation-routes.test.ts src/test/legacy-meta-send-postgres.test.ts
       - name: Ejecutar workflows con el worker compilado y Temporal
         env:
           DB_NAME: whatsap_automat_temporal_smoke
