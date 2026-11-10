@@ -197,6 +197,10 @@ export function useCanonicalComposer({
   const phase = busy[scope];
   const attempt = pending[scope];
   const unresolved = Boolean(attempt || current?.unresolved || serverUnresolved[scope]);
+  const refreshDelivery = useCallback(() => {
+    if (unresolved) refresh();
+    else refreshHistory();
+  }, [refresh, refreshHistory, unresolved]);
   const windowOpen = expiresAt > clock && closedWindow[scope] !== expiresAt;
   const verifiedConversation = Boolean(conversation?.channel === 'whatsapp-cloud' && conversation.status === 'open');
   const assignedElsewhere = Boolean(conversation?.assignedUserId && conversation.assignedUserId !== actor?.id);
@@ -310,7 +314,7 @@ export function useCanonicalComposer({
     conversation, error, loading: Boolean(scope && !fresh && !error), phase, notice: notices[scope],
     windowOpen, owns, assignedElsewhere, unresolved, canSend, canAttach, canSendLegacyAttachment, canTakeover, canRetryExact,
     attachmentDraft: attachmentDrafts[scope] ?? null, attachmentPending: attempt?.kind === 'attachment',
-    setAttachmentDraft, selectAttachment, takeover, refresh, send, sendAttachment, retryExact,
+    setAttachmentDraft, selectAttachment, takeover, refresh, refreshDelivery, send, sendAttachment, retryExact,
   };
 }
 

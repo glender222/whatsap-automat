@@ -396,3 +396,158 @@ test('history loads messages from the same second without losing position or cro
     await Promise.all(contexts.map((context) => context.close()));
   }
 });
+
+test('the composer scopes ownership, retries, attachments and receipt recovery to the sending company', async ({ browser, request }) => {
+  const graph = process.env.PRODUCT_GRAPH_FIXTURE_URL;
+  test.skip(!graph, 'Requires the local Graph fixture preload');
+  test.setTimeout(45000);
+  const [companyA, companyB] = provisionCompanies('--send');
+  const companies = [companyA, companyB];
+  const contexts = await Promise.all(companies.map(() => browser.newContext()));
+  const contact = '12025550145';
+  const now = Math.floor(Date.now() / 1000);
+  const inboundId = 'wamid.' + randomUUID();
+  let online = true;
+  let closeSocket: (() => Promise<void>) | undefined;
+  const attempts = async (company: Company) => {
+    const response = await request.get(`${graph}/attempts?line=${company.phoneNumberId}`);
+    expect(response.ok()).toBe(true);
+    return await response.json() as Array<{ operation: string; type?: string; id?: string; to?: string; callback?: string }>;
+  };
+
+  try {
+    const [alpha, bravo] = await Promise.all(companies.map(async (company, index) => {
+      await postWebhook(request, company, { messages: [{
+        id: inboundId, from: contact, timestamp: String(now - (index ? 25 * 60 * 60 : 0)),
+        type: 'text', text: { body: index ? 'Entrada Bravo vencida' : 'Entrada Alfa vigente' },
+      }] });
+      await contexts[index].addInitScript((auth) => localStorage.setItem('auth', JSON.stringify(auth)), company.auth);
+      const page = await contexts[index].newPage();
+      if (index === 0) {
+        await page.routeWebSocket(/\/socket\.io\//, async (socket) => {
+          if (!online) return socket.close({ code: 1001 });
+          socket.connectToServer();
+          closeSocket = () => socket.close({ code: 1001 });
+        });
+      }
+      await page.goto('/gestion-web/inicio?chat=' + contact);
+      return page;
+    }));
+
+    const draft = alpha.getByRole('textbox', { name: 'Mensaje', exact: true });
+    const send = alpha.getByRole('button', { name: 'Enviar mensaje' });
+    const ownership = alpha.getByRole('button', { name: 'Tomar control' });
+    await expect(bravo.getByText('Ventana de atención de 24 horas cerrada.', { exact: true })).toBeVisible();
+    await bravo.getByRole('textbox', { name: 'Mensaje', exact: true }).fill('Borrador de Bravo');
+    await expect(bravo.getByRole('button', { name: 'Enviar mensaje' })).toBeDisabled();
+    await expect(bravo.getByRole('button', { name: 'Adjuntar' })).toBeDisabled();
+    await draft.fill('Envío QA reintento exacto');
+    await expect(send).toBeDisabled();
+    await ownership.press('Enter');
+    await expect(draft).toBeFocused();
+    await expect(send).toBeEnabled();
+    expect(await attempts(companyA)).toEqual([]);
+
+    const keys: string[] = [];
+    const isTextPost = (url: URL) => /^\/api\/v1\/conversations\/\d+\/messages$/.test(url.pathname);
+    alpha.on('request', (outbound) => {
+      if (outbound.method() === 'POST' && isTextPost(new URL(outbound.url()))) {
+        keys.push(outbound.headers()['idempotency-key']);
+      }
+    });
+    await alpha.route(isTextPost, (route) => route.request().method() === 'POST'
+      ? route.abort('timedout') : route.fallback());
+    await send.click();
+    const retry = alpha.getByRole('button', { name: 'Reintentar el mismo envío' });
+    await expect(retry).toBeVisible();
+    expect(await attempts(companyA)).toEqual([]);
+    await alpha.unroute(isTextPost);
+    await retry.press('Enter');
+    await expect(draft).toHaveValue('');
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).toBeTruthy();
+    expect(keys[0]).toBe(keys[1]);
+    expect(await attempts(companyA)).toMatchObject([{ operation: 'messages', type: 'text', to: contact }]);
+
+    await alpha.getByRole('button', { name: 'Adjuntar' }).click();
+    const chooser = alpha.waitForEvent('filechooser');
+    await alpha.getByRole('button', { name: 'Documento', exact: true }).click();
+    await (await chooser).setFiles({ name: 'archivo-qa.txt', mimeType: 'text/plain', buffer: Buffer.from('Archivo QA') });
+    await draft.fill('Adjunto QA');
+    const sendFile = alpha.getByRole('button', { name: 'Enviar archivo' });
+    await sendFile.click();
+    await expect(alpha.getByText(/WhatsApp no admite este adjunto/)).toBeVisible();
+    await expect(draft).toHaveValue('Adjunto QA');
+    await expect(sendFile).toBeEnabled();
+    expect((await attempts(companyA)).map(({ operation }) => operation)).toEqual(['messages', 'media']);
+    await sendFile.click();
+    await expect(draft).toHaveValue('');
+    await expect(sendFile).toHaveCount(0);
+    expect((await attempts(companyA)).map(({ operation, type }) => [operation, type])).toEqual([
+      ['messages', 'text'], ['media', undefined], ['media', undefined], ['messages', 'document'],
+    ]);
+    const file = (await attempts(companyA)).at(-1)!;
+    const fileUrl = `${backend}/api/media/${encodeURIComponent(file.id!)}`;
+    const ownerHeaders = { authorization: `Bearer ${companyA.auth.accessToken}` };
+    expect((await request.get(fileUrl)).status()).toBe(401);
+    const download = await request.get(fileUrl, { headers: ownerHeaders });
+    expect(await download.text()).toBe('Archivo QA');
+    expect(download.status()).toBe(200);
+    expect((await request.get(fileUrl + '/info', { headers: ownerHeaders })).status()).toBe(200);
+    const legacyDownload = await request.get(`${backend}/api/media/media/${encodeURIComponent(file.id!)}`, { headers: ownerHeaders });
+    expect(await legacyDownload.text()).toBe('Archivo QA');
+    const foreignDownload = await request.get(fileUrl, { headers: { authorization: `Bearer ${companyB.auth.accessToken}` } });
+    expect([403, 404]).toContain(foreignDownload.status());
+
+    const pending = 'Envío QA sin confirmación';
+    await draft.fill(pending);
+    await send.click();
+    await expect(alpha.getByText(/La entrega sigue sin confirmar/)).toBeVisible();
+    await expect(send).toBeDisabled();
+    await expect(retry).toHaveCount(0);
+    const requests = await attempts(companyA);
+    expect(requests).toHaveLength(5);
+    const last = requests.at(-1)!;
+    expect(last.callback).toMatch(/^automat:/);
+
+    const signedStatus = { id: last.id, status: 'delivered', recipient_id: contact,
+      timestamp: String(Math.floor(Date.now() / 1000)), biz_opaque_callback_data: last.callback };
+    await postWebhook(request, companyB, { statuses: [signedStatus] });
+    await expect(alpha.getByText(/La entrega sigue sin confirmar/)).toBeVisible();
+    await postWebhook(request, companyA, { statuses: [signedStatus] });
+    const history = alpha.getByRole('region', { name: 'Historial de mensajes' });
+    await expect(history.getByText(pending, { exact: true })).toHaveCount(1);
+    await expect(history.getByTestId('message-delivery-status').filter({ hasText: /^Entregado$/ })).toHaveCount(1);
+    await expect(draft).toHaveValue('');
+    await expect(alpha.getByText('Tienes el control de esta conversación.', { exact: true })).toBeVisible();
+    expect(await attempts(companyA)).toEqual(requests);
+
+    const pendingOffline = 'Envío QA sin confirmación al reconectar';
+    await draft.fill(pendingOffline);
+    await send.click();
+    await expect(alpha.getByText(/La entrega sigue sin confirmar/)).toBeVisible();
+    await draft.fill('Nuevo borrador de Alfa');
+    await expect(send).toBeDisabled();
+    const beforeReconnect = await attempts(companyA);
+    expect(beforeReconnect).toHaveLength(6);
+    const offlineAttempt = beforeReconnect.at(-1)!;
+    expect(closeSocket).toBeDefined();
+    online = false;
+    await contexts[0].setOffline(true);
+    await closeSocket!();
+    await postWebhook(request, companyA, { statuses: [{ ...signedStatus, id: offlineAttempt.id,
+      biz_opaque_callback_data: offlineAttempt.callback, timestamp: String(Math.floor(Date.now() / 1000)) }] });
+    await expect(send).toBeDisabled();
+    online = true;
+    await contexts[0].setOffline(false);
+    await expect(send).toBeEnabled();
+    await expect(draft).toHaveValue('Nuevo borrador de Alfa');
+    await expect(history.getByText(pendingOffline, { exact: true })).toHaveCount(1);
+    expect(await attempts(companyA)).toEqual(beforeReconnect);
+    expect(await attempts(companyB)).toEqual([]);
+    await expect(bravo.getByRole('textbox', { name: 'Mensaje', exact: true })).toHaveValue('Borrador de Bravo');
+    await expect(bravo.getByText(pending, { exact: true })).toHaveCount(0);
+  } finally {
+    await Promise.all(contexts.map((context) => context.close()));
+  }
+});

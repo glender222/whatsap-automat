@@ -65,16 +65,6 @@ export default function Inicio() {
     inboxRefresh.current = null;
   }, []);
 
-  const refreshOnConnection = useCallback(() => {
-    reloadUnlistedChats();
-    reloadMessages();
-  }, [reloadMessages, reloadUnlistedChats]);
-  useSocketSimple({
-    selectedChat, chats, onNewMessage: handleNewMessage, onChatUpdate: setChats,
-    onConnect: refreshOnConnection, onUnlistedChat: reloadUnlistedChats,
-    onHistoryInvalidated: reloadMessages,
-  });
-
   useEffect(() => {
     selectChat(requestedChat ?? '');
   }, [requestedChat, selectChat]);
@@ -95,6 +85,16 @@ export default function Inicio() {
   const composer = useCanonicalComposer({
     chatId: selectedChat, conversationId: activeChat?.conversationId, actor, inboundId: latestInboundId,
     refreshHistory: reloadMessages, acceptDraft,
+  });
+  const { refresh: refreshComposer, refreshDelivery } = composer;
+  const refreshOnConnection = useCallback(() => {
+    reloadUnlistedChats();
+    refreshComposer();
+  }, [refreshComposer, reloadUnlistedChats]);
+  useSocketSimple({
+    selectedChat, chats, onNewMessage: handleNewMessage, onChatUpdate: setChats,
+    onConnect: refreshOnConnection, onUnlistedChat: reloadUnlistedChats,
+    onHistoryInvalidated: refreshDelivery,
   });
 
   function setDraft(update: SetStateAction<string>) {

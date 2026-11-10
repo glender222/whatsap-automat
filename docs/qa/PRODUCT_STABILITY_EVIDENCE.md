@@ -80,6 +80,25 @@ Para reproducirlo con el entorno de MSG-01, ejecutar `npm run test:e2e -- e2e/in
 
 Para reproducirlo, usar el entorno de MSG-01 y ejecutar `npm run test:e2e -- e2e/inbox.integration.spec.ts -g 'history loads messages'`. `legacy-meta-send-postgres.test.ts` cubre también tres páginas consecutivas, el cursor de otra conversación y la consulta anterior por fecha.
 
+## MSG-06. Toma de control, reintento, adjunto y entrega incierta
+
+- **Antes.** En Chrome, tras la pérdida de respuesta del proveedor, un recibo firmado cambió el historial a «Entregado». El cuadro de respuesta siguió bloqueado y conservó el texto enviado hasta pulsar «Actualizar estado».
+- **Cambio.** Una notificación de entrega del hilo activo vuelve a comprobar el intento si hay un resultado pendiente. Al reconectar se actualizan la bandeja, el historial y el estado canónico de la conversación. La confirmación solo limpia el borrador que coincide con el envío y conserva cualquier edición posterior.
+- **Después.** El operador de Alfa tomó el control con teclado y el foco pasó al cuadro de respuesta. Bravo, con el mismo contacto y una ventana vencida, conservó su borrador y no pudo enviar ni adjuntar. Un timeout en el navegador anterior al despacho permitió repetir la misma clave y generó un solo POST de texto a Graph. Un rechazo de subida dejó disponible el archivo original. El reintento subió el archivo y lo envió una vez. Alfa descargó los bytes por las rutas actual y de compatibilidad. La solicitud sin sesión devolvió `401` y Bravo no pudo acceder al archivo.
+- Dos pérdidas de respuesta de Graph dejaron sendos envíos pendientes. Un recibo firmado para la línea de Bravo no resolvió el intento de Alfa. El recibo correcto desbloqueó la respuesta en vivo y, en el segundo caso, al reconectar. El historial mostró cada envío una vez y el borrador editado se conservó. Graph registró dos subidas y cuatro POST de envío en Alfa, y cero en Bravo. El recuento excluye los acuses de lectura.
+
+Para reproducirlo, usar la base local de MSG-01 y arrancar el backend desde `WhatsaapWeb-JS` con el proveedor simulado:
+
+```sh
+npm run build
+export HOST=127.0.0.1 PORT=34254
+export PRODUCT_SMOKE_URL=http://127.0.0.1:34254
+export PRODUCT_GRAPH_FIXTURE_URL=http://127.0.0.1:34255
+node --import ./src/test/fixtures/browserGraph.mjs dist/index.js
+```
+
+Desde el frontend, con las mismas variables de prueba exportadas, ejecutar `npm run test:e2e -- e2e/inbox.integration.spec.ts -g 'composer scopes'`. La carga previa solo admite direcciones de loopback, una base terminada en `_smoke` y el token sintético. Reenvía las peticiones del adaptador Graph al proveedor local.
+
 ## IA-01. Evaluación de ejecución por revisión y empresa
 
 - El evaluador interno carga una revisión inmutable y una suite guardada bajo RLS. Verifica las afirmaciones y el presupuesto del conjunto antes de llamar al proveedor. La ejecución reclama un UUID persistido y guarda las huellas de la revisión y de la suite, los resultados de las afirmaciones y las referencias de consumo. El resumen omite el texto de entrada y salida.
@@ -104,6 +123,6 @@ Para reproducirlo, aplicar la migración 056 en la base local de pruebas y ejecu
 | Recorrido | Evidencia pendiente |
 | --- | --- |
 | Bandeja en tiempo real | Filtro por etiqueta, reconexión, reorden de webhooks e historial paginado cubiertos en MSG-04 y MSG-05. |
-| Envío y recepción | Verificar timeout, reintento, adjuntos, ventana de atención y toma de control desde la interfaz. Contar las llamadas al proveedor de prueba y comprobar persistencia e identidad. |
+| Envío y recepción | Toma de control, ventana de atención, reintento, adjuntos y recuperación de una entrega incierta cubiertos en MSG-06. |
 | Harness IA | Borrador, validación, evaluación de ejecución, publicación y ejecución de una revisión inmutable. Comprobar permisos, límites, cancelación, recuperación y efectos concurrentes. |
 | Flujo operativo y navegación | Atención, pedido, pago, aprobación y conexión. Recorrer como administrador y operador, con teclado y diferentes tamaños de pantalla. |

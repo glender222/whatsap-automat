@@ -13,27 +13,47 @@ async function main() {
   const { default: pool } = await import('../../config/database');
   const { MetaAccountStore } = await import('../../services/whatsapp/meta/MetaAccountStore');
   const { MetaInboxStore } = await import('../../services/whatsapp/meta/MetaInboxStore');
+  const postAuth = async (action: string, body: object, token?: string) => {
+    const response = await fetch(`${url.origin}/api/auth/${action}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...(token && { authorization: `Bearer ${token}` }) },
+      body: JSON.stringify(body), signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(response.status, 200, `Auth fixture ${action}`);
+    return (await response.json()).data;
+  };
   try {
     const store = new MetaAccountStore();
     const firstLine = randomInt(200_000_000_000_000, 300_000_000_000_000);
     const companies = [];
     const outboundId = process.argv.includes('--outbound') ? 'wamid.' + randomUUID() : undefined;
+    const send = process.argv.includes('--send');
+    if (send) {
+      const provider = new URL(process.env.PRODUCT_GRAPH_FIXTURE_URL ?? '');
+      assert.equal(provider.protocol, 'http:');
+      assert.equal(provider.hostname, '127.0.0.1');
+      const health = await fetch(provider.origin + '/health', { signal: AbortSignal.timeout(3000) });
+      assert.equal(health.status, 200);
+      assert.deepEqual(await health.json(), { backend: url.origin });
+    }
     for (const [index, nombre] of ['Alfa', 'Bravo'].entries()) {
-      const response = await fetch(url.origin + '/api/auth/register', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ nombre, email: randomUUID() + '@example.invalid', password: randomUUID() }),
-        signal: AbortSignal.timeout(5000),
-      });
-      assert.equal(response.status, 200);
-      const { data } = await response.json();
+      let data = await postAuth('register', { nombre, email: randomUUID() + '@example.invalid', password: randomUUID() });
       const phoneNumberId = String(firstLine + index);
-      await store.upsertConnection(data.user.companyId, { phoneNumberId, status: 'configured' });
+      await store.upsertConnection(data.user.companyId, {
+        phoneNumberId, status: 'configured',
+        ...(send && { accessToken: 'synthetic-local-token', graphVersion: 'v25.0' }),
+      });
       if (outboundId) {
         await new MetaInboxStore({ companyId: data.user.companyId }).persistOutbound({
           chatId: '12025550145', body: 'Envío de ' + nombre, messageType: 'text',
           providerMessageId: outboundId, phoneNumberId, raw: {},
         });
+      }
+      if (send && index === 0) {
+        const credentials = { email: randomUUID() + '@example.invalid', password: randomUUID() };
+        await postAuth('create-station', { nombre: 'Operador Alfa', ...credentials }, data.accessToken);
+        data = await postAuth('login', credentials);
+        assert.equal(data.user.rol, 'EMPLEADO');
       }
       companies.push({
         phoneNumberId,
