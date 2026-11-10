@@ -15,13 +15,17 @@ export class SimulationInputError extends Error {
   readonly code = 'VALIDATION_ERROR';
 }
 
-function matchText(pattern: string, text: string): boolean {
+export function compileEvalTextPattern(pattern: string): RE2JS {
   if (pattern.length > 256) throw new SimulationInputError('Text patterns must be at most 256 characters');
   try {
-    return RE2JS.compile(pattern, RE2JS.CASE_INSENSITIVE).matcher(text).find();
+    return RE2JS.compile(pattern, RE2JS.CASE_INSENSITIVE);
   } catch {
     throw new SimulationInputError('Invalid or unsupported simulation text pattern');
   }
+}
+
+function matchText(pattern: string, text: string): boolean {
+  return compileEvalTextPattern(pattern).matcher(text).find();
 }
 
 function checkGraph(tenantId: number, graph: AgentGraphVersionV1): void {

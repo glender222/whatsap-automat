@@ -19,6 +19,8 @@ import { OpenAiBoundedTextAdapter } from '../services/ai/gateway/adapters/OpenAi
 import { ByokService } from '../services/ai/gateway/byok/ByokService';
 import type { ModelGatewayRequest } from '../services/ai/gateway/types';
 import { BoundedAgentDispatch, preflightBoundedAgentDispatch } from '../services/ai/studio/BoundedAgentDispatch';
+import { AgentExecutionEvaluator } from '../services/ai/studio/AgentExecutionEvaluator';
+import { saveDraft } from '../services/ai/studio/AgentStudioDrafts';
 
 const databaseUrl = process.env.AI_QUOTA_RESERVATIONS_TEST_DATABASE_URL;
 const model = boundedTextCapability.model;
@@ -138,6 +140,119 @@ async function startFixture(t: TestContext) {
   });
   return { adapter, requests, stalledBodyClosed: () => stalledBodyClosed };
 }
+
+test('Studio execution evaluates stored revisions and suites with durable per-company evidence', {
+  skip: !databaseUrl && 'AI_QUOTA_RESERVATIONS_TEST_DATABASE_URL is required',
+}, async (t) => {
+  const pool = new Pool({ connectionString: databaseUrl });
+  t.after(() => pool.end());
+  const uow = new TenantScopedUoW(pool);
+  const tenantA = randomInt(500_000_000, 900_000_000);
+  const tenantB = tenantA + 1;
+  const setup = async (tenantId: number) => uow.run(tenantId, async (db) => {
+    await db.query('INSERT INTO tenants (id, name, slug) VALUES ($1, $2, $3)',
+      [tenantId, 'Studio evaluation', 'studio-eval-' + randomUUID()]);
+    await db.query('INSERT INTO tenant_ai_quotas (tenant_id, monthly_token_limit, monthly_cost_limit_micro_usd) VALUES ($1, $2, $3)',
+      [tenantId, 10_000_000, 10_000_000]);
+    const graph = revision(tenantId, { limits: { maxModelTokens: 800_080, maxCostMicroUsd: 600_360 } });
+    const { entryNodeId, nodes, edges, policyRef, limits, graphId } = graph;
+    return (await saveDraft(db, tenantId, 1, graphId, { entryNodeId, nodes, edges, policyRef, limits }, true))!;
+  });
+  const [graphA, graphB] = await Promise.all([setup(tenantA), setup(tenantB)]);
+  const makeSuite = async (tenantId: number, graphId: string, entries: Array<[string, string]>) => {
+    const id = randomUUID();
+    const scenarios = entries.map(([mockInput, pattern], index) => ({
+      id: 'scenario-' + index, name: 'Evaluation scenario ' + index, mockInput, expectedTextPatterns: [pattern],
+    }));
+    await uow.run(tenantId, (db) => db.query(
+      'INSERT INTO agent_eval_suites (id, tenant_id, agent_graph_id, name, scenarios) VALUES ($1, $2, $3, $4, $5)',
+      [id, tenantId, graphId, 'Stored regression suite', JSON.stringify(scenarios)],
+    ));
+    return id;
+  };
+  const [suiteA, suiteB] = await Promise.all([
+    makeSuite(tenantA, graphA.graphId, [['First input', '^Fixture output$'], ['Second input', 'output$']]),
+    makeSuite(tenantB, graphB.graphId, [['Tenant B input', '^Different answer$']]),
+  ]);
+  const { adapter, requests } = await startFixture(t);
+  const dispatcher = new BoundedAgentDispatch(new AiQuotaReservationStore(uow), adapter, false);
+  const entered = Promise.withResolvers<void>();
+  const proceed = Promise.withResolvers<void>();
+  const evaluator = new AgentExecutionEvaluator(uow, {
+    dispatch: async (command) => {
+      entered.resolve();
+      await proceed.promise;
+      return dispatcher.dispatch(command);
+    },
+  });
+  const command = { tenantId: tenantA, graphId: graphA.graphId, version: 1, suiteId: suiteA, runId: randomUUID(), timeoutMs: 1000 };
+
+  const running = evaluator.evaluate(command);
+  try {
+    await Promise.race([entered.promise, running.then(() => assert.fail('The execution never dispatched'))]);
+    assert.equal((await evaluator.evaluate(command)).status, 'running');
+    await assert.rejects(evaluator.evaluate({ ...command, tenantId: tenantB }), /not found in this tenant/);
+    await assert.rejects(evaluator.evaluate({ ...command, tenantId: tenantB, suiteId: suiteB }), /already bound/);
+    assert.equal(requests.length, 0);
+  } finally {
+    proceed.resolve();
+  }
+  const completed = await running;
+  assert.equal(completed.status, 'completed');
+  assert.equal(completed.passed, true);
+  assert.equal(completed.specHash, graphA.specHash);
+  assert.match(completed.suiteHash ?? '', /^[a-f0-9]{64}$/);
+  assert.deepEqual(completed.scenarios.map((scenario) => scenario.outcome), ['passed', 'passed']);
+  assert.deepEqual(await evaluator.evaluate(command), completed);
+  assert.equal(requests.length, 2);
+  const ledgerIds = completed.scenarios.map((scenario) => scenario.ledgerId);
+  const usage = await uow.run(tenantA, (db) => db.query(
+    "SELECT id FROM ai_token_cost_ledger WHERE tenant_id = $1 AND operation = 'eval' AND id = ANY($2::bigint[])",
+    [tenantA, ledgerIds],
+  ));
+  assert.equal(usage.rows.length, 2);
+  assert.equal((await uow.run(tenantB, (db) => db.query('SELECT id FROM agent_eval_runs WHERE id = $1', [command.runId]))).rows.length, 0);
+  const { rows: [stored] } = await uow.run(tenantA, (db) => db.query(
+    'SELECT scorecard, execution_spec_hash, execution_suite_hash FROM agent_eval_runs WHERE id = $1', [command.runId],
+  ));
+  assert.equal(stored.execution_spec_hash, completed.specHash);
+  assert.equal(stored.execution_suite_hash, completed.suiteHash);
+  assert.doesNotMatch(JSON.stringify(stored.scorecard), /Fixture output|First input|Second input/);
+
+  const expiredId = randomUUID();
+  await uow.run(tenantA, (db) => db.query(`
+    INSERT INTO agent_eval_runs (id, tenant_id, suite_id, agent_graph_id, graph_version, status, scorecard,
+      execution_spec_hash, execution_suite_hash, execution_deadline_at)
+    VALUES ($1, $2, $3, $4, 1, 'running', $5, $6, $7, clock_timestamp() - interval '1 second')
+  `, [expiredId, tenantA, suiteA, graphA.graphId, JSON.stringify({ timeoutMs: command.timeoutMs }),
+    completed.specHash, completed.suiteHash]));
+  assert.equal((await evaluator.evaluate({ ...command, runId: expiredId })).status, 'failed');
+  assert.equal(requests.length, 2);
+  await uow.run(tenantA, (db) => db.query('UPDATE agent_eval_suites SET name = $1 WHERE id = $2', ['Changed suite', suiteA]));
+  await assert.rejects(evaluator.evaluate(command), /already bound/);
+  assert.equal(requests.length, 2);
+
+  const rejected = await evaluator.evaluate({ ...command, tenantId: tenantB, suiteId: suiteB, runId: randomUUID() });
+  assert.equal(rejected.status, 'completed');
+  assert.equal(rejected.passed, false);
+  assert.deepEqual(rejected.scenarios.map((scenario) => scenario.outcome), ['assertion_failed']);
+  assert.equal(requests.length, 3);
+
+  const invalidSuite = await makeSuite(tenantA, graphA.graphId, [['Valid', 'output'], ['Invalid', '(']]);
+  await assert.rejects(evaluator.evaluate({ ...command, suiteId: invalidSuite, runId: randomUUID() }), /Invalid or unsupported/);
+  assert.equal(requests.length, 3);
+  const oversizedSuite = await makeSuite(tenantA, graphA.graphId, [['First', 'output'], ['Second', 'output'], ['Third', 'output']]);
+  await assert.rejects(evaluator.evaluate({ ...command, suiteId: oversizedSuite, runId: randomUUID() }), /full suite exceeds/);
+  assert.equal(requests.length, 3);
+  const uncertainSuite = await makeSuite(tenantA, graphA.graphId, [['http-503', 'output'], ['Never dispatch', 'output']]);
+  const uncertainCommand = { ...command, suiteId: uncertainSuite, runId: randomUUID() };
+  const uncertain = await evaluator.evaluate(uncertainCommand);
+  assert.equal(uncertain.status, 'failed');
+  assert.equal(uncertain.passed, false);
+  assert.deepEqual(uncertain.scenarios.map((scenario) => scenario.outcome), ['uncertain']);
+  assert.deepEqual(await evaluator.evaluate(uncertainCommand), uncertain);
+  assert.equal(requests.length, 4);
+});
 
 test('bounded dispatch via a loopback provider fixture and real quota store', {
   skip: !databaseUrl && 'AI_QUOTA_RESERVATIONS_TEST_DATABASE_URL is required',
