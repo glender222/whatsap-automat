@@ -95,6 +95,7 @@ export interface MobileApprovalCommand {
   decision: MobileApprovalDecision;
   expectedVersion: number;
   key: string;
+  reason?: string;
 }
 
 export const APPROVAL_PAGE_SIZE = 50;
@@ -115,8 +116,10 @@ export class MobileApiError extends Error {
   constructor(
     public readonly status: number,
     message: string,
-    public readonly metadata?: { currentVersion?: unknown; ownerId?: unknown; ownerType?: unknown; reasonCode?: unknown },
+    public readonly metadata?: { currentVersion?: unknown; ownerId?: unknown; ownerType?: unknown; reasonCode?: unknown; reason?: unknown },
     public readonly accessTokenExpired = false,
+    public readonly code?: string,
+    public readonly retryAfterSeconds?: number,
   ) {
     super(message);
     this.name = 'MobileApiError';
@@ -149,6 +152,12 @@ export function handleUnauthorized(callback: () => void): () => void {
 
 type ResponseFormat = 'envelope' | 'legacy-status' | 'canonical';
 
+function retryAfterSeconds(value: string | null): number | undefined {
+  if (!value) return undefined;
+  const seconds = /^\d+$/.test(value) ? Number(value) : Math.ceil((Date.parse(value) - Date.now()) / 1000);
+  return Number.isSafeInteger(seconds) && seconds >= 0 ? seconds : undefined;
+}
+
 async function request<T>(
   origin: string, path: string, init: RequestInit = {}, accessToken?: string, format: ResponseFormat = 'envelope',
   read?: (response: Response) => Promise<T>,
@@ -175,6 +184,8 @@ async function request<T>(
         body?.metadata && typeof body.metadata === 'object' ? body.metadata : undefined,
         response.status === 401 && (body?.code === 'ACCESS_TOKEN_EXPIRED' ||
           (body?.success === false && body?.error === 'Token invalido o expirado' && body?.details === 'jwt expired')),
+        typeof body?.code === 'string' ? body.code : undefined,
+        response.status === 429 ? retryAfterSeconds(response.headers.get('Retry-After')) : undefined,
       );
     }
     return format === 'envelope' ? (body as ApiEnvelope<T>).data : body as T;
@@ -283,10 +294,11 @@ async function refreshAfterExpiry(original: AuthSessionSnapshot, origin: string)
 
 async function authenticated<T>(
   path: string, init?: RequestInit, format?: ResponseFormat, read?: (response: Response) => Promise<T>,
+  containsPassword = false,
 ): Promise<T> {
   const original = await authStorage.getSnapshot();
   if (!original || !authStorage.isCurrent(original.revision)) throw sessionEnded();
-  const origin = normalizeServerUrl(original.session.apiUrl, typeof __DEV__ !== 'undefined' && __DEV__);
+  const origin = normalizeServerUrl(original.session.apiUrl, !containsPassword && typeof __DEV__ !== 'undefined' && __DEV__);
   const execute = async (snapshot: AuthSessionSnapshot) => {
     if (!authStorage.isCurrent(snapshot.revision)) throw sessionEnded();
     if (init?.signal?.aborted) throw new Error('Solicitud cancelada.');
@@ -302,7 +314,10 @@ async function authenticated<T>(
     return await execute(original);
   } catch (error) {
     if (init?.signal?.aborted || !(error instanceof MobileApiError && error.accessTokenExpired)) throw error;
+    if (containsPassword && error.code !== 'ACCESS_TOKEN_EXPIRED') throw error;
     const refreshed = await refreshAfterExpiry(original, origin);
+    // A renewed session is ready for a fresh confirmation with a newly entered password.
+    if (containsPassword) throw error;
     return execute(refreshed);
   }
 }
@@ -341,12 +356,14 @@ export const apiClient = {
     return approval;
   },
 
-  async decideApproval(command: MobileApprovalCommand): Promise<{ approvalId: string; status: MobileApprovalDecision }> {
-    const { approvalId, decision, expectedVersion, key } = command;
+  async decideApproval(command: MobileApprovalCommand, password?: string): Promise<{ approvalId: string; status: MobileApprovalDecision }> {
+    const { approvalId, decision, expectedVersion, key, reason } = command;
     const result = await authenticated<{ approvalId: string; status: MobileApprovalDecision }>(
       `/v1/approvals/${encodeURIComponent(approvalId)}/decision`,
-      { method: 'POST', headers: { 'Idempotency-Key': key }, body: JSON.stringify({ decision, expectedVersion }) },
+      { method: 'POST', headers: { 'Idempotency-Key': key }, body: JSON.stringify({ decision, expectedVersion, reason, password }) },
       'canonical',
+      undefined,
+      password !== undefined,
     );
     if (result.approvalId !== approvalId || result.status !== decision) {
       throw new MobileApiError(502, 'El servidor no confirmó la decisión solicitada.');

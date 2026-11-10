@@ -2,17 +2,19 @@ import React, { createContext, useCallback, useContext, useEffect, useRef, useSt
 import { AppState } from 'react-native';
 import { apiClient, MobileApiError, type MobileApproval } from './apiClient';
 import { observeApprovalAlerts } from './approvalAlerts';
+import { APPROVAL_REAUTH_CAPABILITY } from './approvalPolicy';
 import { useSession } from './sessionContext';
 
 interface ApprovalFeed {
   canReview: boolean;
+  canReauthenticate: boolean;
   page: MobileApproval[];
   loading: boolean;
   error: string;
   alertIds: string[];
 }
 
-const initialFeed: ApprovalFeed = { canReview: false, page: [], loading: true, error: '', alertIds: [] };
+const initialFeed: ApprovalFeed = { canReview: false, canReauthenticate: false, page: [], loading: true, error: '', alertIds: [] };
 const accessError = 'Tu espacio de trabajo no permite revisar aprobaciones.';
 const ApprovalFeedContext = createContext<(ApprovalFeed & {
   refresh: (verifyAccess?: boolean, requireFresh?: boolean) => Promise<void>;
@@ -53,7 +55,8 @@ export function ApprovalFeedProvider({ children }: React.PropsWithChildren) {
             return;
           }
           access.current = true;
-          setFeed((current) => ({ ...current, canReview: true, error: '' }));
+          const canReauthenticate = workspace.capabilities.includes(APPROVAL_REAUTH_CAPABILITY);
+          setFeed((current) => ({ ...current, canReview: true, canReauthenticate, error: '' }));
         }
         if (access.current !== true) return;
         const page = await apiClient.listApprovals();
@@ -61,7 +64,7 @@ export function ApprovalFeedProvider({ children }: React.PropsWithChildren) {
         const observations = observeApprovalAlerts(cursor.current, page);
         cursor.current = observations.cursor;
         setFeed((current) => ({
-          canReview: true, page, loading: false, error: '',
+          ...current, canReview: true, page, loading: false, error: '',
           alertIds: [...new Set([...observations.newIds, ...current.alertIds])]
             .filter((id) => observations.pendingIds.has(id)),
         }));

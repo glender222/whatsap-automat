@@ -80,6 +80,50 @@ test('coalesces concurrent expirations and replays the exact authenticated mutat
   assert.deepEqual(await authStorage.getAuthSession(), { ...session, accessToken: nextToken });
 });
 
+test('renews access after an explicit expiry without automatically replaying a password-bearing approval', async () => {
+  const approval = { approvalId: 'appr-1', decision: 'approved' as const, expectedVersion: 3, key: 'same-key', reason: 'Motivo' };
+  const paths: string[] = [];
+  globalThis.fetch = async (input, init) => {
+    const path = new URL(String(input)).pathname;
+    paths.push(path);
+    if (path === '/api/auth/refresh') {
+      assert.deepEqual(JSON.parse(String(init?.body)), { refreshToken: session.refreshToken });
+      return renewed();
+    }
+    if (path === '/api/auth/me') return user();
+    assert.equal(path, '/api/v1/approvals/appr-1/decision');
+    assert.equal(new Headers(init?.headers).get('Idempotency-Key'), approval.key);
+    const token = new Headers(init?.headers).get('Authorization');
+    const payload = JSON.parse(String(init?.body));
+    if (token === `Bearer ${session.accessToken}`) {
+      assert.equal(payload.password, 'initial');
+      return expired();
+    }
+    assert.equal(token, `Bearer ${nextToken}`);
+    assert.equal(payload.password, 're-entered');
+    return json(200, { approvalId: approval.approvalId, status: 'approved' });
+  };
+  await assert.rejects(apiClient.decideApproval(approval, 'initial'), { status: 401, code: 'ACCESS_TOKEN_EXPIRED' });
+  assert.deepEqual(paths, ['/api/v1/approvals/appr-1/decision', '/api/auth/refresh', '/api/auth/me']);
+  assert.deepEqual(await authStorage.getAuthSession(), { ...session, accessToken: nextToken });
+  assert.equal((await apiClient.decideApproval(approval, 're-entered')).status, 'approved');
+  assert.equal(paths.length, 4);
+});
+
+test('sensitive approvals require explicit token expiry and HTTPS for the password', async () => {
+  const approval = { approvalId: 'appr-1', decision: 'approved' as const, expectedVersion: 3, key: 'same-key', reason: 'Motivo' };
+  let requests = 0;
+  globalThis.fetch = async () => {
+    requests++;
+    return expired(true);
+  };
+  await assert.rejects(apiClient.decideApproval(approval, 'current'), { status: 401, code: undefined });
+  assert.equal(requests, 1);
+  await authStorage.saveAuthSession({ ...session, apiUrl: 'http://127.0.0.1:3000' });
+  await assert.rejects(apiClient.decideApproval(approval, 'current'), /HTTPS/);
+  assert.equal(requests, 1);
+});
+
 test('keeps the stored session on transient refresh failure and clears it on definitive revocation', async () => {
   let invalidated = 0;
   let status = 503;

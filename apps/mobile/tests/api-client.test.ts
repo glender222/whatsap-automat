@@ -67,18 +67,45 @@ test('writes only the canonical decision and version, reuses the given key and p
   await assert.rejects(apiClient.decideApproval(command), { status: 410 });
 });
 
-test('fails closed for high, financial, destructive or unknown risks and for stale or invalid details', () => {
+test('requires server reauthentication support for sensitive risks and fails closed for unknown or stale requests', () => {
   const now = Date.parse('2026-11-20T09:30:00Z');
-  for (const risk of ['low', 'medium', 'read', 'write', 'send']) {
+  for (const risk of ['low', 'medium', 'read', 'write']) {
     assert.equal(canDecideMobileApproval({ ...approval, risk }, now), true);
   }
-  for (const risk of ['high', 'financial', 'destructive', 'unexpected-risk']) {
+  for (const risk of ['high', 'send', 'financial', 'destructive']) {
     assert.equal(canDecideMobileApproval({ ...approval, risk }, now), false);
+    assert.equal(canDecideMobileApproval({ ...approval, risk }, now, true), true);
   }
+  assert.equal(canDecideMobileApproval({ ...approval, risk: 'unexpected-risk' }, now, true), false);
   assert.equal(canDecideMobileApproval({ ...approval, status: 'rejected' }, now), false);
   assert.equal(canDecideMobileApproval({ ...approval, policyVersion: 0 }, now), false);
   assert.equal(canDecideMobileApproval({ ...approval, expiresAt: 'invalid' }, now), false);
   assert.equal(canDecideMobileApproval(approval, Date.parse(approval.expiresAt)), false);
+});
+
+test('sends sensitive evidence only in the authenticated decision body and preserves the reauthentication errors', async () => {
+  await authStorage.saveAuthSession(session);
+  const command = { approvalId: approval.id, decision: 'rejected' as const, expectedVersion: 7, key: 'same-key', reason: 'Justificación' };
+  const results = [
+    [403, 'APPROVAL_REAUTH_REQUIRED'], [403, 'APPROVAL_REAUTH_INVALID'], [429, 'APPROVAL_REAUTH_LIMITED'],
+  ] as const;
+  let calls = 0;
+  globalThis.fetch = async (url, init) => {
+    assert.equal(url, `${session.apiUrl}/api/v1/approvals/${approval.id}/decision`);
+    assert.equal(new Headers(init?.headers).get('Idempotency-Key'), command.key);
+    assert.deepEqual(JSON.parse(String(init?.body)), {
+      decision: 'rejected', expectedVersion: 7, reason: 'Justificación', password: '  current secret  ',
+    });
+    const [status, reason] = results[calls++];
+    return Response.json({ metadata: { reason } }, { status, headers: status === 429 ? { 'Retry-After': '15' } : undefined });
+  };
+  for (const [status, reason] of results) {
+    await assert.rejects(apiClient.decideApproval(command, '  current secret  '), {
+      status, metadata: { reason }, retryAfterSeconds: status === 429 ? 15 : undefined,
+    });
+  }
+  assert.equal(calls, results.length);
+  assert.equal('password' in command, false);
 });
 
 test('uses HTTPS except private development servers and strips the documented API suffix', () => {
