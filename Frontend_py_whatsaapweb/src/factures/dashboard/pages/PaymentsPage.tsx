@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { isAxiosError } from 'axios';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import MercadoPagoReconciliationPanel from '../components/MercadoPagoReconciliationPanel';
-import { CheckCircle2, ExternalLink, FileText, Image as ImageIcon, Loader2, XCircle } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, ExternalLink, FileText, Image as ImageIcon, Loader2, XCircle } from 'lucide-react';
+import { conversationLocation, orderLocation, positiveInt } from '../../../shared/navigation/commercialNavigation';
 import {
   type PaymentMethod,
   type PaymentProcessStatus,
@@ -144,6 +145,25 @@ function productSummary(row: PaymentProcessSummary): string {
 }
 
 export default function PaymentsPage() {
+  const [params] = useSearchParams();
+  const rawOrderId = params.get('pedido');
+  const orderId = positiveInt(rawOrderId);
+  const orderPage = positiveInt(params.get('paginaPedidos')) ?? 1;
+  const chatId = params.get('chat') || undefined;
+
+  if (rawOrderId !== null && orderId === null) {
+    return <section className="payment-workspace min-h-full space-y-4 bg-canvas p-4 sm:p-6 lg:p-10">
+      <h2 className="text-3xl font-bold text-primary">Validar Pagos</h2>
+      <p role="alert" className="text-sm text-red-700 dark:text-red-300">El identificador de pedido no es válido.</p>
+      <Link className="admin-button-secondary" to={orderLocation(orderPage, undefined, chatId)}>Volver a pedidos</Link>
+    </section>;
+  }
+
+  return <PaymentsWorkspace key={orderId ?? 'all'} orderId={orderId ?? undefined} orderPage={orderPage} chatId={chatId} />;
+}
+
+function PaymentsWorkspace({ orderId, orderPage, chatId }: { orderId?: number; orderPage: number; chatId?: string }) {
+  const heading = useRef<HTMLHeadingElement>(null);
   const [query, setQuery] = useState<{ status: StatusFilter; offset: number }>({ status: 'all', offset: 0 });
   const [response, setResponse] = useState<{
     query: typeof query;
@@ -160,11 +180,16 @@ export default function PaymentsPage() {
   const refresh = useCallback(() => setQuery((previous) => ({ ...previous })), []);
 
   useEffect(() => {
+    if (orderId !== undefined) heading.current?.focus();
+  }, [orderId]);
+
+  useEffect(() => {
     const controller = new AbortController();
     const { status, offset } = query;
     paymentsService.list({
       status: status === 'all' || status === 'collect_payment' ? undefined : status,
       processStatus: status === 'collect_payment' ? status : undefined,
+      orderId,
       limit: paymentPageSize,
       offset,
     }, controller.signal).then((data) => {
@@ -179,7 +204,7 @@ export default function PaymentsPage() {
       if (!controller.signal.aborted) setResponse({ query });
     });
     return () => controller.abort();
-  }, [query]);
+  }, [query, orderId]);
 
   const handleValidate = async (id: number) => {
     setActionInProgress(id);
@@ -232,10 +257,20 @@ export default function PaymentsPage() {
   return (
     <div className="payment-workspace min-h-full bg-canvas p-4 sm:p-6 lg:p-10">
       <div className="mx-auto w-full max-w-7xl space-y-6 pb-20">
+        {orderId !== undefined && <nav aria-label="Regreso del pedido" className="flex flex-wrap gap-2">
+          <Link className="admin-button-secondary" to={orderLocation(orderPage, orderId, chatId)}>
+            <ArrowLeft className="h-4 w-4" aria-hidden="true" /> Volver al pedido
+          </Link>
+          {chatId && <Link className="admin-button-secondary" to={conversationLocation(chatId)} state={{ focusConversation: true }}>
+            Volver a conversación
+          </Link>}
+        </nav>}
         <section className="flex flex-col gap-3 border-b border-subtle pb-5 md:flex-row md:items-end md:justify-between">
           <div>
             <p className="text-sm font-semibold uppercase text-teal-700 dark:text-teal-300">Operaciones</p>
-            <h2 className="mt-1 text-3xl font-bold text-primary">Validar Pagos</h2>
+            <h2 ref={heading} tabIndex={-1} aria-describedby={orderId !== undefined ? 'payment-order-context' : undefined}
+              className="mt-1 text-3xl font-bold text-primary">Validar Pagos</h2>
+            {orderId !== undefined && <p id="payment-order-context" className="mt-2 font-semibold text-primary">Pedido #{orderId}</p>}
             <p className="mt-2 text-sm text-secondary">
               Cobros y comprobantes manuales{total !== undefined && ` · ${total} ${total === 1 ? 'caso' : 'casos'}`}
             </p>
@@ -269,7 +304,7 @@ export default function PaymentsPage() {
           </div>
         </section>
 
-        <MercadoPagoReconciliationPanel onPaymentSettled={refresh} />
+        <MercadoPagoReconciliationPanel onPaymentSettled={refresh} orderId={orderId !== undefined ? String(orderId) : undefined} />
 
         <section aria-label="Comprobantes manuales" className="overflow-hidden rounded-2xl border border-subtle bg-surface shadow-sm">
           {!current ? (

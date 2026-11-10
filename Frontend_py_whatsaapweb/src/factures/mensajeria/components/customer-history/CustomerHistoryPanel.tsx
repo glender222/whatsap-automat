@@ -1,5 +1,7 @@
 import React from 'react';
-import { AlertCircle, Clock3, History, Loader2, MessageSquare, RefreshCw, ShoppingBag, Tag, UserRound, X } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { orderLocation } from '../../../../shared/navigation/commercialNavigation';
+import { AlertCircle, ChevronRight, Clock3, History, Loader2, MessageSquare, RefreshCw, ShoppingBag, Tag, UserRound, X } from 'lucide-react';
 import type {
   CustomerHistory,
   CustomerHistoryAction,
@@ -10,6 +12,7 @@ import type {
 } from '../../types/customerHistoryTypes';
 
 interface CustomerHistoryPanelProps {
+  chatId: string;
   history: CustomerHistory | null;
   loading: boolean;
   error: string | null;
@@ -63,6 +66,7 @@ function labelForAction(type: string): string {
 }
 
 const CustomerHistoryPanel: React.FC<CustomerHistoryPanelProps> = ({
+  chatId,
   history,
   loading,
   error,
@@ -92,6 +96,7 @@ const CustomerHistoryPanel: React.FC<CustomerHistoryPanelProps> = ({
           {onClose && (
             <button
               type="button"
+              data-history-initial-focus=""
               onClick={onClose}
               className="rounded-md p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-gray-900 dark:hover:text-gray-100"
               aria-label="Cerrar historial"
@@ -120,7 +125,7 @@ const CustomerHistoryPanel: React.FC<CustomerHistoryPanelProps> = ({
           <div className="space-y-4">
             <ContactSummary history={history} />
             <TagsSection tags={history.tags} />
-            <OrdersSection orders={history.orders} />
+            <OrdersSection orders={history.orders} chatId={chatId} />
             <ActionsSection actions={history.actions} />
             <ConversationsSection conversations={history.conversations} />
             <MessagesSection messages={history.recentMessages} />
@@ -179,7 +184,7 @@ const TagsSection: React.FC<{ tags: CustomerHistoryTag[] }> = ({ tags }) => (
   </section>
 );
 
-const OrdersSection: React.FC<{ orders: CustomerHistoryOrder[] }> = ({ orders }) => (
+const OrdersSection: React.FC<{ orders: CustomerHistoryOrder[]; chatId: string }> = ({ orders, chatId }) => (
   <section>
     <SectionTitle icon={<ShoppingBag className="h-4 w-4" />} label="Pedidos" count={orders.length} />
     {orders.length === 0 ? (
@@ -187,9 +192,10 @@ const OrdersSection: React.FC<{ orders: CustomerHistoryOrder[] }> = ({ orders })
     ) : (
       <div className="mt-2 space-y-2">
         {orders.slice(0, 5).map((order) => (
-          <div key={order.id} className="rounded-md border border-gray-200 p-3 dark:border-gray-800">
+          <Link key={order.id} to={orderLocation(1, order.id, chatId)} aria-label={`Abrir pedido #${order.id}`}
+            className="block rounded-md border border-gray-200 p-3 hover:bg-gray-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-600 dark:border-gray-800 dark:hover:bg-gray-900">
             <div className="flex items-center justify-between gap-2">
-              <p className="truncate text-xs font-semibold text-gray-800 dark:text-gray-100">{order.title}</p>
+              <p className="truncate text-xs font-semibold text-gray-800 dark:text-gray-100">#{order.id} · {order.title}</p>
               <span className="rounded bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300">
                 {order.status}
               </span>
@@ -222,7 +228,10 @@ const OrdersSection: React.FC<{ orders: CustomerHistoryOrder[] }> = ({ orders })
               <Clock3 className="h-3 w-3" />
               {formatDate(order.occurredAt)}
             </p>
-          </div>
+            <span className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+              Abrir pedido <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
+            </span>
+          </Link>
         ))}
       </div>
     )}

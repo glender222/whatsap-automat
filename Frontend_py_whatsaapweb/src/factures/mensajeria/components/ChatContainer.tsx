@@ -24,6 +24,7 @@ import { agentStateAtom, setChatActivityAtom } from '../../../jotai/slices/agent
 
 interface ChatContainerProps {
   selectedChat: string | null;
+  focusComposer?: boolean;
   loadingMessages: boolean;
   olderHistory: OlderHistoryControls;
   message: string;
@@ -38,6 +39,7 @@ interface ChatContainerProps {
 
 const ChatContainer: React.FC<ChatContainerProps> = ({
   selectedChat,
+  focusComposer = false,
   loadingMessages,
   olderHistory,
   message,
@@ -70,12 +72,40 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
   const setChatActivity = useSetAtom(setChatActivityAtom);
   const emojiPickerRef = useRef<HTMLDivElement>(null);
   const composerInputRef = useRef<HTMLTextAreaElement>(null);
+  const historyButtonRef = useRef<HTMLButtonElement>(null);
+  const mobileHistoryDialogRef = useRef<HTMLDialogElement>(null);
+  const composerFocusRestored = useRef(false);
   const pendingEmojiCaret = useRef<{ input: HTMLTextAreaElement; offset: number }>(null);
   const ownershipFocus = useRef(false);
   const customerHistory = useCustomerHistory(selectedChat);
 
   const iaPauseStatus = selectedChat ? agentState.iaPauseByChat[selectedChat] : undefined;
   const isIaPaused = composer.conversation?.aiPaused ?? Boolean(iaPauseStatus?.paused);
+
+  useEffect(() => {
+    if (!mobileHistoryOpen) return;
+    const dialog = mobileHistoryDialogRef.current;
+    if (!dialog) return;
+    const trigger = historyButtonRef.current;
+    dialog.showModal();
+    dialog.querySelector<HTMLButtonElement>('[data-history-initial-focus]')?.focus();
+    return () => {
+      dialog.close();
+      if (trigger?.isConnected) trigger.focus();
+    };
+  }, [mobileHistoryOpen]);
+
+  useEffect(() => {
+    if (!focusComposer || loadingMessages || composerFocusRestored.current) return;
+    const frame = requestAnimationFrame(() => {
+      const input = composerInputRef.current;
+      if (!input || input.disabled) return;
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+      composerFocusRestored.current = true;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [focusComposer, loadingMessages]);
 
   useLayoutEffect(() => {
     const caret = pendingEmojiCaret.current;
@@ -368,6 +398,7 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <button
+                  ref={historyButtonRef}
                   type="button"
                   onClick={handleHistoryClick}
                   className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-950 dark:text-gray-200 dark:hover:bg-gray-900"
@@ -484,6 +515,7 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
       {selectedChat && desktopHistoryOpen && (
         <div className="hidden w-[300px] flex-shrink-0 2xl:w-80 xl:flex">
           <CustomerHistoryPanel
+            chatId={selectedChat}
             history={customerHistory.history}
             loading={customerHistory.loading}
             error={customerHistory.error}
@@ -492,17 +524,17 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
         </div>
       )}
       {selectedChat && mobileHistoryOpen && (
-        <div className="fixed inset-0 z-50 bg-black/40 xl:hidden">
-          <div className="ml-auto h-full w-full max-w-sm bg-white shadow-xl dark:bg-gray-950">
-            <CustomerHistoryPanel
-              history={customerHistory.history}
-              loading={customerHistory.loading}
-              error={customerHistory.error}
-              onReload={customerHistory.reload}
-              onClose={() => setMobileHistoryOpen(false)}
-            />
-          </div>
-        </div>
+        <dialog ref={mobileHistoryDialogRef} aria-label="Historial del cliente" onCancel={() => setMobileHistoryOpen(false)}
+          className="fixed inset-y-0 left-auto right-0 m-0 h-[100dvh] max-h-none w-full max-w-sm border-0 bg-white p-0 shadow-xl backdrop:bg-black/40 dark:bg-gray-950">
+          <CustomerHistoryPanel
+            chatId={selectedChat}
+            history={customerHistory.history}
+            loading={customerHistory.loading}
+            error={customerHistory.error}
+            onReload={customerHistory.reload}
+            onClose={() => setMobileHistoryOpen(false)}
+          />
+        </dialog>
       )}
     </div>
   );

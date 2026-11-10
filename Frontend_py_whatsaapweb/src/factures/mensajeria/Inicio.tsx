@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import type { SetStateAction } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
-import { useSearchParams } from 'react-router-dom';
+import { useLocation, useSearchParams } from 'react-router-dom';
 import { Inbox, X } from 'lucide-react';
 import ChatSidebar from './components/bandeja de chats/ChatSidebar';
 import UserMediaPanel from './components/extras/UserMediaPanel';
@@ -28,6 +28,7 @@ function formatNumeroAfiliado(chatId: string): string {
 export default function Inicio() {
   const [drafts, setDrafts] = useAtom(inboxDraftsAtom);
   const [searchParams, setSearchParams] = useSearchParams();
+  const { state } = useLocation();
   const requestedChat = searchParams.get('chat');
   const queue = useRef<HTMLDivElement>(null);
   const conversationTitle = useRef<HTMLHeadingElement>(null);
@@ -181,6 +182,7 @@ export default function Inicio() {
             <ChatContainer
               key={selectedChat}
               selectedChat={selectedChat}
+              focusComposer={state?.focusConversation === true}
               loadingMessages={loadingMessages}
               olderHistory={olderHistory}
               messages={messages}

@@ -164,9 +164,12 @@ function LedgerRow({ row, canReconcile, onObserved }: {
 
 type LoadResult = { query: string; attempt: number; page?: MercadoPagoReconciliationPage; error?: string };
 
-function LedgerList({ onPaymentSettled }: { onPaymentSettled: () => void }) {
+type ReconciliationProps = { onPaymentSettled: () => void; orderId?: string };
+
+function LedgerList({ onPaymentSettled, orderId: scopedOrderId }: ReconciliationProps) {
   const [search, setSearch] = useState('');
-  const [orderId, setOrderId] = useState('');
+  const [filteredOrderId, setFilteredOrderId] = useState('');
+  const orderId = scopedOrderId ?? filteredOrderId;
   const [cursors, setCursors] = useState<Array<string | null>>([null]);
   const [attempt, setAttempt] = useState(0);
   const [response, setResponse] = useState<LoadResult>();
@@ -207,7 +210,7 @@ function LedgerList({ onPaymentSettled }: { onPaymentSettled: () => void }) {
   };
   const filter = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setOrderId(search.trim());
+    setFilteredOrderId(search.trim());
     setCursors([null]);
     refresh();
   };
@@ -215,7 +218,7 @@ function LedgerList({ onPaymentSettled }: { onPaymentSettled: () => void }) {
   return (
     <div className="space-y-4 border-t border-subtle px-4 py-4 sm:px-5">
       <div className="flex flex-wrap items-end justify-between gap-3">
-        <form onSubmit={filter} className="flex min-w-0 flex-wrap items-end gap-2">
+        {scopedOrderId ? <p className="text-sm font-semibold text-primary">Conciliación del pedido #{scopedOrderId}</p> : <form onSubmit={filter} className="flex min-w-0 flex-wrap items-end gap-2">
           <label className="flex min-w-0 flex-col gap-1 text-sm font-semibold text-primary">
             Número de pedido
             <input className="admin-control max-w-44" type="text" inputMode="numeric" pattern="[1-9][0-9]{0,18}"
@@ -224,10 +227,10 @@ function LedgerList({ onPaymentSettled }: { onPaymentSettled: () => void }) {
           <button type="submit" className="admin-button-secondary">Filtrar</button>
           {orderId && <button type="button" className="admin-button-secondary" onClick={() => {
             setSearch('');
-            setOrderId('');
+            setFilteredOrderId('');
             setCursors([null]);
           }}>Quitar filtro</button>}
-        </form>
+        </form>}
         <button type="button" className="admin-button-secondary" onClick={refresh} disabled={loading}>
           <RefreshCw className="h-4 w-4" aria-hidden="true" /> Actualizar conciliación
         </button>
@@ -268,7 +271,7 @@ function LedgerList({ onPaymentSettled }: { onPaymentSettled: () => void }) {
   );
 }
 
-export default function MercadoPagoReconciliationPanel({ onPaymentSettled }: { onPaymentSettled: () => void }) {
+export default function MercadoPagoReconciliationPanel({ onPaymentSettled, orderId }: ReconciliationProps) {
   const [expanded, setExpanded] = useState(false);
   return (
     <section aria-labelledby="mercadopago-reconciliation-title" className="rounded-xl border border-subtle bg-surface shadow-sm">
@@ -284,7 +287,7 @@ export default function MercadoPagoReconciliationPanel({ onPaymentSettled }: { o
         </button>
       </header>
       <div id="mercadopago-reconciliation-list" hidden={!expanded}>
-        {expanded && <LedgerList onPaymentSettled={onPaymentSettled} />}
+        {expanded && <LedgerList key={orderId ?? 'all'} onPaymentSettled={onPaymentSettled} orderId={orderId} />}
       </div>
     </section>
   );

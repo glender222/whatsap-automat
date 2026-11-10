@@ -3,7 +3,7 @@ import { api } from '../../../shared/axios/http';
 import type { WhatsAppChat } from '../../../shared/types/wsp';
 import { listProducts } from '../../inventario/services/productService';
 
-export const ordersPath = '/dashboard/pedidos';
+export { ordersPath } from '../../../shared/navigation/commercialNavigation';
 export const orderPageSize = 20;
 
 const statusLabels: Record<string, string> = {
