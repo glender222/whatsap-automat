@@ -397,3 +397,42 @@ test('orchestrator descarta un final handoff del loop sin ticket persistido', as
     factory.create = originalCreate;
   }
 });
+
+test('un turno vencido descarta una llamada de herramienta recibida tarde del proveedor', async (t) => {
+  const { AgentToolRuntimeLoop } = await import('../modules/ai/application/AgentToolRuntimeLoop');
+  const { AgentToolRegistry } = await import('../modules/ai/application/AgentToolRegistry');
+  const { getAiProviderFactory } = await import('../modules/ai/infra/provider/AiProviderFactory');
+  const entered = Promise.withResolvers<void>();
+  const response = Promise.withResolvers<string>();
+  const controller = new AbortController();
+  const expired = new Error('El trabajo de entrada ya venció');
+  let modelCalls = 0;
+  let toolCalls = 0;
+  t.mock.method(getAiProviderFactory(), 'create', () => ({
+    complete: () => {
+      modelCalls++;
+      if (modelCalls === 1) {
+        entered.resolve();
+        return response.promise;
+      }
+      return Promise.resolve('{"type":"final","action":"block","reply":"","confidence":1}');
+    },
+  }));
+  const loop = new AgentToolRuntimeLoop(
+    {} as never, new AgentToolRegistry(), {} as never,
+    { execute: async () => {
+      toolCalls++;
+      return { status: 'ok', toolName: 'tag.applySystem', output: {}, relatedHandoffId: null };
+    } } as never,
+  );
+  const pending = loop.run({
+    ctx: { companyId: 1, chatId: '51999999999' } as never, agent: makeAgent(40, 'support'),
+    message: 'Prueba', history: [], companyMode: 'automator', signal: controller.signal,
+  });
+  await Promise.race([entered.promise, pending.then(() => assert.fail('El proveedor no recibió el turno'))]);
+  controller.abort(expired);
+  response.resolve('{"type":"tool_request","toolCalls":[{"name":"tag.applySystem","input":{"tag":"ia-asistiendo"}}]}');
+  await assert.rejects(pending, (error) => error === expired);
+  assert.equal(modelCalls, 1);
+  assert.equal(toolCalls, 0);
+});

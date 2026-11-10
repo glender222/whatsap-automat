@@ -22,6 +22,8 @@ export type OrchestratorInput = {
   history: Array<{ fromMe: boolean; body: string }>;
   inboundProviderMessageId: string | null;
   sender: ProductCardSender;
+  conversationId?: number;
+  signal?: AbortSignal;
 };
 
 export type OrchestratorResult = {
@@ -51,9 +53,11 @@ export class AiRuntimeOrchestrator {
   ) {}
 
   async processInbound(input: OrchestratorInput): Promise<OrchestratorResult> {
-    const { companyId, chatId, message, history, inboundProviderMessageId, sender } = input;
+    const { companyId, chatId, message, history, inboundProviderMessageId, sender, signal } = input;
+    signal?.throwIfAborted();
     const companyMode = await this.agentRepo.getAutomatorMode(companyId);
-    const conversationId = await this.resolveConversationId(companyId, chatId);
+    const conversationId = input.conversationId ?? await this.resolveConversationId(companyId, chatId);
+    signal?.throwIfAborted();
     const routed = await this.routerService.route({
       companyId,
       chatId,
@@ -62,7 +66,9 @@ export class AiRuntimeOrchestrator {
       companyMode,
       conversationId,
       inboundProviderMessageId,
+      signal,
     });
+    signal?.throwIfAborted();
 
     if (routed.routerMissing) {
       return this.emptyRouteResult(routed);
@@ -133,7 +139,8 @@ export class AiRuntimeOrchestrator {
 
     const executor = new AgentToolExecutor(this.pool, this.registry, this.logger, sender);
     const loop = new AgentToolRuntimeLoop(this.pool, this.registry, this.logger, executor);
-    const loopResult = await loop.run({ ctx, agent, message, history, companyMode });
+    const loopResult = await loop.run({ ctx, agent, message, history, companyMode, signal });
+    signal?.throwIfAborted();
 
     const final = loopResult.final;
     if (!final) {
@@ -188,6 +195,7 @@ export class AiRuntimeOrchestrator {
     const resolvedReply = handoffTicketMissing ? '' : final.reply;
     const resolvedReason = handoffTicketMissing ? 'handoff_ticket_missing' : final.reason;
 
+    signal?.throwIfAborted();
     if (sessionId && turnId && conversationId) {
       await this.sessionService.completeTurn({
         companyId,

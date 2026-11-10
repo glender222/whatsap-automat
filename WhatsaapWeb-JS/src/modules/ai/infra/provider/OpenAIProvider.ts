@@ -88,6 +88,7 @@ export class OpenAIProvider implements AiProviderPort {
     const model = this.resolveModel(options.model);
     const payload = await this.request(RESPONSES_PATH, {
       method: 'POST',
+      signal: options.signal,
       body: JSON.stringify({
         model,
         input: messages.map((message) => this.toResponseInput(message)),
@@ -126,7 +127,7 @@ export class OpenAIProvider implements AiProviderPort {
           Authorization: `Bearer ${this.apiKey}`,
           'Content-Type': 'application/json',
         },
-        signal: controller.signal,
+        signal: init.signal ? AbortSignal.any([controller.signal, init.signal]) : controller.signal,
       });
       const raw = await response.text();
       const payload = this.parseJson(raw);
@@ -141,6 +142,7 @@ export class OpenAIProvider implements AiProviderPort {
       }
       return payload;
     } catch (error: unknown) {
+      init.signal?.throwIfAborted();
       if (this.isProviderError(error)) throw error;
       if (error instanceof Error && error.name === 'AbortError') {
         throw this.createError('AI_PROVIDER_TIMEOUT', 'OpenAI API request timed out', 504);

@@ -6,7 +6,7 @@ import {
   getCommercialCatalogToolService,
   getCommercialStateToolService,
   getHandoffToolService,
-  getMessageSendProductCardToolService,
+  createMessageSendProductCardToolService,
   getPreorderToolService,
   getSystemTagToolService,
   MessageSendProductCardToolService,
@@ -50,7 +50,6 @@ function hasTool(toolAccess: AgentToolAccess | undefined, key: keyof AgentToolAc
 }
 
 export class AgentToolExecutor {
-  private readonly sender: ProductCardSender | null;
   private readonly messageToolService: MessageSendProductCardToolService | null;
 
   constructor(
@@ -59,11 +58,11 @@ export class AgentToolExecutor {
     private readonly logger: AgentToolLogger,
     sender?: ProductCardSender
   ) {
-    this.sender = sender || null;
-    this.messageToolService = sender ? getMessageSendProductCardToolService(pool, sender) : null;
+    this.messageToolService = sender ? createMessageSendProductCardToolService(pool, sender) : null;
   }
 
-  async execute(ctx: AgentToolContext, call: ToolCallRequest): Promise<ToolCallResult> {
+  async execute(ctx: AgentToolContext, call: ToolCallRequest, signal?: AbortSignal): Promise<ToolCallResult> {
+    signal?.throwIfAborted();
     const startedAt = Date.now();
     const definition = this.registry.get(call.name);
 
@@ -82,6 +81,7 @@ export class AgentToolExecutor {
       const outcome: ToolExecutorOutcome = { status: 'disabled_future_tool', output: { reason: 'future_tool_disabled' } };
       const result = await this.finalize(ctx, call, outcome, startedAt);
       if (this.isPaymentClosureIntent(call)) {
+        signal?.throwIfAborted();
         await this.routePaymentClosureToHandoff(ctx, call);
       }
       return result;
@@ -116,6 +116,7 @@ export class AgentToolExecutor {
       );
     }
 
+    signal?.throwIfAborted();
     let outcome: ToolExecutorOutcome;
     try {
       outcome = await this.dispatch(ctx, call);

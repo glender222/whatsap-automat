@@ -65,6 +65,9 @@ export class MessageSendProductCardToolService {
         productName: product.name,
         caption,
       });
+      if (!providerMessageId) {
+        return { status: 'failed', output: { sent: false, reason: 'delivery_unconfirmed' } };
+      }
 
       await this.pool.query(
         `INSERT INTO operational_actions (
@@ -87,12 +90,9 @@ export class MessageSendProductCardToolService {
   }
 }
 
-let instance: MessageSendProductCardToolService | null = null;
-
-export function getMessageSendProductCardToolService(
+export function createMessageSendProductCardToolService(
   pool: Queryable,
   sender: ProductCardSender
 ): MessageSendProductCardToolService {
-  if (!instance) instance = new MessageSendProductCardToolService(pool, new ProductRepositoryPg(pool), sender);
-  return instance;
+  return new MessageSendProductCardToolService(pool, new ProductRepositoryPg(pool), sender);
 }

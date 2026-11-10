@@ -6,6 +6,7 @@ export type AiMessage = {
 export type AiCompletionOptions = {
   model?: string | null;
   temperature?: number;
+  signal?: AbortSignal;
 };
 
 export type AiProviderModel = {

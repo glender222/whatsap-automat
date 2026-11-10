@@ -35,6 +35,7 @@ type RuntimeLoopInput = {
   message: string;
   history: Array<{ fromMe: boolean; body: string }>;
   companyMode: AutomatorMode;
+  signal?: AbortSignal;
 };
 
 function cleanJsonResponse(raw: string): string {
@@ -72,7 +73,7 @@ export class AgentToolRuntimeLoop {
   ) {}
 
   async run(input: RuntimeLoopInput): Promise<RuntimeLoopResult> {
-    const { ctx, agent, message, history } = input;
+    const { ctx, agent, message, history, signal } = input;
     const toolResults: ToolCallResult[] = [];
     const sessionItemConfidence = new Map<number, number>();
     let totalCalls = 0;
@@ -91,11 +92,13 @@ export class AgentToolRuntimeLoop {
     ];
 
     while (rounds < MAX_TOOL_ROUNDS && totalCalls < MAX_TOOL_CALLS_PER_MESSAGE) {
+      signal?.throwIfAborted();
       rounds++;
       const provider = getAiProviderFactory().create(agent.provider || 'opencode');
       if (ctx.chatId) emitConversation(ctx.companyId, ctx.chatId, 'agent:typing', { chatId: ctx.chatId, agentId: agent.id });
 
-      const raw = await provider.complete(conversation as any, { model: String(agent.model || '') });
+      const raw = await provider.complete(conversation as any, { model: String(agent.model || ''), signal });
+      signal?.throwIfAborted();
       const parsed = tryParseJson(raw);
 
       if (!parsed.ok) {
@@ -109,6 +112,7 @@ export class AgentToolRuntimeLoop {
           continue;
         }
         await this.logger.logStage(ctx, 'loop_invalid_json', { status: 'failed', summary: 'JSON invalido tras reparacion. Fallback handoff.' });
+        signal?.throwIfAborted();
         return await this.fallbackHandoff(ctx, 'low_confidence', 'Respuesta IA no es JSON valido tras reparacion.');
       }
 
@@ -121,7 +125,8 @@ export class AgentToolRuntimeLoop {
         for (let i = 0; i < callsThisRound; i++) {
           const call = this.normalizeToolCall(toolRequest.toolCalls[i]);
           totalCalls++;
-          const result = await this.executor.execute(ctx, call);
+          signal?.throwIfAborted();
+          const result = await this.executor.execute(ctx, call, signal);
           toolResults.push(result);
           if (call.name === 'handoff.create' && result.relatedHandoffId) {
             handoffTicketId = result.relatedHandoffId;
@@ -167,6 +172,7 @@ export class AgentToolRuntimeLoop {
     }
 
     await this.logger.logStage(ctx, 'loop_limit_reached', { status: 'skipped', summary: `Loop termino por limite (rounds=${rounds}, calls=${totalCalls}).` });
+    signal?.throwIfAborted();
     return await this.fallbackHandoff(ctx, 'low_confidence', 'Loop alcanzo limite sin respuesta final.');
   }
 

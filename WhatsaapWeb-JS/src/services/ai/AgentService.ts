@@ -350,7 +350,12 @@ export class AgentService {
   async getConversationContext(
     companyId: number,
     chatId: string,
-    options: { windowHours?: number; limit?: number; excludeProviderMessageId?: string | null } = {}
+    options: {
+      windowHours?: number;
+      limit?: number;
+      excludeProviderMessageId?: string | null;
+      inbound?: { conversationId: number; messageId: number };
+    } = {},
   ): Promise<AgentConversationMessage[]> {
     const normalizedChatId = String(chatId || '').replace('@c.us', '').replace('@s.whatsapp.net', '').replace(/[^\d]/g, '');
     if (!normalizedChatId) return [];
@@ -359,14 +364,22 @@ export class AgentService {
     const result = await queryInTenantScope(pool, companyId,
       `SELECT m.direction, m.body, m.message_type, m.occurred_at
        FROM conversations c
-       JOIN messages m ON m.conversation_id = c.id
+       JOIN messages m ON m.company_id = c.company_id AND m.conversation_id = c.id
        WHERE c.company_id = $1 AND c.channel = 'whatsapp' AND c.external_conversation_id = $2
          AND NULLIF(BTRIM(COALESCE(m.body, '')), '') IS NOT NULL
-         AND ($3::varchar IS NULL OR m.provider_message_id <> $3)
+         AND ($3::varchar IS NULL OR m.provider_message_id IS DISTINCT FROM $3)
          AND ($4::int IS NULL OR m.occurred_at >= NOW() - MAKE_INTERVAL(hours => $4))
+         AND (m.direction <> 'outbound' OR m.status NOT IN ('unknown_delivery', 'failed'))
+         AND ($6::int IS NULL OR (c.id = $6 AND EXISTS (
+           SELECT 1 FROM messages inbound
+           WHERE inbound.company_id = c.company_id AND inbound.conversation_id = c.id AND inbound.id = $7
+             AND inbound.direction = 'inbound' AND inbound.provider = 'meta-cloud'
+             AND (m.occurred_at, m.id) < (inbound.occurred_at, inbound.id)
+         )))
        ORDER BY m.occurred_at DESC, m.id DESC
        LIMIT $5`,
-      [companyId, normalizedChatId, options.excludeProviderMessageId || null, windowHours, limit]
+      [companyId, normalizedChatId, options.excludeProviderMessageId || null, windowHours, limit,
+        options.inbound?.conversationId ?? null, options.inbound?.messageId ?? null]
     );
     return result.rows.reverse().map((row) => ({
       fromMe: row.direction === 'outbound',

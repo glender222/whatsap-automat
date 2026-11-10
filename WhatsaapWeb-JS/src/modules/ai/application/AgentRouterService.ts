@@ -26,6 +26,7 @@ export type RouterInput = {
   companyMode: AutomatorMode;
   conversationId: number | null;
   inboundProviderMessageId: string | null;
+  signal?: AbortSignal;
 };
 
 export type RouterRoute =
@@ -92,6 +93,7 @@ export class AgentRouterService {
   ) {}
 
   async route(input: RouterInput): Promise<RouterOutcome> {
+    input.signal?.throwIfAborted();
     const router = await this.findActiveRouter(input.companyId);
     if (!router) {
       await this.logRepo.log({
@@ -118,10 +120,12 @@ export class AgentRouterService {
     }
 
     const availableAgents = await this.listAvailableAgents(input.companyId);
+    input.signal?.throwIfAborted();
     let parsed: Awaited<ReturnType<AgentRouterService['callRouterLlm']>>;
     try {
       parsed = await this.callRouterLlm(router, input, availableAgents);
     } catch (error: unknown) {
+      input.signal?.throwIfAborted();
       const providerError = error as { code?: unknown; providerStatusCode?: unknown };
       await this.logRepo.log({
         companyId: input.companyId,
@@ -142,6 +146,7 @@ export class AgentRouterService {
       });
       return await this.createSafetyHandoff(input, 'low_confidence', 'router_provider_failed');
     }
+    input.signal?.throwIfAborted();
     const route = this.normalizeRoute(parsed.route);
     const confidence = clampConfidence(parsed.confidence);
     const reason = String(parsed.reason || '').trim();
@@ -236,7 +241,8 @@ export class AgentRouterService {
       },
     ];
     const provider = (this.providerFactory ?? getAiProviderFactory()).create(router.provider || 'opencode');
-    const raw = await provider.complete(messages, { model: String(router.model || '') });
+    const raw = await provider.complete(messages, { model: String(router.model || ''), signal: input.signal });
+    input.signal?.throwIfAborted();
     return this.parseRouterJson(raw, input, router.provider || 'opencode');
   }
 
@@ -384,6 +390,7 @@ export class AgentRouterService {
   }
 
   private async createSafetyHandoff(input: RouterInput, reason: string, summary: string): Promise<RouterOutcome> {
+    input.signal?.throwIfAborted();
     let ticketId: number | null = null;
     try {
       const handoffService = getHandoffToolService(this.pool);

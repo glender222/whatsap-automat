@@ -90,11 +90,13 @@ export class OpenCodeProvider implements AiProviderPort {
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
 
     try {
+      options.signal?.throwIfAborted();
       const model = await this.resolveModel(options.model || null);
+      options.signal?.throwIfAborted();
       const response = await fetch(`${this.apiUrl}${this.chatPath}`, {
         method: 'POST',
         headers: this.buildHeaders(),
-        signal: controller.signal,
+        signal: options.signal ? AbortSignal.any([controller.signal, options.signal]) : controller.signal,
         body: JSON.stringify(this.buildBody(messages, { ...options, model })),
       });
 

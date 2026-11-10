@@ -271,6 +271,36 @@ test('errores internos de tools se reemplazan por un codigo seguro', async () =>
   assert.equal(JSON.stringify([executorResult, preorderResult, productCardResult]).includes(internalError), false);
 });
 
+test('cada servicio de fichas usa el remitente del turno y exige un acuse para registrar el envío', async (t) => {
+  const { ProductRepositoryPg } = await import('../modules/inventory');
+  const { createMessageSendProductCardToolService } = await import(
+    '../modules/ai/application/tools/MessageSendProductCardToolService'
+  );
+  t.mock.method(ProductRepositoryPg.prototype, 'get', async () => ({
+    id: 1, name: 'Ficha QA', status: 'active', aiEnabled: true,
+    catalogs: [{ id: 1 }], sections: [], primaryImage: { url: '/uploads/commercial-items/producto.jpg' },
+  }));
+  const write = mock.fn(async () => ({ rows: [] }));
+  const sentByAlpha = mock.fn(async () => ({ providerMessageId: 'wamid.alpha' }));
+  const sentByBravo = mock.fn(async () => ({ providerMessageId: null }));
+  const db = { query: write } as any;
+  const alpha = createMessageSendProductCardToolService(db, { sendProductCard: sentByAlpha });
+  const bravo = createMessageSendProductCardToolService(db, { sendProductCard: sentByBravo });
+  const ctx = {
+    companyId: 1, conversationId: 10, chatId: '51999999999',
+    catalogScope: { catalogIds: [1], sectionIds: [] }, actorUserId: null,
+  } as any;
+  const [accepted, unconfirmed] = await Promise.all([
+    alpha.send(ctx, { commercialItemId: 1 }),
+    bravo.send({ ...ctx, companyId: 2, conversationId: 20 }, { commercialItemId: 1 }),
+  ]);
+  assert.equal(accepted.status, 'ok');
+  assert.deepEqual(unconfirmed.output, { sent: false, reason: 'delivery_unconfirmed' });
+  assert.equal(sentByAlpha.mock.callCount(), 1);
+  assert.equal(sentByBravo.mock.callCount(), 1);
+  assert.equal(write.mock.callCount(), 1);
+});
+
 test('AgentToolLogger usa el provider del contexto y conserva fallback legacy', async () => {
   const { AgentToolLogger } = await import('../modules/ai/application/AgentToolLogger');
   const log = mock.fn(async () => undefined);
