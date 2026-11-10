@@ -275,6 +275,37 @@ jobs:
             -g 'provider mode' --reporter=list,json --output "$evidence/traces"
           node -e 'const { expected, skipped } = require(process.argv[1]).stats;
             if (expected !== 1 || skipped) throw new Error("Provider browser test did not pass")' "$PLAYWRIGHT_JSON_OUTPUT_FILE"
+      - name: Probar conciliación de Mercado Pago desde Chromium
+        timeout-minutes: 4
+        env:
+          DB_NAME: whatsap_mercadopago_ci_smoke
+          PORT: 3031
+          PRODUCT_SMOKE_URL: http://127.0.0.1:3031
+          PRODUCT_MERCADOPAGO_FIXTURE_URL: http://127.0.0.1:3032
+          MERCADOPAGO_RECONCILIATION_ENABLED: 'true'
+          PLAYWRIGHT_PORT: 4181
+          PGPASSWORD: ci-postgres-only
+        run: |
+          psql -X -v ON_ERROR_STOP=1 -h "$DB_HOST" -U postgres -d postgres \
+            -c 'CREATE DATABASE whatsap_mercadopago_ci_smoke OWNER whatsap_smoke'
+          npm run db:migrate
+          evidence="$RUNNER_TEMP/browser-smoke/mercadopago"
+          mkdir -p "$evidence"
+          node --import tsx src/test/fixtures/browserMercadoPagoServer.ts > "$evidence/backend.log" 2>&1 &
+          app_pid=$!
+          trap 'kill "$app_pid" 2>/dev/null || true' EXIT
+          for attempt in {1..30}; do
+            if curl -fsS "$PRODUCT_SMOKE_URL/ready" >/dev/null 2>&1; then break; fi
+            if ! kill -0 "$app_pid" 2>/dev/null; then break; fi
+            sleep 1
+          done
+          curl -fsS "$PRODUCT_SMOKE_URL/ready"
+          curl -fsS "$PRODUCT_MERCADOPAGO_FIXTURE_URL/health"
+          export PLAYWRIGHT_JSON_OUTPUT_FILE="$evidence/results.json"
+          npm --prefix ../Frontend_py_whatsaapweb run test:e2e -- e2e/mercadopago.integration.spec.ts \
+            --reporter=list,json --output "$evidence/traces"
+          node -e 'const { expected, skipped } = require(process.argv[1]).stats;
+            if (expected !== 4 || skipped) throw new Error("Mercado Pago browser tests did not pass")' "$PLAYWRIGHT_JSON_OUTPUT_FILE"
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
