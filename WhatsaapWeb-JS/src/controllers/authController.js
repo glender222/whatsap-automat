@@ -85,7 +85,7 @@ class AuthController {
    * POST /api/auth/refresh - Refrescar token
    */
   refresh = asyncHandler(async (req, res) => {
-    const { refreshToken } = req.body;
+    const { refreshToken } = req.body ?? {};
 
     if (!refreshToken) {
       return res.status(400).json({
@@ -128,9 +128,9 @@ class AuthController {
    * POST /api/auth/logout - Logout
    */
   logout = asyncHandler(async (req, res) => {
-    const { refreshToken } = req.body;
+    const { refreshToken } = req.body ?? {};
 
-    await AuthService.logout(req.whatsappCompanyId, req.user.userId, refreshToken);
+    await AuthService.logout(req.whatsappCompanyId, req.user.userId, refreshToken, req.user.sessionId);
 
     res.json({
       success: true,

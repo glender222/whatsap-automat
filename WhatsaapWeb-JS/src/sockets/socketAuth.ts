@@ -1,6 +1,8 @@
 import { Socket } from 'socket.io';
 import config from '../config/index';
 import { extractBearerToken, toPositiveInt } from '../middleware/jwtAuth';
+import { readAccessSession } from '../services/auth/AccessSession';
+import type { SocketSessionMonitor } from './SocketSessionMonitor';
 
 const jwt = require('jsonwebtoken') as any;
 
@@ -11,10 +13,11 @@ export interface AuthenticatedSocketData {
   workspaceId?: string;
   userId?: string;
   role?: string;
+  expiresAt?: number;
 }
 
 export interface SocketAuthErrorData {
-  code: 'UNAUTHORIZED' | 'FORBIDDEN';
+  code: 'UNAUTHORIZED' | 'FORBIDDEN' | 'ACCESS_TOKEN_EXPIRED' | 'SESSION_REVOKED' | 'SESSION_CHECK_UNAVAILABLE';
   status: number;
   message: string;
   details?: string;
@@ -26,7 +29,7 @@ export interface ExtendedError extends Error {
 
 export function createAuthError(
   message: string,
-  code: 'UNAUTHORIZED' | 'FORBIDDEN',
+  code: SocketAuthErrorData['code'],
   status: number,
   details?: string
 ): ExtendedError {
@@ -45,8 +48,8 @@ export function createAuthError(
  * Extrae y valida el token en handshake.auth.token, handshake.headers.authorization, o query.token.
  * Valida de forma estricta los claims de empresa (companyId, company_id, tenantId) mediante toPositiveInt.
  */
-export function socketJwtAuthMiddleware(jwtSecret?: string) {
-  return (socket: Socket, next: (err?: ExtendedError) => void): void => {
+export function socketJwtAuthMiddleware(jwtSecret?: string, monitor?: SocketSessionMonitor) {
+  return (socket: Socket, next: (err?: ExtendedError) => void): void | Promise<void> => {
     try {
       // 1. Extraer token de auth, headers o query
       let rawToken: unknown = null;
@@ -94,7 +97,7 @@ export function socketJwtAuthMiddleware(jwtSecret?: string) {
         return next(
           createAuthError(
             `AUTHENTICATION_ERROR: ${errorMsg}`,
-            'UNAUTHORIZED',
+            verifyError?.name === 'TokenExpiredError' ? 'ACCESS_TOKEN_EXPIRED' : 'UNAUTHORIZED',
             401,
             errorMsg
           )
@@ -145,14 +148,26 @@ export function socketJwtAuthMiddleware(jwtSecret?: string) {
         ...(userIdNum ? { userId: String(userIdNum) } : {}),
         ...(workspaceIdRaw ? { workspaceId: String(workspaceIdRaw) } : {}),
         role,
+        ...(typeof decoded.exp === 'number' && Number.isSafeInteger(decoded.exp * 1000) ? { expiresAt: decoded.exp * 1000 } : {}),
       };
 
-      socket.data = {
-        ...socket.data,
-        ...authData,
+      const accept = () => {
+        socket.data = { ...socket.data, ...authData };
+        next();
       };
-
-      return next();
+      const session = readAccessSession(decoded, companyIdNum);
+      if (session === undefined) return accept();
+      const revoked = () => next(createAuthError('La sesión ya no está activa', 'SESSION_REVOKED', 401));
+      const unavailable = () => next(createAuthError('No se pudo comprobar la sesión', 'SESSION_CHECK_UNAVAILABLE', 503));
+      if (!session) return revoked();
+      if (!monitor) return unavailable();
+      return monitor.admit(socket, session).then((active) => {
+        if (!active) return revoked();
+        if (session.expiresAt <= Date.now()) {
+          return next(createAuthError('Token invalido o expirado', 'ACCESS_TOKEN_EXPIRED', 401));
+        }
+        return accept();
+      }, unavailable);
     } catch (unexpectedError: any) {
       return next(
         createAuthError(

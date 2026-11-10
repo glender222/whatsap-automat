@@ -11,7 +11,7 @@
  *
  * --- Rollback / Verificación Checklist ---
  * 1) Desactivar flags: CONVERSATIONS_PERSIST_READS=false y CONVERSATIONS_PERSIST_WRITES=false (default).
- * 2) npm start:legacy arranca sin TypeScript ni tablas nuevas.
+ * 2) npm run start:legacy conserva un alias al backend compilado después de migrar la base.
  * 3) coreModel.createTablesIfNotExists() es additive-only; nunca borra ni altera destructivamente.
  * 4) Eliminar código nuevo (src/core/, dist/core/) no rompe endpoints legacy ni el frontend.
  * 5) company_id default está documentado en src/config/index.js (DEFAULT_COMPANY_ID env var, fallback 1).

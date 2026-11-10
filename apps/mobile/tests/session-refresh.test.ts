@@ -41,6 +41,23 @@ beforeEach(async () => {
 });
 afterEach(() => { globalThis.fetch = originalFetch; });
 
+test('a revoked access session signs out without trying to renew or replay', async () => {
+  let requests = 0;
+  let invalidations = 0;
+  const stop = handleUnauthorized(() => { invalidations++; });
+  globalThis.fetch = async () => {
+    requests++;
+    return json(401, { success: false, code: 'SESSION_REVOKED' });
+  };
+  try {
+    await assert.rejects(apiClient.listConversations(), /sesión terminó/);
+    assert.equal(requests, 1);
+    assert.equal(invalidations, 1);
+  } finally {
+    stop();
+  }
+});
+
 test('coalesces concurrent expirations and replays the exact authenticated mutation only once', async () => {
   const bothExpired = deferred();
   const requests: string[] = [];

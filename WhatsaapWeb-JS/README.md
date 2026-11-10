@@ -78,7 +78,7 @@ Cuando se pierde el acuse de WhatsApp de una campaña, el intento queda pendient
 
 Desde la migración 046, cada ejecución tiene un permiso de despacho de dos minutos que se renueva al registrar intentos o resultados. Cuando vence, la siguiente consulta de la campaña o solicitud de despacho la pausa y conserva todos los intentos previos. La reanudación requiere una revisión nueva y queda bloqueada mientras existan entregas pendientes de confirmar. Las ejecuciones anteriores a la migración que aún figuren en curso requieren revisión operativa con los procesos de la versión anterior detenidos.
 
-Para producción, compila con las dependencias de desarrollo y prepara el entorno de ejecución con `npm ci --omit=dev`. Ejecuta `npm start` con `NODE_ENV=production` y `WHATSAPP_PROVIDER=meta-cloud`. El adaptador Web.js y el servidor legacy quedan disponibles en desarrollo. Si vas a probar la conexión legacy, instala sin `PUPPETEER_SKIP_DOWNLOAD` para incluir su navegador.
+Para producción, compila con las dependencias de desarrollo y prepara el entorno de ejecución con `npm ci --omit=dev`. Ejecuta `npm start` con `NODE_ENV=production` y `WHATSAPP_PROVIDER=meta-cloud`. El adaptador Web.js queda disponible en desarrollo. Si vas a probar esa conexión, instala sin `PUPPETEER_SKIP_DOWNLOAD` para incluir su navegador. `npm run start:legacy` y `npm run dev:legacy` usan el mismo servidor que los comandos principales.
 
 Desde la raíz del repositorio frontend (`Frontend_py_whatsaapweb`), en otra terminal:
 
@@ -333,7 +333,9 @@ Checklist de aceptación para la demo:
 
 ## Renovación de sesiones por empresa
 
-La migración 051 activa RLS en `refresh_tokens` y conserva las sesiones existentes. Registro, inicio de sesión, renovación y cierre de sesión operan dentro de la empresa. Cambiar el correo o la contraseña de una estación o desactivarla revoca sus tokens de renovación en la misma transacción. Un token de acceso ya emitido conserva su plazo de expiración.
+La migración 051 activa RLS en `refresh_tokens` y conserva las sesiones existentes. Registro, inicio de sesión, renovación y cierre de sesión operan dentro de la empresa. Cambiar el correo o la contraseña de una estación o desactivarla revoca sus tokens de renovación en la misma transacción. A partir de la migración 052, los tokens de acceso emitidos al iniciar sesión o renovar quedan vinculados a su sesión. HTTP comprueba que sigue activa y Socket.IO cierra la conexión al revocar la sesión o al expirar el token. Los tokens firmados antes de este cambio que carecen de identificador de sesión conservan su vigencia hasta la expiración.
+
+Detén las réplicas anteriores antes de aplicar las migraciones 051 y 052 y arranca la compilación compatible antes de reabrir el tráfico. Cada instancia con conexiones Socket.IO autenticadas mantiene una conexión de PostgreSQL dedicada a `LISTEN`. Usa una conexión directa o un pool en modo sesión. Si pierde la escucha, la instancia cierra las conexiones vinculadas y vuelve a comprobar la sesión al aceptar una nueva.
 
 Para instalar la migración 051, drena las réplicas anteriores, aplica la migración y arranca las réplicas con el backend actualizado. Las versiones anteriores accedían a `refresh_tokens` sin el contexto que exige la nueva política.
 

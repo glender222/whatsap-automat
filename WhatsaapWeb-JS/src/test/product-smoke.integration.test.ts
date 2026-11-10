@@ -18,6 +18,7 @@ import { MetaAccountStore } from '../services/whatsapp/meta/MetaAccountStore';
 import { setSocketIo } from '../sockets/socketEmitter';
 
 const base = process.env.PRODUCT_SMOKE_URL;
+const peer = process.env.PRODUCT_SMOKE_PEER_URL || base;
 
 async function api(path: string, status: number, token?: string, data?: object) {
   const response = await fetch(`${base}${path}`, {
@@ -33,9 +34,9 @@ async function api(path: string, status: number, token?: string, data?: object) 
   return 'data' in body ? body.data : body;
 }
 
-function connect(token: string): Promise<Socket> {
+function connect(token: string, origin = base): Promise<Socket> {
   return new Promise((resolve, reject) => {
-    const socket = io(base, { auth: { token }, transports: ['websocket'], reconnection: false, timeout: 5000 });
+    const socket = io(origin, { auth: { token }, transports: ['websocket'], reconnection: false, timeout: 5000 });
     socket.once('connect', () => resolve(socket));
     socket.once('connect_error', (error) => {
       socket.disconnect();
@@ -44,11 +45,21 @@ function connect(token: string): Promise<Socket> {
   });
 }
 
+function invalidation(socket: Socket) {
+  let reason: unknown;
+  socket.once('auth:invalidated', (event) => { reason = event?.reason; });
+  return Promise.race([
+    new Promise<unknown>((resolve) => socket.once('disconnect', () => resolve(reason))),
+    delay(5000, undefined, { ref: false }).then(() => { throw new Error('Socket invalidation timed out'); }),
+  ]);
+}
+
 test('real API isolates two companies through auth, signed ingress, inbox, sockets and CAS', {
   skip: !base && 'Run against a dedicated local smoke database and set PRODUCT_SMOKE_URL',
   timeout: 40000,
 }, async (t) => {
   assert.equal(new URL(base!).hostname, '127.0.0.1');
+  assert.equal(new URL(peer!).hostname, '127.0.0.1');
   assert.match(config.database.name, /_smoke$/);
   assert.equal(config.whatsapp.provider, 'meta-cloud');
   t.after(() => pool.end());
@@ -80,12 +91,31 @@ test('real API isolates two companies through auth, signed ingress, inbox, socke
     'UPDATE refresh_tokens SET revocado = true WHERE usuario_id = $1 RETURNING id', [owner.user.id],
   ))).rowCount, 0);
   const renewal = await api('/api/auth/refresh', 200, undefined, { refreshToken: first.refreshToken });
+  assert.equal(jwt.decode(renewal.accessToken)?.sessionId, jwt.decode(first.accessToken)?.sessionId);
+  assert.match(String(jwt.decode(first.accessToken)?.sessionId), /^[1-9]\d*$/);
   assert.equal((await api('/api/auth/me', 200, renewal.accessToken)).companyId, owner.user.companyId);
   await api('/api/auth/logout', 200, other.accessToken, { refreshToken: first.refreshToken });
   await api('/api/auth/refresh', 200, undefined, { refreshToken: first.refreshToken });
+  const revokedSocket = await connect(renewal.accessToken, peer);
+  t.after(() => { revokedSocket.disconnect(); });
+  const revoked = invalidation(revokedSocket);
   await api('/api/auth/logout', 200, first.accessToken, { refreshToken: first.refreshToken });
+  assert.equal(await revoked, 'revoked');
+  assert.equal((await api('/api/auth/me', 401, renewal.accessToken)).code, 'SESSION_REVOKED');
+  assert.equal((await api('/api/v1/workspaces/current', 401, first.accessToken)).code, 'SESSION_REVOKED');
+  await assert.rejects(connect(first.accessToken, peer), (error: { data?: { code?: string } }) =>
+    error.data?.code === 'SESSION_REVOKED');
   await api('/api/auth/refresh', 401, undefined, { refreshToken: first.refreshToken });
+  const { exp, iat, ...secondClaims } = jwt.decode(second.accessToken) as jwt.JwtPayload;
+  const shortAccess = jwt.sign(secondClaims, config.jwt.secret, { expiresIn: 2 });
+  const expiringSocket = await connect(shortAccess, peer);
+  t.after(() => { expiringSocket.disconnect(); });
+  assert.equal(await invalidation(expiringSocket), 'expiry');
+  await assert.rejects(connect(shortAccess, peer), (error: { data?: { code?: string } }) =>
+    error.data?.code === 'ACCESS_TOKEN_EXPIRED');
   await api('/api/auth/refresh', 200, undefined, { refreshToken: second.refreshToken });
+  await api('/api/auth/logout', 200, second.accessToken, {});
+  assert.equal((await api('/api/auth/me', 401, second.accessToken)).code, 'SESSION_REVOKED');
 
   const ownerSocket = await connect(owner.accessToken);
   t.after(() => { ownerSocket.disconnect(); });
@@ -702,12 +732,15 @@ test('real API isolates two companies through auth, signed ingress, inbox, socke
   assert.equal((await updateStation({ password: randomUUID() }, other.accessToken)).status, 404);
   await renewStation(stationSession.refreshToken, 200);
   const nextPassword = randomUUID();
+  const employeeRevoked = invalidation(employeeSocket);
   const [changed, concurrentLogin] = await Promise.all([
     updateStation({ password: nextPassword }),
     fetch(`${base}/api/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: station.email, password: tempPassword }) }),
   ]);
   assert.equal(changed.status, 200);
+  assert.equal(await employeeRevoked, 'revoked');
+  assert.equal((await api('/api/auth/me', 401, employeeToken)).code, 'SESSION_REVOKED');
   assert.ok([200, 401].includes(concurrentLogin.status));
   if (concurrentLogin.ok) await renewStation((await concurrentLogin.json()).data.refreshToken, 401);
   await renewStation(stationSession.refreshToken, 401);
@@ -723,4 +756,15 @@ test('real API isolates two companies through auth, signed ingress, inbox, socke
     'SELECT bool_and(revocado) AS revoked FROM refresh_tokens WHERE usuario_id = $1', [employeeId],
   ));
   assert.equal(revocations.revoked, true);
+
+  const disconnected = invalidation(ownerSocket);
+  const listeners = await pool.query(`
+    SELECT pg_terminate_backend(pid) AS terminated FROM pg_stat_activity
+    WHERE datname = current_database() AND application_name = 'whatsap-session-monitor'
+  `);
+  assert.ok(listeners.rowCount && listeners.rows.every(({ terminated }) => terminated));
+  assert.equal(await disconnected, undefined);
+  assert.equal((await api('/api/auth/me', 200, owner.accessToken)).companyId, owner.user.companyId);
+  const recoveredSocket = await connect(owner.accessToken);
+  t.after(() => { recoveredSocket.disconnect(); });
 });

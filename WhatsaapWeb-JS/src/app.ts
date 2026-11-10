@@ -315,7 +315,7 @@ export class App {
   private setupSocketIO(): void {
     this.whatsappService.setSocketIO(this.io);
     setSocketIo(this.io);
-    this.socketHandler.handleConnection(this.io);
+    this.server.once('close', this.socketHandler.handleConnection(this.io));
   }
 
   private setupErrorHandling(): void {

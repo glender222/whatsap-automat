@@ -188,7 +188,7 @@ class User {
   /**
    * Verificar si refresh token existe y es válido
    */
-  static async verifyRefreshToken(usuarioId, token, db) {
+  static async findActiveRefreshToken(usuarioId, token, db) {
     const query = `
       SELECT id FROM refresh_tokens
       WHERE usuario_id = $1 AND token = $2 AND revocado = false AND expira_en > clock_timestamp()
@@ -196,7 +196,7 @@ class User {
     `;
     
     const result = await db.query(query, [usuarioId, digestRefreshToken(token)]);
-    return result.rows.length > 0;
+    return result.rows[0] || null;
   }
 
   /**
@@ -210,6 +210,13 @@ class User {
     `;
     
     await db.query(query, [digestRefreshToken(token), usuarioId]);
+  }
+
+  static async revokeAccessSession(userId, sessionId, client) {
+    await client.query(
+      'UPDATE refresh_tokens SET revocado = true WHERE usuario_id = $1 AND id = $2',
+      [userId, sessionId],
+    );
   }
 
   static async revokeUserSessions(userId, client) {

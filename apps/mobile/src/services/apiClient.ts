@@ -313,6 +313,10 @@ async function authenticated<T>(
   try {
     return await execute(original);
   } catch (error) {
+    if (error instanceof MobileApiError && error.status === 401 && error.code === 'SESSION_REVOKED') {
+      invalidate(original);
+      throw sessionEnded();
+    }
     if (init?.signal?.aborted || !(error instanceof MobileApiError && error.accessTokenExpired)) throw error;
     if (containsPassword && error.code !== 'ACCESS_TOKEN_EXPIRED') throw error;
     const refreshed = await refreshAfterExpiry(original, origin);

@@ -1,6 +1,6 @@
 import { NextFunction, Request, Response } from 'express';
 import config from '../config/index';
-import { extractBearerToken, JwtRequest, toPositiveInt } from './jwtAuth';
+import { extractBearerToken, JwtRequest, requireActiveAccessSession, toPositiveInt } from './jwtAuth';
 import { tenantScopedUoW, TenantScopedUoW } from '../db/TenantScopedUoW';
 import { Queryable } from '../shared/UnitOfWorkPort';
 
@@ -78,7 +78,7 @@ export function tenantContext(options: TenantContextOptions = {}) {
   const secret = options.jwtSecret || config.jwt.secret || process.env.JWT_SECRET || '';
   const uowInstance = options.uow || tenantScopedUoW;
 
-  return (req: Request, res: Response, next: NextFunction): void | Response => {
+  return (req: Request, res: Response, next: NextFunction): void | Response | Promise<void | Response> => {
     let claims = (req as JwtRequest).user as Record<string, unknown> | undefined;
 
     // 1. If req.user not yet populated, verify JWT from header
@@ -121,7 +121,6 @@ export function tenantContext(options: TenantContextOptions = {}) {
 
       try {
         claims = jwt.verify(token, secret) as Record<string, unknown>;
-        (req as JwtRequest).user = claims;
       } catch (err: any) {
         return res.status(401).json({
           success: false,
@@ -229,14 +228,16 @@ export function tenantContext(options: TenantContextOptions = {}) {
     };
 
     // 7. Decorate Request
-    req.tenantId = currentTenantId;
-    req.workspaceId = workspaceId;
-    req.tenant = context.tenant;
-    req.workspace = context.workspace;
-    req.tenantContext = context;
-    req.whatsappCompanyId = currentTenantId; // backward-compat
-
-    return next();
+    return requireActiveAccessSession(req, res, claims, currentTenantId, () => {
+      (req as JwtRequest).user = context.rawClaims;
+      req.tenantId = currentTenantId;
+      req.workspaceId = workspaceId;
+      req.tenant = context.tenant;
+      req.workspace = context.workspace;
+      req.tenantContext = context;
+      req.whatsappCompanyId = currentTenantId;
+      next();
+    });
   };
 }
 

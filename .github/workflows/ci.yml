@@ -114,6 +114,7 @@ jobs:
       PORT: 3024
       HOST: 127.0.0.1
       PRODUCT_SMOKE_URL: http://127.0.0.1:3024
+      PRODUCT_SMOKE_PEER_URL: http://127.0.0.1:3025
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -142,14 +143,16 @@ jobs:
         run: |
           node dist/index.js > "$RUNNER_TEMP/product-smoke.log" 2>&1 &
           app_pid=$!
-          trap 'kill "$app_pid" 2>/dev/null || true' EXIT
+          PORT=3025 node dist/index.js > "$RUNNER_TEMP/product-smoke-peer.log" 2>&1 &
+          peer_pid=$!
+          trap 'kill "$app_pid" "$peer_pid" 2>/dev/null || true' EXIT
           for attempt in {1..30}; do
-            if curl -fsS "$PRODUCT_SMOKE_URL/ready" >/dev/null 2>&1; then break; fi
-            if ! kill -0 "$app_pid" 2>/dev/null; then break; fi
+            if curl -fsS "$PRODUCT_SMOKE_URL/ready" >/dev/null 2>&1 && curl -fsS "$PRODUCT_SMOKE_PEER_URL/ready" >/dev/null 2>&1; then break; fi
+            if ! kill -0 "$app_pid" "$peer_pid" 2>/dev/null; then break; fi
             sleep 1
           done
-          if ! curl -fsS "$PRODUCT_SMOKE_URL/ready" || ! node --import tsx --test src/test/product-smoke.integration.test.ts; then
-            cat "$RUNNER_TEMP/product-smoke.log"
+          if ! curl -fsS "$PRODUCT_SMOKE_URL/ready" || ! curl -fsS "$PRODUCT_SMOKE_PEER_URL/ready" || ! node --import tsx --test src/test/product-smoke.integration.test.ts; then
+            cat "$RUNNER_TEMP/product-smoke.log" "$RUNNER_TEMP/product-smoke-peer.log"
             exit 1
           fi
       - name: Probar envíos, campañas, Marketplace, Studio, conexiones, inventario, pedidos y workflows contra PostgreSQL

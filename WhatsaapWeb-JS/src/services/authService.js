@@ -27,9 +27,9 @@ function accessClaims(user) {
 
 async function issueSession(user, client) {
   const { userId, ...profile } = accessClaims(user);
-  const accessToken = generateAccessToken({ userId, ...profile });
   const refreshToken = generateRefreshToken({ userId, email: profile.email });
-  await User.saveRefreshToken(userId, refreshToken, 30 * 24 * 60 * 60 * 1000, client);
+  const session = await User.saveRefreshToken(userId, refreshToken, 30 * 24 * 60 * 60 * 1000, client);
+  const accessToken = generateAccessToken({ userId, ...profile, sessionId: String(session.id) });
   return { user: { id: userId, ...profile }, accessToken, refreshToken };
 }
 
@@ -96,10 +96,10 @@ class AuthService {
     const { companyId } = accessClaims(user);
     return withTenantTransaction(companyId, async (client) => {
       const current = await User.lockSessionUser(companyId, user.id, client);
-      if (current?.email !== payload.email || !await User.verifyRefreshToken(user.id, refreshToken, client)) {
-        throw authError('Refresh token inválido o expirado', 401);
-      }
-      return { accessToken: generateAccessToken(accessClaims(current)) };
+      if (current?.email !== payload.email) throw authError('Refresh token inválido o expirado', 401);
+      const session = await User.findActiveRefreshToken(user.id, refreshToken, client);
+      if (!session) throw authError('Refresh token inválido o expirado', 401);
+      return { accessToken: generateAccessToken({ ...accessClaims(current), sessionId: String(session.id) }) };
     });
   }
 
@@ -179,9 +179,11 @@ class AuthService {
   /**
    * Logout
    */
-  static async logout(companyId, userId, refreshToken) {
+  static async logout(companyId, userId, refreshToken, sessionId) {
     if (typeof refreshToken === 'string' && refreshToken) {
       await withTenantTransaction(companyId, (client) => User.revokeRefreshToken(userId, refreshToken, client));
+    } else if (refreshToken === undefined && sessionId) {
+      await withTenantTransaction(companyId, (client) => User.revokeAccessSession(userId, sessionId, client));
     }
     return true;
   }

@@ -200,7 +200,7 @@ describe('PR-F1-01: Socket.IO Fail-Closed Security & Room Isolation', () => {
       const err = await waitForConnectError(client);
       assert.ok(err.message.includes('AUTHENTICATION_ERROR'));
       assert.ok(err.message.includes('jwt expired') || err.data?.details?.includes('expired'));
-      assert.equal(err.data?.code, 'UNAUTHORIZED');
+      assert.equal(err.data?.code, 'ACCESS_TOKEN_EXPIRED');
       assert.equal(client.connected, false);
     });
 

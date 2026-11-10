@@ -1,7 +1,7 @@
 import { Pool, PoolClient } from 'pg';
 import defaultPool from '../config/database';
 import { Queryable } from '../shared/UnitOfWorkPort';
-import { toPositiveInt } from '../middleware/jwtAuth';
+import { toPositiveInt } from '../shared/positiveInt';
 
 function formatTenantId(tenantId: unknown): string {
   if (typeof tenantId === 'bigint') {

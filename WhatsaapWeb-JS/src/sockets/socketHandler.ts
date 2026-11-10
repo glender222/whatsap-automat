@@ -2,6 +2,7 @@ import { Server, Socket } from 'socket.io';
 import pool from '../config/database';
 import { DbQueryable, isInternalChatId, normalizeChatIdCandidates, queryTenantResource } from '../middleware/resourceAuth';
 import { socketJwtAuthMiddleware, AuthenticatedSocketData } from './socketAuth';
+import { SocketSessionMonitor } from './SocketSessionMonitor';
 
 const CHAT_ID_REGEX = /^[a-zA-Z0-9_\-+.:@]+$/;
 
@@ -14,9 +15,10 @@ export class SocketHandler {
     this.db = db || pool;
   }
 
-  handleConnection(io: Server): void {
+  handleConnection(io: Server): () => void {
+    const sessions = new SocketSessionMonitor(pool);
     // 1. Registrar middleware fail-closed de autenticación JWT
-    io.use(socketJwtAuthMiddleware());
+    io.use(socketJwtAuthMiddleware(undefined, sessions));
 
     io.on('connection', (socket: Socket) => {
       const data = socket.data as Partial<AuthenticatedSocketData>;
@@ -24,6 +26,8 @@ export class SocketHandler {
       const companyId = data.companyId || (tenantId ? Number(tenantId) : null);
       const workspaceId = data.workspaceId ? String(data.workspaceId) : null;
       const userId = data.userId ? String(data.userId) : null;
+
+      if (!sessions.activate(socket, data.expiresAt)) return;
 
       if (!tenantId || !companyId) {
         console.error(`[SocketHandler] Conexión rechazada: socket ${socket.id} sin tenantId válido.`);
@@ -269,11 +273,6 @@ export class SocketHandler {
         }
       });
 
-      // Notificación de mensaje enviado desde frontend (registro de depuración)
-      socket.on('sent-message', (data: unknown) => {
-        // Operación informativa acotada
-      });
-
       // Logout desde Socket.IO deshabilitado por seguridad
       socket.on('logout', async (callback?: (res: any) => void) => {
         const response = {
@@ -287,10 +286,8 @@ export class SocketHandler {
         }
       });
 
-      socket.on('disconnect', () => {
-        // Desconexión limpia
-      });
     });
+    return () => sessions.close();
   }
 }
 

@@ -7,7 +7,7 @@
     "start:legacy": "node index.js",
     "dev": "tsx watch src/index.ts",
     "dev:tunnel": "tsx scripts/dev-tunnel.ts",
-    "dev:legacy": "nodemon index.js",
+    "dev:legacy": "tsx watch src/index.ts",
     "dev:ts": "tsx watch src/index.ts",
     "build": "tsc && node scripts/copy-runtime-assets.cjs",
     "typecheck": "tsc --noEmit",
