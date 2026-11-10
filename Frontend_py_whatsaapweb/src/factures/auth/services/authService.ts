@@ -1,5 +1,6 @@
 // src/services/auth.service.ts
-import { api } from "../../../shared/axios/http";
+import { api, type AuthRequestConfig } from "../../../shared/axios/http";
+import { clearSession, readSession } from "../../../shared/auth/session";
 import type { login, LoginResponse, AuthTokens, AuthState } from "../types/logTypes";
 
 /**
@@ -12,7 +13,7 @@ export const authService = {
    */
   isAuthenticated(): boolean {
     // Puedes ajustar la lógica según cómo almacenes el token
-    return !!localStorage.getItem("accessToken");
+    return Boolean(readSession().accessToken);
   },
   /**
    * Iniciar sesión (POST /auth/login)
@@ -38,10 +39,12 @@ export const authService = {
   },
 
   /** Refresca el acceso con el token de renovación. */
-  async refreshToken(refreshToken: string): Promise<AuthTokens> {
+  async refreshToken(refreshToken: string, sessionGeneration: number): Promise<AuthTokens> {
+    const config: AuthRequestConfig = { sessionGeneration };
     const { data } = await api.post<{ success: boolean; data: AuthTokens }>(
       "/auth/refresh",
-      { refreshToken }
+      { refreshToken },
+      config,
     );
     if (!data.success || typeof data.data?.accessToken !== 'string' || !data.data.accessToken) {
       throw new Error("No se pudo refrescar el token");
@@ -52,11 +55,13 @@ export const authService = {
   /**
    * Cerrar sesión (POST /auth/logout)
    */
-  async logout(refreshToken: string): Promise<void> {
+  async logout(refreshToken: string, sessionGeneration: number): Promise<void> {
+    const config: AuthRequestConfig = { sessionGeneration };
     try {
       const { data } = await api.post<{ success: boolean; message: string }>(
         "/auth/logout",
-        { refreshToken }
+        { refreshToken },
+        config,
       );
 
       if (!data.success) {
@@ -89,3 +94,15 @@ export const authService = {
     }
   },
 };
+
+
+export async function logoutSession(generation = readSession().generation): Promise<boolean> {
+  const current = readSession();
+  if (current.generation !== generation) return false;
+  try {
+    if (current.refreshToken) await authService.logout(current.refreshToken, generation);
+  } catch {
+    // A transport failure still permits closing this session locally.
+  }
+  return clearSession(generation);
+}

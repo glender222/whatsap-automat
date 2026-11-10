@@ -1,3 +1,4 @@
+import { subscribeSession } from '../../../shared/auth/session';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { ClipboardCheck, RefreshCw } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
@@ -120,8 +121,7 @@ export default function ApprovalsPage() {
 
   useEffect(() => {
     const update = () => setSession(currentApprovalSession());
-    window.addEventListener('storage', update);
-    return () => window.removeEventListener('storage', update);
+    return subscribeSession(update);
   }, []);
 
   useEffect(() => {

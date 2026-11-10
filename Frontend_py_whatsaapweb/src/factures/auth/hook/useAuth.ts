@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { authService } from "../services/authService";
-import SocketService from "../../../utils/socket";
+import { authService, logoutSession } from "../services/authService";
+import { saveSession } from "../../../shared/auth/session";
 import type { login } from "../types/logTypes";
 import type { User } from "../../../shared/types/user.types";
 
@@ -20,16 +20,9 @@ export function useAuth() {
       console.log('🚀 Iniciando proceso de login...');
       const response = await authService.login(credentials);
       
-      // Guardar tokens en localStorage
-      localStorage.setItem("accessToken", response.accessToken);
-      localStorage.setItem("refreshToken", response.refreshToken);
+      saveSession(response.user, response.accessToken, response.refreshToken);
       setUser(response.user);
-      console.log('✅ Login exitoso, tokens guardados');
-      
-      // Conectar socket con el token
-      console.log('🔌 Conectando Socket.IO después del login...');
-      SocketService.getInstance().connect();
-      
+
       // Navegar inmediatamente después del login exitoso
       console.log('🔄 Navegando a /gestion-web...');
       navigate("/gestion-web");
@@ -52,17 +45,7 @@ export function useAuth() {
   // Eliminar función register porque no existe en authService
 
   const logout = async () => {
-    const refreshToken = localStorage.getItem("refreshToken");
-    if (refreshToken) {
-      await authService.logout(refreshToken);
-    }
-    
-    // Desconectar socket
-    console.log('🔌 Desconectando Socket.IO...');
-    SocketService.getInstance().disconnect();
-    
-    localStorage.removeItem("accessToken");
-    localStorage.removeItem("refreshToken");
+    if (!await logoutSession()) return;
     setUser(null);
     navigate("/auth/login");
   };

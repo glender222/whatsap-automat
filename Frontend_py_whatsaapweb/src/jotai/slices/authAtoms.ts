@@ -1,16 +1,18 @@
 import { atom } from 'jotai';
+import { readSession, subscribeSession } from '../../shared/auth/session';
 
-// Atom para el accessToken
-export const accessTokenAtom = atom<string | null>(
-  typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null
-);
+const sessionVersionAtom = atom(0);
+sessionVersionAtom.onMount = (setVersion) => {
+  const update = () => setVersion((version) => version + 1);
+  const unsubscribe = subscribeSession(update);
+  update();
+  return unsubscribe;
+};
+const sessionAtom = atom((get) => {
+  get(sessionVersionAtom);
+  return readSession();
+});
 
-// Atom para el refreshToken
-export const refreshTokenAtom = atom<string | null>(
-  typeof window !== 'undefined' ? localStorage.getItem('refreshToken') : null
-);
-
-// Atom para el usuario autenticado (puedes ajustar el tipo según tu modelo de usuario)
-export const userAtom = atom<any | null>(
-  typeof window !== 'undefined' ? JSON.parse(localStorage.getItem('auth') || 'null')?.user ?? null : null
-);
+export const accessTokenAtom = atom((get) => get(sessionAtom).accessToken);
+export const refreshTokenAtom = atom((get) => get(sessionAtom).refreshToken);
+export const userAtom = atom((get) => get(sessionAtom).user);

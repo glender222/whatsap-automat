@@ -2,14 +2,12 @@ import { Suspense, useRef, useState } from 'react';
 import { Outlet, useNavigate } from 'react-router-dom';
 import DashboardSidebar from './DashboardSidebar';
 import DashboardTopbar from './DashboardTopbar';
-import { authService } from '../../auth/services/authService';
-import { useAuthJotai } from '../../../jotai/middleware/useAuthJotai';
+import { logoutSession } from '../../auth/services/authService';
 import { useUserRoleJotai } from '../../../jotai/middleware/useUserRoleJotai';
 
 export default function DashboardLayout() {
   const navigate = useNavigate();
-  const { clearAuth } = useAuthJotai();
-  const { userRole, clearUserRole } = useUserRoleJotai();
+  const { userRole } = useUserRoleJotai();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => (
     localStorage.getItem('adminSidebarCollapsed') === 'true'
   ));
@@ -31,16 +29,7 @@ export default function DashboardLayout() {
   }
 
   async function handleLogout() {
-    const refreshToken = localStorage.getItem('refreshToken');
-    try {
-      if (refreshToken) await authService.logout(refreshToken);
-    } catch {
-      // La sesión local se cierra aunque el servidor no esté disponible.
-    } finally {
-      clearAuth();
-      clearUserRole();
-      navigate('/auth/login', { replace: true });
-    }
+    if (await logoutSession()) navigate('/auth/login', { replace: true });
   }
 
   return (

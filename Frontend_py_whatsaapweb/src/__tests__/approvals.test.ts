@@ -3,7 +3,7 @@ import { test, type TestContext } from 'node:test';
 import { type InternalAxiosRequestConfig } from 'axios';
 import { api } from '../shared/axios/http';
 import {
-  decideApproval, isSensitiveApproval, listApprovals, readApproval, type Approval, type DecisionIntent,
+  currentApprovalSession, decideApproval, isSensitiveApproval, listApprovals, readApproval, type Approval, type DecisionIntent,
 } from '../factures/dashboard/approvals/approvalApi';
 
 let session = 'approval-session-a';
@@ -68,12 +68,13 @@ test('a retry preserves its exact decision intent and stops when the session cha
     assert.deepEqual(JSON.parse(request.data), { decision: 'rejected', expectedVersion: 2, reason: 'Razón revisada' });
     return { approvalId: approval.id, status: returnedStatus, decidedAt: '2026-11-09T12:01:00Z' };
   });
-  const expected = await decideApproval(intent, session);
-  assert.deepEqual(await decideApproval(intent, session), expected);
+  const originalGeneration = currentApprovalSession()!;
+  const expected = await decideApproval(intent, originalGeneration);
+  assert.deepEqual(await decideApproval(intent, originalGeneration), expected);
   returnedStatus = 'approved';
-  await assert.rejects(decideApproval(intent, session), /no confirmó la decisión/);
+  await assert.rejects(decideApproval(intent, originalGeneration), /no confirmó la decisión/);
   session = 'approval-session-b';
   context.after(() => { session = 'approval-session-a'; });
-  await assert.rejects(decideApproval(intent, 'approval-session-a'), /La sesión cambió/);
+  await assert.rejects(decideApproval(intent, originalGeneration), /La sesión cambió/);
   assert.equal(requests, 3);
 });

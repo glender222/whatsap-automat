@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Settings, LogOut } from 'lucide-react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { useAuthJotai } from '../../../jotai/middleware/useAuthJotai';
+import { readSession } from '../../../shared/auth/session';
+import { logoutSession } from '../../auth/services/authService';
 import GlobalTransition from '../../../shared/components/GlobalTransition';
 import { useUserRoleJotai } from '../../../jotai/middleware/useUserRoleJotai';
 
@@ -31,7 +32,6 @@ const Sidebar: React.FC<SidebarProps> = ({
   const [showTransition, setShowTransition] = useState(false);
   const [transitionMsg, setTransitionMsg] = useState('Cerrando sesión...');
   const settingsBtnRef = useRef<HTMLButtonElement>(null);
-  const { clearAuth } = useAuthJotai();
   const { userRole } = useUserRoleJotai();
   const navigate = useNavigate();
 
@@ -58,9 +58,9 @@ const Sidebar: React.FC<SidebarProps> = ({
     setSettingsOpen(false);
     setTransitionMsg('Cerrando sesión...');
     setShowTransition(true);
-    setTimeout(() => {
-      clearAuth();
-      navigate('/auth/login');
+    const { generation } = readSession();
+    setTimeout(async () => {
+      if (await logoutSession(generation)) navigate('/auth/login', { replace: true });
       setShowTransition(false);
     }, 1500);
   };

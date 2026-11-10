@@ -13,6 +13,7 @@
     "preview": "vite preview",
     "test": "npm run test:tokens && npm run test:campaigns && npm run test:extensions && npm run test:admin && npm run test:marketplace && npm run test:workflows && npm run test:agent-graphs && npm run test:canonical-inbox && npm run test:pdf-media && npm run test:operation-executions && npm run test:auth-session && npm run test:commercial-orders && npm run test:approvals",
     "test:auth-session": "node --import tsx --test src/__tests__/auth-session.test.ts",
+    "test:socket-session": "node --import tsx --test src/__tests__/socket-session.integration.mjs",
     "test:tokens": "node --import tsx --test src/styles/tokens.test.ts",
     "test:campaigns": "node --import tsx --test src/__tests__/campaigns.test.ts",
     "test:extensions": "node --import tsx --test src/__tests__/SandboxedExtensionIframe.test.ts",

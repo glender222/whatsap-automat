@@ -1,4 +1,5 @@
 import { atom } from 'jotai';
+import { readSession } from '../../shared/auth/session';
 import type { UserRole } from '../../shared/types/user.types';
 
 // Atom para el rol actual del usuario
@@ -10,7 +11,7 @@ export const setUserRole = (role: UserRole) => {
 };
 
 export const getUserRole = (): UserRole | null => {
-  const role = localStorage.getItem('userRole');
+  const role = readSession().user?.rol ?? localStorage.getItem('userRole');
   if (role === 'ADMIN' || role === 'EMPLEADO') return role;
   return null;
 };

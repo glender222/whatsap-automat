@@ -1,5 +1,6 @@
 import axios, { CanceledError, type AxiosRequestConfig, type InternalAxiosRequestConfig } from 'axios';
 import { authService } from '../../factures/auth/services/authService';
+import { invalidateSession, readSession, saveRenewedAccess, type SessionSnapshot } from '../auth/session';
 
 export const api = axios.create({
   baseURL: import.meta.env?.VITE_API_URL ?? 'http://localhost:3000/api',
@@ -9,56 +10,48 @@ export const api = axios.create({
 
 const publicAuthRoutes = new Set(['/auth/register', '/auth/login', '/auth/refresh']);
 
-interface SessionSnapshot {
-  accessToken: string | null;
-  refreshToken: string | null;
-  generation: number;
-}
+export type AuthRequestConfig = AxiosRequestConfig & { replayOnAuthRenewal?: boolean; sessionGeneration?: number };
+type SessionRequest = InternalAxiosRequestConfig & {
+  authRetryGeneration?: number; replayOnAuthRenewal?: boolean; sessionGeneration?: number;
+};
 
-export type AuthRequestConfig = AxiosRequestConfig & { replayOnAuthRenewal?: boolean };
-type SessionRequest = InternalAxiosRequestConfig & { authRetryGeneration?: number; replayOnAuthRenewal?: boolean };
-
-let observedSession: SessionSnapshot = { accessToken: null, refreshToken: null, generation: 0 };
 const requestSessions = new WeakMap<InternalAxiosRequestConfig, SessionSnapshot>();
-const pendingRenewals = new Map<number, Promise<void>>();
-
-function readSession(): SessionSnapshot {
-  const accessToken = localStorage.getItem('accessToken');
-  const refreshToken = localStorage.getItem('refreshToken');
-  const changed = refreshToken !== observedSession.refreshToken ||
-    (!refreshToken && accessToken !== observedSession.accessToken);
-  observedSession = { accessToken, refreshToken, generation: observedSession.generation + Number(changed) };
-  return observedSession;
-}
+const pendingRenewals = new Map<number, Promise<SessionSnapshot>>();
 
 api.interceptors.request.use((config: SessionRequest) => {
-  if (publicAuthRoutes.has(config.url ?? '')) return config;
+  const publicRoute = publicAuthRoutes.has(config.url ?? '');
+  const expectedGeneration = config.authRetryGeneration ?? config.sessionGeneration;
+  if (publicRoute && expectedGeneration === undefined) return config;
   const session = readSession();
-  if (config.authRetryGeneration !== undefined && config.authRetryGeneration !== session.generation) {
+  if (expectedGeneration !== undefined && expectedGeneration !== session.generation) {
     throw new CanceledError('La sesión cambió antes del reintento.');
   }
+  if (publicRoute) return config;
   requestSessions.set(config, session);
   if (session.accessToken) config.headers.set('Authorization', `Bearer ${session.accessToken}`);
   return config;
 });
 
-function clearExpiredSession() {
-  for (const key of ['accessToken', 'refreshToken', 'auth', 'userRole']) {
-    localStorage.removeItem(key);
+export async function renewAccess(sent: SessionSnapshot): Promise<SessionSnapshot> {
+  const current = readSession();
+  const { generation, refreshToken } = current;
+  if (sent.generation !== generation) throw new CanceledError('La sesión cambió antes de la renovación.');
+  if (current.accessToken && sent.accessToken !== current.accessToken) return current;
+  if (!refreshToken) {
+    invalidateSession(generation);
+    throw new CanceledError('La sesión no tiene token de renovación.');
   }
-  window.location.assign('/auth/login');
-}
 
-function renewAccess(generation: number, refreshToken: string): Promise<void> {
   const pending = pendingRenewals.get(generation);
   if (pending) return pending;
 
-  const renewal = authService.refreshToken(refreshToken).then((tokens) => {
-    if (readSession().generation !== generation) throw new CanceledError('La sesión cambió durante la renovación.');
-    localStorage.setItem('accessToken', tokens.accessToken);
-    const nextRefreshToken = tokens.refreshToken || refreshToken;
-    localStorage.setItem('refreshToken', nextRefreshToken);
-    observedSession = { accessToken: tokens.accessToken, refreshToken: nextRefreshToken, generation };
+  const renewal = authService.refreshToken(refreshToken, generation).then((tokens) => {
+    const renewed = saveRenewedAccess(generation, tokens.accessToken, tokens.refreshToken);
+    if (!renewed) throw new CanceledError('La sesión cambió durante la renovación.');
+    return renewed;
+  }).catch((error) => {
+    if (axios.isAxiosError(error) && error.response?.status === 401) invalidateSession(generation);
+    throw error;
   }).finally(() => pendingRenewals.delete(generation));
   pendingRenewals.set(generation, renewal);
   return renewal;
@@ -74,7 +67,7 @@ api.interceptors.response.use(
   },
   async (error) => {
     const request = error?.config as SessionRequest | undefined;
-    if (error?.response?.status !== 401 || !request || request.authRetryGeneration !== undefined) throw error;
+    if (error?.response?.status !== 401 || !request) throw error;
     const sent = requestSessions.get(request);
     if (!sent) throw error;
 
@@ -83,29 +76,17 @@ api.interceptors.response.use(
       /^application\/(?:[\w.+-]+\+)?json(?:;|$)/i.test(payload.type)
       ? await payload.text().then((value) => JSON.parse(value)).catch(() => null)
       : payload;
-    const expiredAccess = body?.code === 'ACCESS_TOKEN_EXPIRED' ||
-      (body?.error === 'Token invalido o expirado' && body?.details === 'jwt expired');
-    if (!expiredAccess) throw error;
-
-    const current = readSession();
-    if (sent.generation !== current.generation) throw error;
-    if (!current.refreshToken) {
-      clearExpiredSession();
+    if (body?.code === 'SESSION_REVOKED') {
+      invalidateSession(sent.generation);
       throw error;
     }
+    const expiredAccess = body?.code === 'ACCESS_TOKEN_EXPIRED' ||
+      (body?.error === 'Token invalido o expirado' && body?.details === 'jwt expired');
+    if (!expiredAccess || request.authRetryGeneration !== undefined || sent.generation !== readSession().generation) throw error;
 
-    if (sent.accessToken === current.accessToken) {
-      try {
-        await renewAccess(current.generation, current.refreshToken);
-      } catch (renewalError) {
-        if (axios.isAxiosError(renewalError) && renewalError.response?.status === 401 &&
-            readSession().generation === current.generation) clearExpiredSession();
-        throw renewalError;
-      }
-    }
-
+    await renewAccess(sent);
     if (request.replayOnAuthRenewal === false) throw error;
-    request.authRetryGeneration = current.generation;
+    request.authRetryGeneration = sent.generation;
     return api(request);
   },
 );

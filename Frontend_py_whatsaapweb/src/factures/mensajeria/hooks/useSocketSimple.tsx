@@ -2,6 +2,7 @@
 import { useEffect, useRef } from 'react';
 import { Socket } from 'socket.io-client';
 import SocketService from '../../../utils/socket';
+import { readSession } from '../../../shared/auth/session';
 import { markChatAsRead } from '../services/chatService';
 import type { WhatsAppChat, WhatsAppMessage, MessageReplacedEvent } from '../../../shared/types/wsp';
 import { normalizeMessageTimestamp } from '../../../shared/types/wsp';
@@ -40,10 +41,10 @@ export const useSocketSimple = ({ selectedChat, onNewMessage, onChatUpdate, chat
 
   // Conectar Socket.IO al montar (solo si hay token)
   useEffect(() => {
-    const token = localStorage.getItem('accessToken');
+    const { accessToken } = readSession();
 
     // No conectar si no hay token
-    if (!token) {
+    if (!accessToken) {
       console.warn('⚠️ No se puede conectar Socket.IO sin token de autenticación');
       return;
     }
@@ -67,19 +68,10 @@ export const useSocketSimple = ({ selectedChat, onNewMessage, onChatUpdate, chat
       // El socket solo mantiene updates de mensajes y reordenamientos
     };
 
-    // Listener para reconexión
-    const handleReconnect = () => {
-      console.log('🔄 Socket reconectado - ID:', socket.id);
-      // ⚠️ NO emitir 'request-chats' aquí
-      // Los chats se cargan vía /tags/{id}/chats/full en Inicio.tsx
-    };
-
     socket.on('connect', handleConnect);
-    socket.on('reconnect', handleReconnect);
 
     return () => {
       socket.off('connect', handleConnect);
-      socket.off('reconnect', handleReconnect);
       // NO desconectar aquí, ya que otros componentes pueden necesitar el socket
       // Cleanup se maneja en el nivel superior (App.tsx)
     };
@@ -89,9 +81,11 @@ export const useSocketSimple = ({ selectedChat, onNewMessage, onChatUpdate, chat
   useEffect(() => {
     const socket = socketRef.current;
     if (!socket) return;
+    const socketService = SocketService.getInstance();
 
     // Función para manejar mensajes
     const handleMessage = async (incoming: MessageInfo) => {
+      if (socketService.getSocket() !== socket) return;
       // Normalizar timestamp del servidor (s -> ms) usando función robusta
       const normalizedTimestamp = normalizeMessageTimestamp(incoming.timestamp);
       const msg: MessageInfo = { ...incoming, timestamp: normalizedTimestamp };
@@ -119,6 +113,8 @@ export const useSocketSimple = ({ selectedChat, onNewMessage, onChatUpdate, chat
           }
         }
       }
+
+      if (socketService.getSocket() !== socket) return;
 
       // Mostrar notificación solo si NO estoy en ese chat
       if (!msg.fromMe && msg.chatId !== selectedChat && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
@@ -181,6 +177,7 @@ export const useSocketSimple = ({ selectedChat, onNewMessage, onChatUpdate, chat
     // Configurar listener para mensajes reconciliados (v1.34.4+)
     // Cuando falla el envío por bug de markedUnread, el backend reconcilia el mensaje
     const handleMessageReplaced = (event: MessageReplacedEvent) => {
+      if (socketService.getSocket() !== socket) return;
       console.log('🔄 Mensaje reemplazado:', event.tempId, '->', event.realMessage.id);
       
       // Normalizar el timestamp del mensaje real
@@ -201,10 +198,11 @@ export const useSocketSimple = ({ selectedChat, onNewMessage, onChatUpdate, chat
   }, [selectedChat, onNewMessage, onChatUpdate, chats]);
 
   useEffect(() => {
-    if (!selectedChat) return;
+    const socket = socketRef.current;
+    if (!selectedChat || !socket) return;
     const socketService = SocketService.getInstance();
-    socketService.joinRoom(selectedChat);
-    return () => socketService.leaveRoom(selectedChat);
+    socketService.joinRoom(selectedChat, socket);
+    return () => socketService.leaveRoom(selectedChat, socket);
   }, [selectedChat]);
 
   return socketRef.current;

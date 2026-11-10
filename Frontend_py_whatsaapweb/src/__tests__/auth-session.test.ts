@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import test, { type TestContext } from 'node:test';
 import { AxiosError, type InternalAxiosRequestConfig } from 'axios';
 import { api } from '../shared/axios/http';
-import { decideApproval } from '../factures/dashboard/approvals/approvalApi';
+import { readSession, saveSession } from '../shared/auth/session';
+import { logoutSession } from '../factures/auth/services/authService';
+import { currentApprovalSession, decideApproval } from '../factures/dashboard/approvals/approvalApi';
 
 function response(config: InternalAxiosRequestConfig, status: number, data = {}) {
   return { config, status, statusText: String(status), data, headers: {} };
@@ -55,7 +57,7 @@ test('an expired mutation from a previous account never renews or replays as the
   };
   await assert.rejects(api.post('/orders/7/cancel', {}), AxiosError);
   assert.deepEqual(sent, [['/orders/7/cancel', 'Bearer owner-A']]);
-  assert.equal(localStorage.getItem('accessToken'), 'owner-B');
+  assert.equal(readSession().accessToken, 'owner-B');
 });
 
 test('concurrent requests share one renewal and retry with the refreshed token', async (t) => {
@@ -93,8 +95,8 @@ test('renewal completed after an account switch cannot overwrite the new session
   };
   await assert.rejects(api.post('/orders/7/cancel', {}), { code: 'ERR_CANCELED' });
   assert.equal(mutations, 1);
-  assert.equal(localStorage.getItem('accessToken'), 'new-owner');
-  assert.equal(localStorage.getItem('refreshToken'), 'new-refresh');
+  assert.equal(readSession().accessToken, 'new-owner');
+  assert.equal(readSession().refreshToken, 'new-refresh');
 });
 
 test('a late successful response from a previous account is discarded', async (t) => {
@@ -154,7 +156,63 @@ test('an expired approval password request renews the session without replaying 
     throw expired(config);
   };
   await assert.rejects(decideApproval({ approvalId: 'test', decision: 'approved', expectedVersion: 1,
-    reason: 'Reviewed fixture', key: 'approval-attempt' }, 'active-refresh', 'local-password-fixture'), AxiosError);
+    reason: 'Reviewed fixture', key: 'approval-attempt' }, currentApprovalSession()!, 'local-password-fixture'), AxiosError);
   assert.deepEqual(calls, ['/v1/approvals/test/decision', '/auth/refresh']);
-  assert.equal(localStorage.getItem('accessToken'), 'fresh-access');
+  assert.equal(readSession().accessToken, 'fresh-access');
+});
+
+
+test('renewing a legacy session migrates credentials to one record without changing its generation', async (t) => {
+  useAuthFixture(t);
+  session('expired-access', 'active-refresh');
+  const generation = readSession().generation;
+  api.defaults.adapter = async (config) => {
+    if (config.url === '/auth/refresh') {
+      return response(config, 200, { success: true, data: { accessToken: 'fresh-access', refreshToken: 'fresh-refresh' } });
+    }
+    if (config.headers.get('Authorization') === 'Bearer expired-access') throw expired(config);
+    return response(config, 200);
+  };
+  await api.get('/auth/me');
+  assert.equal(readSession().generation, generation);
+  assert.equal(readSession().accessToken, 'fresh-access');
+  assert.equal(readSession().refreshToken, 'fresh-refresh');
+  assert.equal(localStorage.getItem('accessToken'), null);
+  assert.equal(localStorage.getItem('refreshToken'), null);
+  assert.doesNotMatch(localStorage.getItem('auth')!, /expired-access|active-refresh/);
+});
+
+test('a structured revoked response clears only the generation that made the request', async (t) => {
+  useAuthFixture(t);
+  const operator = { id: '1', nombre: 'Fixture', email: 'fixture@example.test', rol: 'ADMIN' as const, idPadre: null };
+  saveSession(operator, 'owner-A', 'refresh-A');
+  api.defaults.adapter = async (config) => {
+    if (config.headers.get('Authorization') === 'Bearer owner-A') {
+      saveSession({ ...operator, id: '2' }, 'owner-B', 'refresh-B');
+    }
+    throw new AxiosError('Revoked', undefined, config, undefined, response(config, 401, { code: 'SESSION_REVOKED' }));
+  };
+  await assert.rejects(api.get('/auth/me'), AxiosError);
+  assert.equal(readSession().accessToken, 'owner-B');
+  assert.equal(readSession().refreshToken, 'refresh-B');
+  await assert.rejects(api.get('/auth/me'), AxiosError);
+  assert.equal(readSession().accessToken, null);
+  assert.equal(localStorage.getItem('auth'), null);
+});
+
+
+test('a pending logout for A cannot clear the replacement session B', async (t) => {
+  useAuthFixture(t);
+  const operator = { id: '1', nombre: 'Fixture', email: 'fixture@example.test', rol: 'ADMIN' as const, idPadre: null };
+  const accountA = saveSession(operator, 'owner-A', 'refresh-A');
+  api.defaults.adapter = async (config) => {
+    assert.equal(config.url, '/auth/logout');
+    assert.equal(config.headers.get('Authorization'), 'Bearer owner-A');
+    assert.deepEqual(JSON.parse(config.data), { refreshToken: 'refresh-A' });
+    saveSession({ ...operator, id: '2' }, 'owner-B', 'refresh-B');
+    return response(config, 200, { success: true });
+  };
+  assert.equal(await logoutSession(accountA.generation), false);
+  assert.equal(readSession().accessToken, 'owner-B');
+  assert.equal(readSession().refreshToken, 'refresh-B');
 });

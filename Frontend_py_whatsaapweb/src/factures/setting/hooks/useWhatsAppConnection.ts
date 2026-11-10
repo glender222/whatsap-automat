@@ -1,3 +1,4 @@
+import { readSession } from "../../../shared/auth/session";
 import { useState, useEffect } from 'react';
 import SocketService from '../../../utils/socket';
 import { WhatsAppService } from '../services/whatsappService';
@@ -77,7 +78,7 @@ export const useWhatsAppConnection = () => {
     console.log('🟢 Iniciando proceso de afiliación...');
     
     // Verificar que haya token
-    const token = localStorage.getItem('accessToken');
+    const token = readSession().accessToken;
     if (!token) {
       alert('Error: No estás autenticado. Inicia sesión primero.');
       return;

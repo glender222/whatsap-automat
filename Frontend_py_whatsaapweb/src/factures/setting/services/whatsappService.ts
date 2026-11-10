@@ -1,3 +1,4 @@
+import { readSession } from "../../../shared/auth/session";
 /**
  * Servicio para manejar operaciones de WhatsApp
  * 
@@ -138,7 +139,7 @@ export class WhatsAppService {
     try {
       console.log('🚀 Solicitando código QR al servidor...');
       
-      const token = localStorage.getItem('accessToken');
+      const token = readSession().accessToken;
       if (!token) {
         return { 
           success: false, 
@@ -230,7 +231,7 @@ export class WhatsAppService {
    */
   static async initializeWhatsApp(): Promise<{ success: boolean; message?: string }> {
     try {
-      const token = localStorage.getItem('accessToken');
+      const token = readSession().accessToken;
       if (!token) {
         console.log('⚠️ Token no disponible, omitiendo inicialización de WhatsApp');
         return { 

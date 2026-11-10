@@ -1,3 +1,4 @@
+import { readSession } from '../../../shared/auth/session';
 import { isAxiosError } from 'axios';
 import { api, type AuthRequestConfig } from '../../../shared/axios/http';
 
@@ -49,7 +50,8 @@ export function isSensitiveApproval(risk: Risk) {
 }
 
 export function currentApprovalSession() {
-  return localStorage.getItem('refreshToken') ?? localStorage.getItem('accessToken');
+  const session = readSession();
+  return session.accessToken || session.refreshToken ? String(session.generation) : null;
 }
 
 export function approvalDate(date: string) {
@@ -125,6 +127,7 @@ export async function decideApproval(intent: DecisionIntent, session: string, pa
   const config: AuthRequestConfig = {
     headers: { 'Idempotency-Key': intent.key },
     replayOnAuthRenewal: password === undefined,
+    sessionGeneration: Number(session),
   };
   const { data } = await api.post<{ approvalId: string; status: Decision; decidedAt: string }>(
     `${endpoint}/${encodeURIComponent(intent.approvalId)}/decision`,

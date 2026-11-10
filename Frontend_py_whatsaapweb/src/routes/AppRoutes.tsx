@@ -1,7 +1,7 @@
-import { lazy, useEffect } from "react";
-import { useSetAtom } from "jotai";
+import { lazy, useEffect, useSyncExternalStore } from "react";
+import { Provider, useSetAtom } from "jotai";
 import { getUserRole, userRoleAtom } from "../jotai/middleware/userRoleAtom";
-import SocketService from "../utils/socket";
+import { readSession, subscribeSession } from "../shared/auth/session";
 import type { ReactNode } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import LandingPage from "../factures/landing/pages/LandingPage";
@@ -13,7 +13,6 @@ import ForgotPasswordPage from "../factures/auth/pages/ForgotPasswordPage";
 
 import DashboardLayout from "../factures/dashboard/components/DashboardLayout";
 import { useAgentState } from "../factures/dashboard/hooks/useAgentState";
-import { authService } from "../factures/auth/services/authService";
 
 const Inicio = lazy(() => import("../factures/mensajeria/Inicio"));
 const Reportes = lazy(() => import("../factures/estadisticos/Reportes"));
@@ -47,26 +46,22 @@ const OperationExecutionsPage = lazy(() => import("../pages/Admin/OperationExecu
 const ApprovalsPage = lazy(() => import("../factures/dashboard/approvals/ApprovalsPage"));
 
 function PrivateRoute({ children, adminOnly = false }: { children: ReactNode; adminOnly?: boolean }) {
-  const isAuth = authService.isAuthenticated();
-  const token = localStorage.getItem('accessToken');
-  if (!isAuth || !token) return <Navigate to="/auth/login" replace />;
+  if (!readSession().accessToken) return <Navigate to="/auth/login" replace />;
   if (adminOnly) {
-    const role = localStorage.getItem('userRole');
+    const role = getUserRole();
     if (role !== 'ADMIN') return <Navigate to="/gestion-web/inicio" replace />;
   }
   return <>{children}</>;
 }
 
+function RealtimeSession() {
+  useAgentState();
+  return null;
+}
+
 function AppRoutesInner() {
   const setUserRole = useSetAtom(userRoleAtom);
-  useAgentState();
-
-  useEffect(() => {
-    setUserRole(getUserRole());
-    if (localStorage.getItem('accessToken')) {
-      SocketService.getInstance().connect();
-    }
-  }, [setUserRole]);
+  useEffect(() => { setUserRole(getUserRole()); }, [setUserRole]);
 
   return (
     <Routes>
@@ -133,9 +128,13 @@ function AppRoutesInner() {
 }
 
 export default function AppRoutes() {
+  const session = useSyncExternalStore(subscribeSession, readSession);
   return (
     <BrowserRouter>
-      <AppRoutesInner />
+      <Provider key={session.generation}>
+        {session.accessToken && <RealtimeSession />}
+        <AppRoutesInner />
+      </Provider>
     </BrowserRouter>
   );
 }
