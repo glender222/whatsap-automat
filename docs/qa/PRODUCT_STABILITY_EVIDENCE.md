@@ -199,6 +199,12 @@ Con las mismas variables exportadas en el frontend, ejecutar `npm run test:e2e -
 - **Después.** Ambas rutas pasan por el ejecutor que aplica los permisos del módulo y la herramienta, el modo de la empresa y del agente, y la simulación sin efectos. El modo Automático autorizado conserva la derivación para cobros y registra el resultado de la herramienta.
 - **Reproducción.** `node --import tsx --test src/test/tools-reales-ia.test.ts src/test/multiagent-routing-p0.test.ts` desde el backend. La prueba comprueba las llamadas al servicio que escribe los tickets y verifica que el fallback del runtime pasa por el mismo ejecutor.
 
+## IA-08. Reclamo duradero de efectos de herramientas
+
+- **Antes.** Dos procesos con la misma clave dejaron dos recibos para un efecto. Matar un proceso después de escribir el recibo y antes de guardar el resultado también causó dos efectos al reiniciar.
+- **Después.** La migración 061 vincula la clave a la empresa, la ejecución, la herramienta y los argumentos. Solo el proceso que confirma el reclamo puede invocar el efecto y guardar el resultado. El broker conserva un resultado incierto para inspección cuando falta el acuse.
+- **Validación.** La regresión con PostgreSQL y procesos separados conserva un recibo por clave en ambas reproducciones. También comprueba permiso revocado, parámetros distintos con la misma clave, acuse perdido antes y después del commit, fallo de PostgreSQL y aislamiento de resultados entre Alfa y Bravo. Los registros históricos se conservan para inspección. [Pruebas, despliegue y recuperación](../../WhatsaapWeb-JS/docs/tool-effect-claims.md).
+
 ## WF-01. Ingreso mientras se revierte una revisión publicada
 
 - **Antes.** CI devolvió `WORKFLOW_NOT_PUBLISHED` durante una reversión válida. La regresión local mantuvo la reversión abierta hasta observar en PostgreSQL que un webhook esperaba su bloqueo. El ingreso falló al intentar fijar la revisión mediante una consulta que también bloqueaba la definición.
@@ -210,5 +216,5 @@ Con las mismas variables exportadas en el frontend, ejecutar `npm run test:e2e -
 | --- | --- |
 | Bandeja en tiempo real | Filtro por etiqueta, reconexión, reorden de webhooks e historial paginado cubiertos en MSG-04 y MSG-05. |
 | Envío y recepción | MSG-06 y MSG-07 cubren envíos humanos y automáticos, adjuntos, entrega incierta y recuperación tras reinicio con Graph local. Falta el recorrido en navegador con dos líneas Meta reales. |
-| Harness IA | IA-03 e IA-04 cubren Studio en verificación. IA-05 e IA-06 comprueban la cuota común y el modo proveedor desde Studio con transporte local. Faltan el piloto con proveedor real y los perfiles de runtime con herramientas. |
+| Harness IA | IA-03 a IA-06 cubren Studio y su cuota. IA-07 e IA-08 cubren autorización de derivaciones y reclamo de efectos del broker. Faltan el piloto con proveedor real, la admisión estricta en el runtime con herramientas y la conciliación de efectos por proveedor. |
 | Flujo operativo y navegación | UX-07 a UX-09 cubren conversación, pedido, pago y regreso, aprobación y conexión. Falta el ensayo con una cuenta autorizada de Mercado Pago y la validación independiente del candidato completo. |
