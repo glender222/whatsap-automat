@@ -1,0 +1,13 @@
+# Reservas de cuota para ejecuciones de IA
+
+`AiQuotaReservationStore` ofrece contabilidad interna para intentos de proveedor con una cota previa de tokens y micro-USD. La migración 048 aplica RLS por tenant. Una fila de `tenant_ai_quotas` serializa reserva, adquisición y liquidación. El saldo disponible descuenta el consumo registrado y las retenciones vigentes. El protocolo aplica ambos límites mensuales aunque `hard_limit_enabled` permita otros comportamientos en el gateway actual.
+
+1. El llamador calcula una cota verificable, elige un UUID estable y genera un hash SHA-256 de la identidad exacta del intento, incluida la revisión y la configuración efectiva. `reserve` permite repetir la misma solicitud. Cualquier cambio de identidad o importe produce conflicto.
+2. `claim` vuelve a comprobar el saldo y entrega el permiso una sola vez. Solo quien lo recibe puede despachar el intento asociado antes de `dispatchBefore`, con timeout acotado. Si el permiso se pierde o el despacho queda incierto, repetir `claim` devuelve `null`. Una reserva sin permiso vence tras cinco minutos o al cerrar el periodo mensual. `release` permite cancelar una reserva sin permiso.
+3. `settle` requiere el permiso y el uso verificado. Registra el uso y el ledger en la misma transacción que libera la retención. La repetición exacta devuelve la referencia del ledger original. Un exceso se registra por su importe real y el resultado incluye `overrun`, que debe invalidar el intento como evidencia de evaluación. Cuando el consumo es incierto, la retención conserva solo su importe hasta reconciliación o fin del periodo. Si el uso llega después, el ledger conserva el periodo original y el nuevo periodo mantiene su propio saldo.
+
+## Condición de activación
+
+El store aún carece de llamadores de producción. La simulación sigue usando fixtures y la publicación sigue bloqueada. Antes de habilitar una evaluación con proveedor, cada entrada de `ModelGateway` que comparta ese saldo, incluida la prueba de conexión, debe reservar una cota con este protocolo o quedar excluida durante la operación. El gateway actual comprueba gasto acumulado antes del despacho y lo contabiliza después, de modo que puede competir con una retención si se activa el store en paralelo. El despliegue del protocolo debe cubrir también las instancias antiguas del gateway que sigan atendiendo peticiones.
+
+El runner necesitará además límites por revisión y suite, modelos con cotas verificables, una política de errores que distinga uso conocido de entrega incierta y un mecanismo autorizado de reconciliación. Una liquidación únicamente confirma la contabilidad del intento. La evidencia de publicación depende del resultado completo de la evaluación de servidor.

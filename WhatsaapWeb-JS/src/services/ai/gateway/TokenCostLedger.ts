@@ -1,4 +1,4 @@
-import { tenantScopedUoW, TenantScopedUoW } from '../../../db/TenantScopedUoW';
+import { tenantScopedUoW, TenantScopedUoW, type TenantScopedOptions } from '../../../db/TenantScopedUoW';
 import {
   TokenLedgerEntryV1,
   CreateTokenLedgerEntryCommandV1,
@@ -12,7 +12,10 @@ export class TokenCostLedger {
    * Records an immutable entry in the AI token and cost ledger.
    * Returns the database surrogate primary key.
    */
-  async record(entry: CreateTokenLedgerEntryCommandV1 & { id?: string | number }): Promise<number> {
+  async record(
+    entry: CreateTokenLedgerEntryCommandV1 & { id?: string | number },
+    options?: TenantScopedOptions
+  ): Promise<number> {
     const tenantIdNum = Number(entry.tenantId);
     return this.uow.run(tenantIdNum, async (client) => {
       const res = await client.query(
@@ -42,7 +45,7 @@ export class TokenCostLedger {
         ]
       );
       return Number(res.rows[0].id);
-    });
+    }, options);
   }
 
   /**
