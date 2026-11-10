@@ -11,7 +11,7 @@ Object.assign(process.env, {
   META_TOKEN_ENCRYPTION_KEY: 'meta-inbound-crash-fixture-key-000000000000',
   META_APP_SECRET: 'meta-inbound-crash-fixture-signature',
   META_GRAPH_VERSION: 'v25.0',
-  META_WA_PHONE_NUMBER_ID: '178000000000001',
+  META_WA_PHONE_NUMBER_ID: process.env.META_INBOUND_CRASH_FIXTURE_PHONE_ID || '178000000000001',
   META_WABA_ID: '178000000000002',
   META_WA_ACCESS_TOKEN: 'meta-inbound-crash-fixture-token',
   META_WEBHOOK_VERIFY_TOKEN: 'meta-inbound-crash-fixture-verify',

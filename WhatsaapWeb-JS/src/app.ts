@@ -374,6 +374,10 @@ export class App {
 
       this.server.listen(config.server.port, config.server.host, () => {
         this.server.once('close', startOrderReservationExpiry(pool));
+        const stopMetaInbound = this.whatsappService.startMetaInboundWorker();
+        this.server.once('close', () => {
+          void stopMetaInbound().catch(() => console.error('No se pudo cerrar el worker de mensajes entrantes'));
+        });
         console.log(`🚀 API + Socket.IO corriendo en http://${config.server.host}:${config.server.port}`);
         console.log(`📱 WhatsApp provider: ${this.whatsappService.provider}`);
         console.log(`🔐 JWT WhatsApp API: ${config.security.whatsappApiRequireJwt ? 'activado' : 'desactivado en desarrollo'}`);

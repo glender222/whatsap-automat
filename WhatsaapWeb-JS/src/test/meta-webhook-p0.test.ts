@@ -324,7 +324,7 @@ describe('P0 seguridad del webhook Meta', () => {
     assert.equal(withCompany.mock.calls.length, 0);
   });
 
-  test('un wamid duplicado no reejecuta agente, handoff ni envio', async () => {
+  test('el webhook solo persiste y el worker ejecuta el handoff con trazas acotadas', async () => {
     const inboundText = 'mensaje privado del cliente que no debe aparecer en trazas';
     const outboundText = 'respuesta privada que tampoco debe aparecer en trazas';
     const seen = new Set<string>();
@@ -347,7 +347,7 @@ describe('P0 seguridad del webhook Meta', () => {
       rounds: 2,
       delivery: null,
     }));
-    const sendAgentReply = mock.fn(async () => undefined);
+    const sendAgentReply = mock.fn(async () => ({ status: 'completed' }));
     const withCompany = mock.fn(() => ({
       persistInboundMessage,
       persistStatus: mock.fn(async () => ({})),
@@ -377,9 +377,19 @@ describe('P0 seguridad del webhook Meta', () => {
     assert.equal(first.processed, 1);
     assert.equal(second.processed, 1);
     assert.equal(persistInboundMessage.mock.calls.length, 2);
+    assert.equal(processInbound.mock.calls.length, 0);
+    assert.equal(sendAgentReply.mock.calls.length, 0);
+    assert.deepEqual(withCompany.mock.calls.map((call: any) => call.arguments[0]), [42, 42]);
+
+    const authority = { isCurrent: async () => true, signal: new AbortController().signal };
+    const work = {
+      jobId: 'durable-fixture', companyId: 42, conversationId: '321', messageId: '654', phoneNumberId: '100001',
+      inboundProviderMessageId: 'wamid.dedupe',
+      message: { id: 'wamid.dedupe', from: '51999999999', type: 'text', text: { body: inboundText } },
+    };
+    assert.deepEqual(await service.processMetaInbound(work, authority), { status: 'completed' });
     assert.equal(processInbound.mock.calls.length, 1);
     assert.equal(sendAgentReply.mock.calls.length, 1);
-    assert.deepEqual(withCompany.mock.calls.map((call: any) => call.arguments[0]), [42, 42]);
 
     const completedCall = runtimeLog.mock.calls.find(
       (call: any) => call.arguments[0]?.stage === 'agent_runtime_completed'
@@ -401,20 +411,32 @@ describe('P0 seguridad del webhook Meta', () => {
   test('traza segura enlaza wamid inbound con wamid outbound', async () => {
     const reply = 'respuesta completa que solo debe enviarse, no loguearse';
     const runtimeLog = mock.fn(async () => undefined);
+    const sendAgentText = mock.fn(async () => ({
+      providerMessageId: 'wamid.outbound', accepted: true, messageId: 43, deliveryState: 'provider_accepted',
+    }));
     const service = Object.create(WhatsAppService.prototype) as WhatsAppService;
     Object.assign(service, {
       provider: 'meta-cloud',
       metaAccountStore: { recordLastError: mock.fn(async () => undefined) },
       agentService: { logRuntimeEvent: runtimeLog },
-      ensureFreeFormWindowOpen: mock.fn(async () => undefined),
+      metaStore: null,
       resolveProductCardMedia: mock.fn(async () => null),
-      sendMessage: mock.fn(async () => ({ id: 'wamid.outbound' })),
+      conversationSender: { sendAgentText },
     });
 
-    await (service as any).sendAgentReply(42, 7, '51999999999', 'wamid.inbound', {
+    const authority = { isCurrent: async () => true, signal: new AbortController().signal };
+    const outcome = await (service as any).sendAgentReply({
+      companyId: 42, conversationId: '321', messageId: '654', phoneNumberId: '100001',
+      inboundProviderMessageId: 'wamid.inbound',
+    }, authority, '51999999999', 7, {
       reply,
       action: 'handoff',
       confidence: 0.91,
+    });
+    assert.deepEqual(outcome, { status: 'completed' });
+    assert.deepEqual(sendAgentText.mock.calls[0].arguments[0], {
+      tenantId: 42, conversationId: 321, inboundMessageId: 654, phoneNumberId: '100001',
+      effect: 'reply', authority, text: reply,
     });
 
     const successCall = runtimeLog.mock.calls.find(

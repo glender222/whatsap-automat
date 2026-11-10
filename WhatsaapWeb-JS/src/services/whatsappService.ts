@@ -6,14 +6,18 @@ import type { Server } from 'socket.io';
 import { MetaCloudClient, MetaMediaMessageType } from './whatsapp/meta/MetaCloudClient';
 import { MetaAccountStore } from './whatsapp/meta/MetaAccountStore';
 import { MetaInboxStore, type MetaMediaAttachment } from './whatsapp/meta/MetaInboxStore';
+import { MetaInboundWorker, type MetaInboundAuthority, type MetaInboundExecution, type MetaInboundOutcome } from './whatsapp/meta/MetaInboundWorker';
+import type { MetaInboundWorkRepository } from './whatsapp/meta/MetaInboundWorkRepository';
+import { ConversationSendError, conversationSendService, type AgentSendAnchor, type AgentSendResult } from './conversations/ConversationSendService';
 import { withCompatibleVideo } from './whatsapp/VideoTranscode';
 import { removeTemporaryUpload } from '../shared/temporaryUpload';
 import AgentService from './ai/AgentService';
 import config from '../config/index';
 import pool from '../config/database';
+import { queryInTenantScope } from '../db/TenantScopedUoW';
 import type { AgentRuntimeLogInput } from '../modules/ai/domain/runtime.types';
 import { AiRuntimeOrchestrator, getAiRuntimeOrchestrator } from '../modules/ai';
-import type { ProductCardSender, ProductCardSendPayload } from '../modules/ai';
+import type { ProductCardSendPayload } from '../modules/ai';
 import { emitDashboard, emitConversation } from '../sockets/socketEmitter';
 
 
@@ -86,6 +90,7 @@ export class WhatsAppService {
   readonly metaStore: MetaInboxStore | null;
   readonly metaAccountStore: MetaAccountStore | null;
   private readonly agentService: AgentService;
+  private readonly conversationSender = conversationSendService;
   private conversationCore: any;
 
   constructor() {
@@ -647,7 +652,7 @@ export class WhatsAppService {
             inboundProviderMessageId: message?.id,
             stage: 'webhook_message_received',
             summary: persisted?.duplicate
-              ? 'Mensaje inbound duplicado recibido desde Meta; no se reejecuta el agente.'
+              ? 'Mensaje inbound duplicado recibido desde Meta.'
               : 'Mensaje inbound recibido desde Meta y persistido.',
             status: persisted?.duplicate ? 'skipped' : 'ok',
             payload: {
@@ -656,9 +661,6 @@ export class WhatsAppService {
               hasText: Boolean(message?.text?.body || message?.button?.text || message?.interactive),
             },
           });
-          if (!persisted?.duplicate) {
-            await this.maybeAutoReplyWithAgent(companyId, message, persisted);
-          }
         }
 
         for (const status of value.statuses || []) {
@@ -687,18 +689,30 @@ export class WhatsAppService {
     return getAiRuntimeOrchestrator(pool);
   }
 
-  private async maybeAutoReplyWithAgent(companyId: number, message: any, persisted: any = null): Promise<void> {
-    const inboundProviderMessageId = message?.id ? String(message.id) : null;
-    const chatId = message?.from ? String(message.from) : '';
+  startMetaInboundWorker(repository?: MetaInboundWorkRepository): () => Promise<void> {
+    if (this.provider !== 'meta-cloud') return async () => {};
+    const worker = new MetaInboundWorker({
+      repository,
+      execute: (work, authority) => this.processMetaInbound(work, authority),
+      onError: (error) => console.error('No se pudo procesar el trabajo de mensajes entrantes', {
+        code: error instanceof Error ? error.name : 'META_INBOUND_WORKER_ERROR',
+      }),
+    });
+    worker.start();
+    return () => worker.stop();
+  }
+
+  async processMetaInbound(work: MetaInboundExecution, authority: MetaInboundAuthority): Promise<MetaInboundOutcome> {
+    const { companyId, message, inboundProviderMessageId } = work;
+    const chatId = typeof message.from === 'string' ? message.from : '';
     let agentId: number | null = null;
 
     try {
-      const text = message?.text?.body || message?.button?.text || message?.interactive?.button_reply?.title || '';
-      const to = chatId;
-      if (!text || !to) {
+      const text: unknown = message?.text?.body || message?.button?.text || message?.interactive?.button_reply?.title;
+      if (typeof text !== 'string' || !text.trim() || !chatId) {
         await this.logAgentRuntime({
           companyId,
-          chatId: to,
+          chatId,
           inboundProviderMessageId,
           stage: 'agent_skipped_unsupported_message',
           level: 'warn',
@@ -706,47 +720,53 @@ export class WhatsAppService {
           summary: 'Mensaje inbound sin texto util para el agente automatico.',
           payload: { messageType: message?.type || 'unknown' },
         });
-        return;
+        return { status: 'skipped', code: 'META_INBOUND_UNSUPPORTED' };
       }
 
-      const isPaused = await this.agentService.isConversationPaused(companyId, to);
+      const isPaused = await this.agentService.isConversationPaused(companyId, chatId);
       if (isPaused) {
         await this.logAgentRuntime({
           companyId,
-          chatId: to,
+          chatId,
           inboundProviderMessageId,
           stage: 'agent_skipped_paused',
           level: 'info',
           status: 'skipped',
           summary: 'IA pausada en este chat por un empleado. No se envia respuesta automatica.',
         });
-        return;
+        return { status: 'skipped', code: 'AGENT_REPLY_DISABLED' };
       }
 
       await this.logAgentRuntime({
         companyId,
-        chatId: to,
+        chatId,
         inboundProviderMessageId,
         stage: 'agent_runtime_started',
         summary: 'Iniciando runtime de tools reales IA (router + loop).',
         payload: { messageType: message?.type || 'unknown' },
       });
 
-      const history = await this.agentService.getConversationContext(companyId, to, {
+      const history = await this.agentService.getConversationContext(companyId, chatId, {
         windowHours: 24,
         limit: 12,
         excludeProviderMessageId: inboundProviderMessageId,
+        inbound: { conversationId: Number(work.conversationId), messageId: Number(work.messageId) },
       });
 
+      authority.signal.throwIfAborted();
+      if (!await authority.isCurrent()) return { status: 'uncertain', code: 'AGENT_WORK_EXPIRED' };
       const orchestrator = this.getRuntimeOrchestrator();
       const result = await orchestrator.processInbound({
         companyId,
-        chatId: to,
+        chatId,
+        conversationId: Number(work.conversationId),
         message: text,
         history: history.map((h) => ({ fromMe: h.fromMe, body: h.body })),
         inboundProviderMessageId,
-        sender: this,
+        signal: authority.signal,
+        sender: { sendProductCard: (payload) => this.sendProductCard(work, authority, payload) },
       });
+      authority.signal.throwIfAborted();
 
       agentId = result.agentId;
       const toolTrace = sanitizeToolTrace(result.toolResults);
@@ -754,7 +774,7 @@ export class WhatsAppService {
       await this.logAgentRuntime({
         companyId,
         agentId,
-        chatId: to,
+        chatId,
         inboundProviderMessageId,
         stage: 'agent_runtime_completed',
         status: ['auto_reply', 'suggest', 'handoff'].includes(result.action) ? 'ok' : 'skipped',
@@ -773,33 +793,14 @@ export class WhatsAppService {
         },
       });
 
-      if (result.action === 'auto_reply' && result.reply) {
-        if (await this.agentService.isConversationPaused(companyId, to)) {
-          await this.logAgentRuntime({
-            companyId, agentId, chatId: to, inboundProviderMessageId,
-            stage: 'agent_skipped_paused', status: 'skipped',
-            summary: 'La IA se pausó antes de enviar la respuesta automática.',
-          });
-          return;
-        }
-        await this.sendAgentReply(companyId, agentId, to, inboundProviderMessageId, {
-          reply: result.reply,
-          action: result.action,
-          confidence: result.confidence,
-          delivery: result.delivery,
-        });
-      } else if (result.action === 'handoff' && result.reply) {
-        await this.sendAgentReply(companyId, agentId, to, inboundProviderMessageId, {
-          reply: result.reply,
-          action: result.action,
-          confidence: result.confidence,
-          delivery: result.delivery,
-        });
-      } else if (result.action === 'suggest') {
+      if ((result.action === 'auto_reply' || result.action === 'handoff') && result.reply) {
+        return await this.sendAgentReply(work, authority, chatId, agentId, result);
+      }
+      if (result.action === 'suggest') {
         await this.logAgentRuntime({
           companyId,
           agentId,
-          chatId: to,
+          chatId,
           inboundProviderMessageId,
           stage: 'agent_suggestion_emitted',
           status: 'ok',
@@ -807,17 +808,21 @@ export class WhatsAppService {
           payload: { intent: result.route, action: result.action },
         });
       }
+      return { status: 'completed' };
     } catch (error: any) {
-      const safeErrorCode = String(error?.code || 'AGENT_RUNTIME_FAILED');
+      const safeErrorCode = error instanceof ConversationSendError ? error.reasonCode : 'AGENT_RUNTIME_FAILED';
+      const skipped = error instanceof ConversationSendError && (error.code === 'POLICY_DENIED' ||
+        ['SERVICE_WINDOW_CLOSED', 'CONVERSATION_CLOSED', 'DELIVERY_UNRESOLVED', 'SENDING_ACCOUNT_UNAVAILABLE'].includes(safeErrorCode));
       await this.logAgentRuntime({
         companyId,
         agentId,
         chatId,
         inboundProviderMessageId,
-        stage: 'meta_send_failed',
-        level: 'error',
-        status: 'failed',
-        summary: 'Fallo el flujo de tools reales IA antes de persistir el outbound.',
+        stage: skipped ? 'meta_send_skipped' : 'meta_runtime_unconfirmed',
+        level: skipped ? 'warn' : 'error',
+        status: skipped ? 'skipped' : 'failed',
+        summary: skipped ? 'El estado de la conversación impidió el envío automático.'
+          : 'La ejecución automática no pudo confirmarse.',
         errorCode: safeErrorCode,
         errorMessage: error?.userMessage || 'Fallo el runtime automatico de WhatsApp.',
         payload: {
@@ -829,7 +834,7 @@ export class WhatsAppService {
           metaTraceId: error?.metaTraceId || null,
         },
       });
-      await this.metaAccountStore?.recordLastError(
+      if (!skipped) await this.metaAccountStore?.recordLastError(
         companyId,
         error?.userMessage || safeErrorCode
       ).catch(() => undefined);
@@ -838,174 +843,101 @@ export class WhatsAppService {
         providerStatusCode: error?.providerStatusCode || null,
         metaErrorCode: error?.metaErrorCode || null,
       });
+      return { status: skipped ? 'skipped' : 'uncertain', code: safeErrorCode };
     }
   }
 
-  async sendProductCard(payload: ProductCardSendPayload): Promise<{ providerMessageId: string | null }> {
-    const filename = path.basename(payload.primaryImageUrl || '');
-    if (!filename) throw new Error('image_url_invalid');
-    const sourcePath = path.join(config.whatsapp.uploadDir, 'commercial-items', filename);
-    if (!existsSync(sourcePath)) throw new Error('image_not_found');
-    const tempDir = path.join(config.whatsapp.uploadDir, 'agent-product-cards');
-    await fs.mkdir(tempDir, { recursive: true });
-    const tempPath = path.join(tempDir, `${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${filename}`);
-    await fs.copyFile(sourcePath, tempPath);
-    const stat = await fs.stat(tempPath);
-    const media = {
-      path: tempPath,
-      mimetype: mimeFromImageFilename(filename),
-      originalname: filename,
-      size: stat.size,
+  private agentSendAnchor(work: MetaInboundExecution, authority: MetaInboundAuthority, effect: AgentSendAnchor['effect']): AgentSendAnchor {
+    return {
+      tenantId: work.companyId, conversationId: Number(work.conversationId), inboundMessageId: Number(work.messageId),
+      phoneNumberId: work.phoneNumberId, effect, authority,
     };
+  }
+
+  private async sendProductCard(
+    work: MetaInboundExecution, authority: MetaInboundAuthority, payload: ProductCardSendPayload,
+  ): Promise<{ providerMessageId: string | null }> {
+    if (payload.companyId !== work.companyId || payload.chatId !== work.message.from) {
+      throw new Error('Product card does not belong to the inbound work');
+    }
+    const card = await this.resolveProductCardMedia(work.companyId, payload.commercialItemId);
+    if (!card) throw new Error('Product card is unavailable');
     try {
-      const caption = payload.caption || payload.productName || '';
-      await this.ensureFreeFormWindowOpen(payload.companyId, payload.chatId);
-      const sent = await this.sendMessage(payload.chatId, caption, media, { companyId: payload.companyId });
-      return { providerMessageId: sent?.id || null };
+      const result = await this.conversationSender.sendAgentAttachment({
+        ...this.agentSendAnchor(work, authority, 'card:' + card.productId as `card:${string}`),
+        file: card.media, caption: this.fitImageCaption(payload.caption || payload.productName), forceDocument: false,
+      });
+      await this.notifyAgentDelivery(work.companyId, payload.chatId, result);
+      return { providerMessageId: result.accepted && result.deliveryState !== 'failed' ? result.providerMessageId : null };
     } finally {
-      await fs.unlink(tempPath).catch(() => undefined);
+      await removeTemporaryUpload(card.media.path);
     }
   }
 
   private async sendAgentReply(
-    companyId: number,
+    work: MetaInboundExecution,
+    authority: MetaInboundAuthority,
+    chatId: string,
     agentId: number | null,
-    to: string,
-    inboundProviderMessageId: string | null,
-    result: { reply: string; action: string; confidence: number; detectedOrder?: any; delivery?: any }
-  ): Promise<void> {
+    result: Pick<Awaited<ReturnType<AiRuntimeOrchestrator['processInbound']>>, 'reply' | 'action' | 'confidence' | 'delivery'>,
+  ): Promise<MetaInboundOutcome> {
+    const { companyId, inboundProviderMessageId } = work;
+    const logContext = { companyId, agentId, chatId, inboundProviderMessageId, confidence: result.confidence,
+      action: result.action === 'none' ? null : result.action };
     await this.logAgentRuntime({
-      companyId,
-      agentId,
-      chatId: to,
-      inboundProviderMessageId,
-      stage: 'meta_send_started',
-      summary: 'Enviando respuesta automatica a Meta Cloud API.',
-      confidence: result.confidence,
-      action: result.action as AgentRuntimeLogInput['action'],
-      payload: { action: result.action },
+      ...logContext, stage: 'meta_send_started', summary: 'Iniciando el envío de la respuesta automática.',
     });
 
+    const productId = result.delivery?.productCards?.[0]?.commercialItemId;
+    const card = productId ? await this.resolveProductCardMedia(companyId, productId) : null;
+    const anchor = this.agentSendAnchor(work, authority, 'reply');
+    let sent: AgentSendResult;
     try {
-      await this.ensureFreeFormWindowOpen(companyId, to);
-    } catch (error: any) {
-      await this.logAgentRuntime({
-        companyId,
-        agentId,
-        chatId: to,
-        inboundProviderMessageId,
-        stage: 'meta_send_skipped_service_window_closed',
-        level: 'warn',
-        status: 'skipped',
-        summary: 'Ventana de 24h cerrada. La respuesta final queda registrada internamente y no se envia al cliente.',
-        payload: {
-          action: result.action,
-          code: error?.code || 'SERVICE_WINDOW_CLOSED',
-        },
-      });
-      return;
+      sent = card ? await this.conversationSender.sendAgentAttachment({
+        ...anchor, file: card.media, caption: this.fitImageCaption(result.reply), forceDocument: false,
+      }) : await this.conversationSender.sendAgentText({ ...anchor, text: result.reply });
+    } finally {
+      if (card) await removeTemporaryUpload(card.media.path);
     }
-    const productCardMedia = await this.resolveProductCardMedia(companyId, result.delivery, result.detectedOrder);
-    let sent;
-    if (productCardMedia) {
-      await this.logAgentRuntime({
-        companyId,
-        agentId,
-        chatId: to,
-        inboundProviderMessageId,
-        stage: 'agent_tool_message_send_product_card',
-        summary: 'Enviando ficha de producto con imagen principal.',
-        toolName: 'message.sendProductCard',
-        toolResultStatus: 'started',
-        payload: {
-          productId: productCardMedia.productId,
-        },
-      });
-      try {
-        sent = await this.sendMessage(to, this.fitImageCaption(result.reply), productCardMedia.media, { companyId });
-      } finally {
-        if (productCardMedia.media?.path) await fs.unlink(productCardMedia.media.path).catch(() => undefined);
-      }
-      await this.logAgentRuntime({
-        companyId,
-        agentId,
-        chatId: to,
-        inboundProviderMessageId,
-        outboundProviderMessageId: sent?.id || null,
-        stage: 'agent_tool_message_send_product_card_done',
-        summary: 'Ficha de producto enviada.',
-        toolName: 'message.sendProductCard',
-        toolResultStatus: 'ok',
-        payload: {
-          productId: productCardMedia.productId,
-          providerMessageId: sent?.id || null,
-        },
-      });
-    } else {
-      sent = await this.sendMessage(to, result.reply, null, { companyId });
+    await this.notifyAgentDelivery(companyId, chatId, sent);
+    if (sent.deliveryState === 'unknown_delivery') {
+      await this.logAgentRuntime({ ...logContext, stage: 'meta_send_unconfirmed', level: 'warn', status: 'failed',
+        summary: 'La respuesta tiene un intento persistido y su entrega sigue sin confirmarse.' });
+      return { status: 'uncertain', code: 'META_REPLY_DELIVERY_UNCONFIRMED' };
+    }
+    if (!sent.accepted || !sent.providerMessageId || sent.deliveryState === 'failed') {
+      await this.logAgentRuntime({ ...logContext, stage: 'meta_send_failed', level: 'warn', status: 'failed',
+        summary: 'El envío de la respuesta automática terminó sin entrega confirmada.' });
+      return { status: 'skipped', code: 'META_REPLY_FAILED' };
     }
     await this.logAgentRuntime({
-      companyId,
-      agentId,
-      chatId: to,
-      inboundProviderMessageId,
-      outboundProviderMessageId: sent?.id || null,
-      stage: 'meta_send_success',
-      summary: 'Meta acepto la respuesta automatica y se persistio el mensaje saliente.',
-      payload: { providerMessageId: sent?.id || null },
+      ...logContext, outboundProviderMessageId: sent.providerMessageId, stage: 'meta_send_success',
+      summary: 'Meta aceptó la respuesta automática y se persistió el mensaje saliente.',
+      payload: { providerMessageId: sent.providerMessageId, ...(card && { productId: card.productId }) },
     });
-
-    emitDashboard('agent:auto_reply_sent', {
-      companyId,
-      chatId: to,
-      agentId,
-      messageId: sent?.id || null,
-      reply: result.reply,
-      confidence: result.confidence,
-    });
-    emitConversation(companyId, to, 'agent:auto_reply_sent', {
-      chatId: to,
-      agentId,
-      messageId: sent?.id || null,
-      reply: result.reply,
-      confidence: result.confidence,
-    });
-    await this.metaAccountStore?.recordLastError(companyId, null);
+    const notification = { companyId, chatId, agentId, messageId: sent.providerMessageId,
+      reply: result.reply, confidence: result.confidence };
+    emitDashboard(companyId, 'agent:auto_reply_sent', notification);
+    emitConversation(companyId, chatId, 'agent:auto_reply_sent', notification);
+    await this.metaAccountStore?.recordLastError(companyId, null).catch(() => undefined);
+    return { status: 'completed' };
   }
 
-  private async ensureFreeFormWindowOpen(companyId: number, chatId: string): Promise<void> {
-    if (this.provider !== 'meta-cloud') return;
-    const store = this.getMetaStore(companyId);
-    if (!store) return;
-    const canSend = await store.canSendFreeForm(chatId);
-    if (canSend) return;
-    const error = new Error('La ventana de servicio de 24 horas esta cerrada. Usa una plantilla aprobada de Meta.') as Error & {
-      statusCode?: number;
-      code?: string;
-      userMessage?: string;
-      action?: string;
-    };
-    error.statusCode = 409;
-    error.code = 'SERVICE_WINDOW_CLOSED';
-    error.userMessage = 'La ventana de 24 horas esta cerrada.';
-    error.action = 'No se autoenvia respuesta libre ni ficha de producto; usa una plantilla aprobada o handoff humano.';
-    throw error;
+  private async notifyAgentDelivery(companyId: number, chatId: string, sent: AgentSendResult): Promise<void> {
+    if (sent.messageId === null) return;
+    if (sent.accepted && sent.deliveryState !== 'failed') {
+      await this.getMetaStore(companyId)?.publishCanonicalOutbound(chatId, sent.messageId).catch(() => undefined);
+    }
+    emitConversation(companyId, chatId, 'conversation.delivery_changed', { chatId });
   }
 
-  private async resolveProductCardMedia(companyId: number, delivery: any, detectedOrder: any): Promise<{
+  private async resolveProductCardMedia(companyId: number, productId: number): Promise<{
     productId: number;
     imageUrl: string;
     media: { path: string; mimetype: string; originalname: string; size: number };
   } | null> {
-    const firstDeliveryCard = Array.isArray(delivery?.productCards)
-      ? delivery.productCards.find((item: any) => Number(item?.commercialItemId) > 0)
-      : null;
-    const firstItem = Array.isArray(detectedOrder?.items)
-      ? detectedOrder.items.find((item: any) => Number(item?.commercialItemId) > 0)
-      : null;
-    const productId = Number(firstDeliveryCard?.commercialItemId || firstItem?.commercialItemId || 0);
-    if (!productId) return null;
-    const result = await pool.query(
+    if (!Number.isSafeInteger(productId) || productId <= 0) return null;
+    const result = await queryInTenantScope(pool, companyId,
       `SELECT p.id,
               COALESCE(
                 (
@@ -1018,7 +950,7 @@ export class WhatsAppService {
                 p.image_url
               ) AS image_url
        FROM products p
-       WHERE p.company_id = $1 AND p.id = $2 AND p.status = 'active'
+       WHERE p.company_id = $1 AND p.id = $2 AND p.status = 'active' AND p.ai_enabled
        LIMIT 1`,
       [companyId, productId]
     );
@@ -1026,6 +958,8 @@ export class WhatsAppService {
     if (!imageUrl.startsWith('/uploads/commercial-items/')) return null;
     const filename = path.basename(imageUrl);
     if (!filename) return null;
+    const mimetype = mimeFromImageFilename(filename);
+    if (mimetype !== 'image/jpeg' && mimetype !== 'image/png') return null;
     const sourcePath = path.join(config.whatsapp.uploadDir, 'commercial-items', filename);
     if (!existsSync(sourcePath)) return null;
     const tempDir = path.join(config.whatsapp.uploadDir, 'agent-product-cards');
@@ -1038,7 +972,7 @@ export class WhatsAppService {
       imageUrl,
       media: {
         path: tempPath,
-        mimetype: mimeFromImageFilename(filename),
+        mimetype,
         originalname: filename,
         size: stat.size,
       },

@@ -6,6 +6,8 @@ import pool from '../../config/database';
 import createMetaWebhookRoutes from '../../routes/metaWebhookRoutes';
 import WhatsAppService from '../../services/whatsappService';
 import { MetaInboxStore } from '../../services/whatsapp/meta/MetaInboxStore';
+import { MetaInboundWorkRepository } from '../../services/whatsapp/meta/MetaInboundWorkRepository';
+import type { OrchestratorInput } from '../../modules/ai/application/AiRuntimeOrchestrator';
 
 async function main() {
   assert.equal(process.env.META_INBOUND_CRASH_TEST, '1');
@@ -48,8 +50,8 @@ async function main() {
   Object.assign(service, {
     metaStore: new CommitBoundaryStore({ companyId: tenantId }),
     getRuntimeOrchestrator: () => ({
-      processInbound: async ({ inboundProviderMessageId }: { inboundProviderMessageId: string }) => {
-        process.send!({ type: 'runtime-entered', inboundProviderMessageId });
+      processInbound: async ({ inboundProviderMessageId, history }: OrchestratorInput) => {
+        process.send!({ type: 'runtime-entered', inboundProviderMessageId, history });
         return {
           routerMissing: false, route: 'ventas', agentId: null, action: 'auto_reply',
           reply: `Fixture reply for ${inboundProviderMessageId}`, confidence: 1,
@@ -67,13 +69,22 @@ async function main() {
   app.use((error: { statusCode?: number; code?: string }, _req: Request, res: Response, _next: NextFunction) => {
     res.status(error.statusCode || 500).json({ code: error.code || 'FIXTURE_HTTP_FAILED' });
   });
-  const server = app.listen(port, '127.0.0.1', () => process.send!({ type: 'ready' }));
+  let stopWorker: (() => Promise<void>) | undefined;
+  const server = app.listen(port, '127.0.0.1', () => {
+    if (process.env.META_INBOUND_CRASH_RUN_WORKER === '1') {
+      class FixtureWorkRepository extends MetaInboundWorkRepository {
+        override async getTenantIds() { return [tenantId]; }
+      }
+      stopWorker = service.startMetaInboundWorker(new FixtureWorkRepository());
+    }
+    process.send!({ type: 'ready' });
+  });
   server.on('error', () => {
     process.send!({ type: 'fixture-error', code: 'FIXTURE_LISTEN_FAILED' });
     process.exitCode = 1;
   });
   process.on('SIGTERM', () => {
-    server.close(() => { void pool.end().then(() => process.exit(0)); });
+    server.close(() => { void Promise.resolve(stopWorker?.()).then(() => pool.end()).then(() => process.exit(0)); });
     server.closeIdleConnections();
   });
 }

@@ -52,7 +52,7 @@ La cancelación es cooperativa: un callback que ignore el signal puede seguir ej
 
 ## Composición
 
-La composición de `WhatsAppService`/App debe quitar la ejecución inline del webhook y pasar exclusivamente por `MetaInboundWorker({ execute })`. No se deben habilitar los dos caminos a la vez. El callback debe devolver un resultado explícito; no tratar como éxito un método que haya absorbido internamente una excepción de envío.
+El webhook confirma la recepción después de persistirla. `App` arranca `MetaInboundWorker` al escuchar conexiones y lo detiene al cerrar el servidor. El callback procesa el texto con el historial anterior al inbound de la misma conversación. Descarta respuestas del modelo que llegan después de vencer el turno. Los envíos automáticos pasan por una reserva que comprueba la autoridad del trabajo, la línea y el estado de la conversación. [Reserva y conciliación de envíos](../../WhatsaapWeb-JS/docs/qa/META_AGENT_SEND_CLAIMS.md).
 
 `start()` inicia polling, `stop()` cancela y espera el trabajo local; `processBatch(companyId?)` permite un pase controlado en pruebas. La migración 058 añade un registro de discovery con IDs de empresa y políticas RLS, más índices de polling/orden/unicidad. No abre acceso global al contenido del outbox.
 
@@ -69,12 +69,13 @@ META_INBOUND_CRASH_TEST=1 node --import tsx --test \
 
 Los tests de procesos emplean IPC, observación desde otra conexión y SIGKILL, sin depender de un sleep para suponer el commit. El servidor de efectos local usa `127.0.0.1:34383`; la reproducción HTTP original usa 34380/34381. Para avanzar un lease tras matar el proceso solo se cambia el deadline de esa fila de fixture, nunca el reloj del servidor.
 
-- Caída después del commit inbound: un mensaje, un trabajo estable tras redelivery.
+- Caída después del commit inbound: el reinicio recupera el trabajo pendiente. La repetición del webhook conserva el mismo UUID.
+- El servidor Graph local recibe el POST de respuesta y el proceso muere antes del acuse. Otro reinicio conserva un solo envío. Un recibo firmado concilia la entrega y el inbound siguiente vuelve a procesarse.
 - Caída con claim `processing`: un nuevo proceso recupera el trabajo y produce un efecto.
 - Caída tras reservar `dispatched` antes del callback: cero efectos, estado incierto, ningún replay.
 - Caída tras efecto HTTP aceptado: un efecto, estado incierto; dos reinicios posteriores no lo repiten.
 - PostgreSQL verifica rollback, dedupe concurrente, aislamiento, fencing, orden entre conversaciones, referencias alteradas, resultados terminales, timeout y parada del worker.
 
-Las filas propias de los fixtures se eliminan y los procesos/puertos se cierran; la base de prueba permanece disponible. Estas pruebas no sustituyen la validación integrada del sender autorizado, de las tools con efectos ni de entrega real al celular.
+Las filas propias de los fixtures se eliminan y los procesos se cierran. La base de prueba permanece disponible. Quedan por validar el proveedor de modelos de producción, el comportamiento de las demás herramientas con efectos y la entrega con dos líneas reales.
 
-Resultado de este tramo: las tres suites nuevas pasan 28 pruebas sin omisiones, incluidas las barreras de apagado durante claim manual y durante la reserva de runtime. Las suites existentes de webhook Meta y outbox pasan 48 pruebas. Se validan además typecheck/build del backend y los archivos de prueba mediante TypeScript estricto directo.
+Las tres suites anteriores, junto con `conversation-send-postgres.test.ts`, pasaron 31 pruebas sin omisiones. Incluyen las barreras de apagado durante claim manual y durante la reserva de runtime. También pasaron el build, la comprobación de tipos del backend y las suites de producto con dos réplicas.

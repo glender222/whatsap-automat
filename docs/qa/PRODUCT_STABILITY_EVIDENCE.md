@@ -112,6 +112,13 @@ node --import ./src/test/fixtures/browserGraph.mjs dist/index.js
 
 Desde el frontend, con las mismas variables de prueba exportadas, ejecutar `npm run test:e2e -- e2e/inbox.integration.spec.ts -g 'composer scopes'`. La carga previa solo admite direcciones de loopback, una base terminada en `_smoke` y el token sintético. Reenvía las peticiones del adaptador Graph al proveedor local.
 
+## MSG-07. Respuesta automática tras reiniciar el proceso
+
+- **Antes.** Un `SIGKILL` después de confirmar el mensaje dejaba el webhook como procesado y cero trabajos pendientes. Al repetir el webhook, la respuesta automática se omitía.
+- **Después.** La recepción y el trabajo quedan en la misma transacción. El reinicio recupera el mismo UUID y el mismo mensaje. PostgreSQL comprueba el orden dentro de una conversación, la validez de la línea y el aislamiento por empresa.
+- **Segundo corte.** Graph local recibió el POST y el proceso murió antes de recibir el acuse. La reserva persistida conservó el envío incierto. Tras reiniciar, el webhook duplicado no produjo otro POST. Un recibo firmado confirmó la entrega y el mensaje siguiente recibió su propia respuesta. Las pruebas de envío también comprobaron dos empresas, rechazo de recibos ajenos y pausa o toma de control antes de admitir un envío.
+- **Validación.** Pasaron 31 pruebas de PostgreSQL y procesos, las dos pruebas del producto con réplicas de la API, 251 pruebas del backend y 18 recorridos de Chromium. [Procedimiento y límites de recuperación](META_INBOUND_DURABLE_RECOVERY.md).
+
 ## IA-01. Evaluación de ejecución por revisión y empresa
 
 - El evaluador interno carga una revisión inmutable y una suite guardada bajo RLS. Verifica las afirmaciones y el presupuesto del conjunto antes de llamar al proveedor. La ejecución reclama un UUID persistido y guarda las huellas de la revisión y de la suite, los resultados de las afirmaciones y las referencias de consumo. El resumen omite el texto de entrada y salida.
@@ -162,6 +169,6 @@ Con las mismas variables exportadas en el frontend, ejecutar `npm run test:e2e -
 | Recorrido | Evidencia pendiente |
 | --- | --- |
 | Bandeja en tiempo real | Filtro por etiqueta, reconexión, reorden de webhooks e historial paginado cubiertos en MSG-04 y MSG-05. |
-| Envío y recepción | MSG-06 cubre toma de control, ventana de atención, reintento, adjuntos y recuperación de entrega incierta. Una caída después de confirmar el mensaje entrante deja el trabajo de respuesta sin programar. Tras el reinicio, el webhook duplicado conserva el mensaje y omite la respuesta. Queda pendiente programar la respuesta de forma atómica y conciliar su envío. |
+| Envío y recepción | MSG-06 y MSG-07 cubren envíos humanos y automáticos, adjuntos, entrega incierta y recuperación tras reinicio con Graph local. Falta el recorrido en navegador con dos líneas Meta reales. |
 | Harness IA | IA-03 e IA-04 cubren publicación, ejecución de texto, cancelación y recuperación de resultados parciales en modo de verificación. Completar la admisión coordinada del proveedor de producción y los perfiles restantes. |
 | Flujo operativo y navegación | Atención, pedido, pago, aprobación y conexión. Recorrer como administrador y operador, con teclado y diferentes tamaños de pantalla. |

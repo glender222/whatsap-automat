@@ -45,12 +45,9 @@ Validaciones complementarias: `npm run typecheck` y `npm run build` pasan; los t
 
 Preparar una base nueva con el nombre permitido y las migraciones del repositorio. Las dependencias se instalan siguiendo el entorno de desarrollo habitual; no hay paquetes nuevos. El archivo de entorno local usado en esta sesión contiene las variables de PostgreSQL y no se incluye en Git.
 
-Desde `WhatsaapWeb-JS`, usando el archivo de entorno local autorizado:
+Desde `WhatsaapWeb-JS`, con las variables de PostgreSQL ya exportadas:
 
 ```bash
-set -a
-source /tmp/product-browser-qa.OyVbm3CO/runtime.env
-set +a
 export DB_NAME=meta_inbound_recovery_20261110_smoke
 export META_INBOUND_CRASH_TEST=1
 export META_INBOUND_CRASH_HTTP_PORT=34380
@@ -62,10 +59,6 @@ Las variables de PostgreSQL requeridas son `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_
 
 La ejecución elimina las filas de su propia empresa de fixture y termina los procesos/servidores que creó; conserva la base y su esquema para repetirla. No elimina datos de otras empresas ni bases.
 
-## Uso con la corrección
+## Resultado con la corrección
 
-La primera condición ya verificada es **persistencia del inbound y programación atómica**: una fila `whatsapp.inbound.received`, `pending`, con identidad/idempotency key y una referencia recuperable al inbound. Tras repetir el webhook se conserva la misma fila y sus referencias; el test compara también el UUID y la clave, no solo la cantidad.
-
-Este test verifica la programación sin iniciar el worker. `meta-inbound-worker-crash.integration.test.ts` cubre ahora por separado el consumidor con procesos reales y un efecto HTTP local. La integración final con el sender autorizado debe conservar el mismo corte/IPC/SIGKILL y exigir un único POST/outbound. El control sano deberá esperar ese consumidor cuando el endpoint deje de ejecutar IA de forma síncrona.
-
-Añadir por separado cortes después de reservar el envío y después de aceptación de Graph. Una respuesta externa incierta debe conciliarse sin repetir el POST; un trabajo pendiente no basta para demostrar esa propiedad. Tampoco se validan aquí herramientas con efectos laterales, el modelo IA, Socket.IO ni experiencia visual.
+El primer corte conserva el inbound y su trabajo `pending`. Repetir el webhook conserva el UUID, la clave de idempotencia y ambas referencias al inbound. Al reiniciar con el worker se recupera ese trabajo y Graph local recibe un POST. El segundo corte mata el proceso antes de recibir el acuse. Tras reiniciar, el mismo envío se concilia con un recibo firmado y el contador de POST permanece en uno. Un nuevo inbound de control produce su propia respuesta. [Evidencia de recuperación](META_INBOUND_DURABLE_RECOVERY.md).

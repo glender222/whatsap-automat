@@ -140,10 +140,22 @@ export class MetaInboxStore {
     };
   }
 
-  private async readHistory(chatId: string, limit: number, { before = 0, anchorId }: { before?: number; anchorId?: number }) {
+  async publishCanonicalOutbound(chatId: string, messageId: number): Promise<void> {
+    if (!this.io) return;
+    const rows = await this.readHistory(chatId, 1, { messageId });
+    const [message] = this.formatHistory(rows, chatId);
+    if (message) await this.emitUpdate(message);
+  }
+
+  private async readHistory(chatId: string, limit: number, {
+    before = 0, anchorId, messageId,
+  }: { before?: number; anchorId?: number; messageId?: number }) {
     const params: unknown[] = [this.companyId, this.normalizePhone(chatId), limit];
     let beforeSql = '';
-    if (anchorId !== undefined) {
+    if (messageId !== undefined) {
+      params.push(messageId);
+      beforeSql = "AND m.id = $4 AND m.direction = 'outbound' AND m.provider = 'meta-cloud'";
+    } else if (anchorId !== undefined) {
       params.push(anchorId);
       beforeSql = `AND EXISTS (
         SELECT 1 FROM messages anchor

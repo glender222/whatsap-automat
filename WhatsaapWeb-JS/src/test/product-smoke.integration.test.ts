@@ -155,6 +155,19 @@ test('real API isolates two companies through auth, signed ingress, inbox, socke
   await webhook('0'.repeat(64), 403);
   assert.equal((await webhook(signature, 200)).results[0].duplicate, false);
   assert.equal((await webhook(signature, 200)).results[0].duplicate, true);
+  const logPath = `/api/agents/runtime-logs?chatId=${chatId}`;
+  async function waitForStage(id: string, stage: string) {
+    const deadline = performance.now() + 8000;
+    do {
+      const logs = await api(logPath, 200, owner.accessToken);
+      const stages: string[] = logs.filter((entry: { inboundProviderMessageId: string }) =>
+        entry.inboundProviderMessageId === id).map((entry: { stage: string }) => entry.stage);
+      if (stages.includes(stage)) return stages;
+      await delay(100);
+    } while (performance.now() < deadline);
+    assert.fail('The inbound worker did not record ' + stage);
+  }
+  assert.ok((await waitForStage(messageId, 'agent_runtime_completed')).includes('router_missing'));
 
   const chats = await api('/api/chats', 200, owner.accessToken);
   assert.equal(chats.length, 1);
@@ -256,14 +269,7 @@ test('real API isolates two companies through auth, signed ingress, inbox, socke
   const pausedMessageId = `wamid.${randomUUID()}`;
   const pausedPayload = inbound(pausedMessageId, 'Mensaje durante toma de control');
   assert.equal((await webhook(sign(pausedPayload), 200, pausedPayload)).results[0].duplicate, false);
-  const logPath = `/api/agents/runtime-logs?chatId=${chatId}`;
-  const runtimeLogs = await api(logPath, 200, owner.accessToken);
-  const stagesFor = (id: string) => runtimeLogs.filter((entry: { inboundProviderMessageId: string }) =>
-    entry.inboundProviderMessageId === id).map((entry: { stage: string }) => entry.stage);
-  assert.ok(stagesFor(messageId).includes('router_missing'));
-  assert.ok(stagesFor(messageId).includes('agent_runtime_completed'));
-  assert.ok(stagesFor(pausedMessageId).includes('agent_skipped_paused'));
-  assert.ok(!stagesFor(pausedMessageId).includes('agent_runtime_started'));
+  assert.ok(!(await waitForStage(pausedMessageId, 'agent_skipped_paused')).includes('agent_runtime_started'));
   assert.deepEqual(await api(logPath, 200, other.accessToken), []);
 
   const legacyPausePath = `/api/chats/ia/${chatId}`;
