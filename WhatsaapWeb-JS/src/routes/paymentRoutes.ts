@@ -31,9 +31,9 @@ function requireAdmin(req: JwtRequest, res: Response): boolean {
 
 const ALLOWED_MIME = /^(image\/(jpeg|png|webp|gif)|application\/pdf|video\/mp4)$/i;
 
-export default function createPaymentRoutes(): Router {
+export default function createPaymentRoutes(database = pool): Router {
   const router = Router();
-  const service = new PaymentService(new PaymentRepositoryPg(pool));
+  const service = new PaymentService(new PaymentRepositoryPg(database));
   const mediaDir = path.join(config.whatsapp.uploadDir, 'payment-vouchers');
   fs.mkdirSync(mediaDir, { recursive: true });
   const upload = multer({

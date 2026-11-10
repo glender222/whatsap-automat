@@ -1,0 +1,11 @@
+# Preparación interna de cobros en Mercado Pago Perú
+
+La migración `050_prepare_payment_checkout_intents` agrega el registro interno de intenciones con RLS forzado y claves foráneas compuestas por empresa. Aplica la migración antes de desplegar el backend que valida comprobantes. Una intención preparada solo registra la orden y su importe. La creación de enlaces y la recepción de webhooks de pago mantienen la respuesta 501.
+
+El servicio recibe la empresa, el actor autenticado, la orden, la pasarela y una clave de idempotencia. Verifica la membresía administrativa y usa el mismo bloqueo que la confirmación y el vencimiento de pedidos. Lee las cantidades, la moneda y los precios de los ítems guardados, y calcula el total en céntimos. Esta etapa admite PEN, precios positivos y disponibilidad confirmada o ilimitada. Conserva la revisión de la orden, la vigencia de su reserva y la revisión de la pasarela.
+
+Una orden admite una intención preparada a la vez. Repetir la clave con la misma orden y pasarela recupera la intención mientras su snapshot y las precondiciones sigan vigentes. La anulación usa la versión esperada. La validación manual de un comprobante anula una intención preparada dentro de la misma transacción. Un comprobante pendiente o validado bloquea una preparación nueva. La preparación y la anulación de una intención solo escriben en su registro.
+
+La integración futura deberá comprobar de nuevo la orden, el saldo de sus reservas, el estado de los comprobantes y la pasarela antes de contactar al proveedor. También deberá definir qué hacer con un acuse incierto, cómo limitar el checkout a la vigencia de la reserva y cómo reconciliar un cobro tardío. La referencia externa UUID es opaca y sirve para correlación.
+
+Mercado Pago Perú documenta `X-Idempotency-Key` para crear una orden en Checkout Pro vía Orders. La referencia de creación de Preferences documenta `external_reference` y sus encabezados sin ofrecer esa garantía de reintento. La implementación local conserva su propia idempotencia. [Orders](https://www.mercadopago.com.pe/developers/es/reference/online-payments/checkout-pro/create-order/post) · [Preferences](https://www.mercadopago.com.pe/developers/es/reference/online-payments/checkout-pro-preferences/create-preference/post)

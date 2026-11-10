@@ -11,6 +11,7 @@ import {
   PaymentVoucherPage,
   PaymentVoucherStatus,
 } from '../../domain/payment.types';
+import { PaymentCheckoutIntentRepositoryPg } from './PaymentCheckoutIntentRepositoryPg';
 
 type Row = Record<string, any>;
 
@@ -358,6 +359,7 @@ export class PaymentRepositoryPg {
           `, [companyId, voucherId]);
           voucher.order_reconciliation_required = true;
         }
+        await new PaymentCheckoutIntentRepositoryPg(client).voidForValidatedVoucher(companyId, Number(voucher.order_id));
       }
       await client.query(
         `INSERT INTO operational_actions (

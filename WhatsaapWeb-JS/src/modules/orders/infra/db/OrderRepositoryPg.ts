@@ -8,6 +8,17 @@ import type { CommercialOrder, CommercialOrderStatus, CreateDetectedOrderInput, 
 type Row = Record<string, any>;
 type ConversationReference = { contactId: number | null; conversationId: number; chatId: string };
 type Reservation = { productId: number; itemId: number | null; quantity: number };
+type CheckoutOrderItem = {
+  id: string;
+  catalogItemId: string | null;
+  title: string;
+  quantity: number;
+  unitAmount: string | null;
+  currency: string;
+  status: string;
+  availability: string;
+  availabilityType: string | null;
+};
 export type DueReservation = { id: number; deadline: string };
 export const dueReservationPageSize = 25;
 const preorderStates = ['draft', 'quoted', 'pending_handoff', 'pending_approval', 'out_of_stock', 'unavailable'];
@@ -322,7 +333,9 @@ export class OrderRepositoryPg {
       if (!rows.length) throw this.notFound('Conversacion no encontrada');
     }
     const { rows: [order] } = await this.db.query(
-      "SELECT * FROM customer_orders WHERE company_id = $1 AND id = $2 AND order_type = 'commercial' FOR UPDATE",
+      `SELECT *, to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS order_revision,
+       to_char(reservation_expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS checkout_deadline
+       FROM customer_orders WHERE company_id = $1 AND id = $2 AND order_type = 'commercial' FOR UPDATE`,
       [companyId, orderId],
     );
     if (order && order.conversation_id !== prior.conversation_id) {
@@ -336,6 +349,28 @@ export class OrderRepositoryPg {
       order.reservation_due = deadline.due;
     }
     return order;
+  }
+
+  async lockForCheckout(companyId: number, orderId: number) {
+    if (this.tenantWork) throw new Error('El checkout requiere una transacción de empresa activa');
+    const row = await this.lockOrder(companyId, orderId);
+    return row ? {
+      status: String(row.status),
+      confirmed: row.confirmed_at != null,
+      expired: Boolean(row.reservation_due || row.reservation_expired_at),
+      revision: String(row.order_revision),
+      deadline: row.checkout_deadline == null ? null : String(row.checkout_deadline),
+    } : null;
+  }
+
+  async checkoutItems(companyId: number, orderId: number) {
+    const { rows: items } = await this.db.query(`
+      SELECT id::text, COALESCE(commercial_item_id, product_id)::text AS "catalogItemId", product_name AS title,
+        quantity, unit_price::text AS "unitAmount", currency, status, availability_status AS availability,
+        metadata_json->>'availabilityType' AS "availabilityType"
+      FROM order_items WHERE company_id = $1 AND order_id = $2 ORDER BY id
+    `, [companyId, orderId]);
+    return { items: items as CheckoutOrderItem[], reservations: await this.reservations(companyId, orderId) };
   }
 
   private async reserveInventory(order: CommercialOrder, status: CommercialOrderStatus, actorId: number): Promise<boolean> {
