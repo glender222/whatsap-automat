@@ -9,6 +9,7 @@ Estos archivos deben mantenerse vivos durante todo el proyecto:
 - `architecture.md`: arquitectura general del backend, capas, módulos, integraciones y decisiones base.
 - `current-state.md`: estado actual del proyecto, sprint activo, sprint cerrado más reciente y foco inmediato.
 - `specs/catalogo-comercial-inventario.md`: especificación del catálogo comercial operable por IA para productos, servicios, cursos, suscripciones y ofertas vendibles.
+- [Lista de cobros y comprobantes](payments-list.md): contrato de filtros, totales y paginación de pagos manuales.
 
 ## Mercado Pago
 

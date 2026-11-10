@@ -12,6 +12,7 @@ import {
 } from '../services/paymentsService';
 
 type StatusFilter = 'all' | 'collect_payment' | PaymentVoucherStatus;
+const paymentPageSize = 100;
 
 const STATUS_TONE: Record<PaymentProcessStatus, string> = {
   collect_payment: 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950 dark:text-blue-200 dark:border-blue-800',
@@ -143,7 +144,7 @@ function productSummary(row: PaymentProcessSummary): string {
 }
 
 export default function PaymentsPage() {
-  const [query, setQuery] = useState<{ status: StatusFilter }>({ status: 'all' });
+  const [query, setQuery] = useState<{ status: StatusFilter; offset: number }>({ status: 'all', offset: 0 });
   const [response, setResponse] = useState<{
     query: typeof query;
     result?: { rows: PaymentProcessSummary[]; total: number };
@@ -160,16 +161,20 @@ export default function PaymentsPage() {
 
   useEffect(() => {
     const controller = new AbortController();
-    const { status } = query;
+    const { status, offset } = query;
     paymentsService.list({
       status: status === 'all' || status === 'collect_payment' ? undefined : status,
-      limit: 100,
+      processStatus: status === 'collect_payment' ? status : undefined,
+      limit: paymentPageSize,
+      offset,
     }, controller.signal).then((data) => {
       if (controller.signal.aborted) return;
-      const filteredRows = status === 'collect_payment'
-        ? data.rows.filter((row) => row.processStatus === 'collect_payment')
-        : data.rows;
-      setResponse({ query, result: { rows: filteredRows, total: status === 'collect_payment' ? filteredRows.length : data.total } });
+      if (offset > 0 && offset >= data.total) {
+        const lastOffset = Math.max(0, (Math.ceil(data.total / paymentPageSize) - 1) * paymentPageSize);
+        setQuery((previous) => previous === query ? { ...previous, offset: lastOffset } : previous);
+        return;
+      }
+      setResponse({ query, result: data });
     }).catch(() => {
       if (!controller.signal.aborted) setResponse({ query });
     });
@@ -250,7 +255,7 @@ export default function PaymentsPage() {
                   key={option}
                   type="button"
                   aria-pressed={isActive}
-                  onClick={() => { if (!isActive) setQuery({ status: option }); }}
+                  onClick={() => { if (!isActive) setQuery({ status: option, offset: 0 }); }}
                   className={`rounded-full border px-4 py-2 text-xs font-semibold transition ${
                     isActive
                       ? 'border-teal-600 bg-teal-50 text-teal-800 dark:bg-teal-950 dark:text-teal-200'
@@ -428,6 +433,23 @@ export default function PaymentsPage() {
               </table>
             </div>
           )}
+          <nav aria-label="Páginas de pagos" className="flex flex-wrap items-center justify-between gap-3 border-t border-subtle p-4">
+            <p role="status" className="text-sm text-secondary">
+              Página {Math.floor(query.offset / paymentPageSize) + 1}
+              {total !== undefined && ` de ${Math.max(1, Math.ceil(total / paymentPageSize))}`}
+            </p>
+            <div className="flex items-center gap-2">
+              <button type="button" className="admin-button-secondary" disabled={!current || query.offset === 0}
+                onClick={() => setQuery((previous) => ({ ...previous, offset: Math.max(0, previous.offset - paymentPageSize) }))}>
+                Anterior
+              </button>
+              <button type="button" className="admin-button-secondary"
+                disabled={!current?.result || query.offset + paymentPageSize >= current.result.total}
+                onClick={() => setQuery((previous) => ({ ...previous, offset: previous.offset + paymentPageSize }))}>
+                Siguiente
+              </button>
+            </div>
+          </nav>
         </section>
       </div>
 

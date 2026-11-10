@@ -67,6 +67,7 @@ export type MercadoPagoObservation = Pick<MercadoPagoReconciliation,
 
 export type PaymentListFilters = {
   status?: PaymentVoucherStatus;
+  processStatus?: 'collect_payment';
   paymentMethod?: PaymentMethod;
   orderId?: number;
   chatId?: string;
@@ -103,6 +104,7 @@ export const paymentsService = {
     const response = await api.get('/payments', {
       params: {
         status: filters.status,
+        processStatus: filters.processStatus,
         paymentMethod: filters.paymentMethod,
         orderId: filters.orderId,
         chatId: filters.chatId,

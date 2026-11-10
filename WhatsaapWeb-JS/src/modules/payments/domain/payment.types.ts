@@ -119,6 +119,7 @@ export type MarkFromMessageInput = {
 
 export type PaymentFilters = {
   status?: PaymentVoucherStatus;
+  processStatus?: 'collect_payment';
   paymentMethod?: PaymentMethod;
   orderId?: number;
   chatId?: string;

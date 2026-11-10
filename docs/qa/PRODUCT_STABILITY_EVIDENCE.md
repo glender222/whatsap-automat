@@ -41,8 +41,13 @@ Para reproducir UX-02 y UX-03, ejecutar `npm run test:e2e -- e2e/orders-navigati
 ## UX-05. El borrador se pierde al volver de Pedidos
 
 - **Antes.** Chromium escribió un texto en la conversación de Alfa, abrió Pedidos con el teclado, esperó que la vista cargara y volvió por el historial. El cuadro de mensaje estaba vacío.
-- **Después.** El texto y la referencia exacta de un envío en curso viven en el estado de la sesión. El borrador reaparece al volver a la misma conversación. Al cambiar de cuenta a Bravo en otra pestaña, el mismo contacto y el mismo identificador de WhatsApp conservan el historial y el borrador de su propia sesión.
+- **Después.** El texto y la referencia exacta de un envío en curso viven en el estado de la sesión. El borrador reaparece al volver a la misma conversación. Al cambiar de cuenta a Bravo en otra pestaña, el mismo contacto y el mismo identificador de WhatsApp muestran el historial de Bravo y el cuadro de mensaje vacío.
 - **Recibo durante la navegación.** Graph local perdió el acuse de un envío. El operador abrió Pedidos y, mientras estaba allí, llegó el recibo firmado. Al volver se mostró una sola copia del mensaje y se limpió el borrador correspondiente. Graph no recibió un nuevo POST. Pasaron los 14 recorridos de Chromium y el build web.
+
+## UX-06. El filtro «Por cobrar» omite pedidos antiguos
+
+- **Antes.** La pantalla filtraba solo las primeras 100 filas ya paginadas. Chromium reprodujo la ausencia de un cobro fuera de esa página. PostgreSQL devolvió 106 registros para una consulta que debía devolver los 3 cobros pendientes del fixture.
+- **Después.** La API filtra antes de contar y paginar. La UI muestra el total filtrado, permite recorrer las páginas y vuelve a la última disponible si una operación elimina la página actual. Chromium verificó el filtro en escritorio y móvil, una respuesta tardía y la recuperación de una página vacía. La suite combinada pasó 18 recorridos sin omisiones. Las 12 pruebas HTTP y PostgreSQL incluyeron el filtro, el aislamiento por empresa y la conciliación interna de Mercado Pago.
 
 ## MSG-01. Conversaciones nuevas y recuperación de la bandeja
 
@@ -157,6 +162,6 @@ Con las mismas variables exportadas en el frontend, ejecutar `npm run test:e2e -
 | Recorrido | Evidencia pendiente |
 | --- | --- |
 | Bandeja en tiempo real | Filtro por etiqueta, reconexión, reorden de webhooks e historial paginado cubiertos en MSG-04 y MSG-05. |
-| Envío y recepción | Toma de control, ventana de atención, reintento, adjuntos y recuperación de una entrega incierta cubiertos en MSG-06. |
+| Envío y recepción | MSG-06 cubre toma de control, ventana de atención, reintento, adjuntos y recuperación de entrega incierta. Una caída después de confirmar el mensaje entrante deja el trabajo de respuesta sin programar. Tras el reinicio, el webhook duplicado conserva el mensaje y omite la respuesta. Queda pendiente programar la respuesta de forma atómica y conciliar su envío. |
 | Harness IA | IA-03 e IA-04 cubren publicación, ejecución de texto, cancelación y recuperación de resultados parciales en modo de verificación. Completar la admisión coordinada del proveedor de producción y los perfiles restantes. |
 | Flujo operativo y navegación | Atención, pedido, pago, aprobación y conexión. Recorrer como administrador y operador, con teclado y diferentes tamaños de pantalla. |

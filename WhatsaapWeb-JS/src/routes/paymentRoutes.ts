@@ -72,8 +72,13 @@ export default function createPaymentRoutes(database = pool): Router {
 
   router.get('/', async (req: JwtRequest, res: Response, next: NextFunction) => {
     try {
+      const processStatus = req.query.processStatus;
+      if (processStatus !== undefined && processStatus !== 'collect_payment') {
+        throw validationError('processStatus invalido');
+      }
       const data = await service.list(resolveWhatsappCompanyId(req), {
         status: req.query.status ? String(req.query.status) as any : undefined,
+        processStatus,
         paymentMethod: req.query.paymentMethod ? String(req.query.paymentMethod) as any : undefined,
         orderId: parsePositiveInt(req.query.orderId) || undefined,
         chatId: req.query.chatId ? String(req.query.chatId) : undefined,

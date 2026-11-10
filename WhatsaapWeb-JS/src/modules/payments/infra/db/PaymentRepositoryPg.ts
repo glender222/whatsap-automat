@@ -52,6 +52,10 @@ export class PaymentRepositoryPg {
     ];
     const voucherClauses: string[] = ['pv.company_id = $1', 'pv.order_id IS NULL'];
 
+    if (filters.processStatus === 'collect_payment') {
+      orderClauses.push('last_voucher.id IS NULL');
+      voucherClauses.push('FALSE');
+    }
     if (filters.status) {
       params.push(filters.status);
       const statusParam = `$${params.length}`;
