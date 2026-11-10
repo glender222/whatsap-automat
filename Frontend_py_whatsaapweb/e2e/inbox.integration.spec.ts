@@ -285,3 +285,100 @@ test('an active tag preserves live previews across a delayed snapshot and reconn
     await Promise.all(contexts.map((context) => context.close()));
   }
 });
+
+test('history loads messages from the same second without losing position or crossing companies', async ({ browser, request }) => {
+  const companies = provisionCompanies();
+  const contexts = await Promise.all([
+    browser.newContext({ viewport: { width: 1280, height: 800 } }),
+    browser.newContext({ viewport: { width: 390, height: 680 } }),
+  ]);
+  const contact = '12025550145';
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  const ids = Array.from({ length: 52 }, () => 'wamid.' + randomUUID());
+  const historyPath = `/api/chats/${contact}/messages`;
+  const headers = (company: Company) => ({ authorization: 'Bearer ' + company.auth.accessToken });
+  let online = true;
+  let closeSocket: (() => Promise<void>) | undefined;
+  try {
+    const pages = await Promise.all(companies.map(async (company, index) => {
+      const label = index === 0 ? 'Alfa' : 'Bravo';
+      for (const start of [0, 26]) {
+        await postWebhook(request, company, { messages: ids.slice(start, start + 26).map((id, i) => ({
+          id, from: contact, timestamp, type: 'text', text: { body: `${label} historial ${start + i + 1}` },
+        })) });
+      }
+      const context = contexts[index];
+      await context.addInitScript((auth) => localStorage.setItem('auth', JSON.stringify(auth)), company.auth);
+      const page = await context.newPage();
+      if (index === 0) {
+        await page.routeWebSocket(/\/socket\.io\//, async (socket) => {
+          if (!online) return socket.close({ code: 1001 });
+          socket.connectToServer();
+          closeSocket = () => socket.close({ code: 1001 });
+        });
+      }
+      await page.goto('/gestion-web/inicio?chat=' + contact);
+      await expect(page.getByRole('region', { name: 'Historial de mensajes' }).locator('[data-history-message]')).toHaveCount(50);
+      return page;
+    }));
+    const [alpha] = pages;
+    const [alphaHistory, bravoHistory] = pages.map((page) => page.getByRole('region', { name: 'Historial de mensajes' }));
+    const head = await request.get(backend + historyPath, { headers: headers(companies[0]) });
+    expect(head.ok()).toBe(true);
+    const { nextCursor } = await head.json();
+    expect(typeof nextCursor).toBe('string');
+    const foreign = await request.get(`${backend}${historyPath}?cursor=${nextCursor}`, { headers: headers(companies[1]) });
+    expect(await foreign.json()).toMatchObject({ data: [], nextCursor: null });
+
+    const anchor = alphaHistory.locator('[data-history-message]').filter({ has: alpha.getByText('Alfa historial 3', { exact: true }) });
+    const load = alphaHistory.getByRole('button', { name: 'Cargar mensajes anteriores' });
+    await alpha.route((url) => url.pathname === historyPath && url.searchParams.has('cursor'),
+      (route) => route.fulfill({ status: 503 }), { times: 1 });
+    await load.press('Enter');
+    await expect(alphaHistory.getByRole('alert')).toContainText('Vuelve a intentarlo.');
+    await expect(load).toBeFocused();
+    await expect(alphaHistory.locator('[data-history-message]')).toHaveCount(50);
+    await alphaHistory.evaluate((element) => { element.scrollTop = 0; });
+    const top = (await anchor.boundingBox())?.y;
+    await load.press('Enter');
+    await expect(alphaHistory.getByText('Alfa historial 1', { exact: true })).toBeAttached();
+    await expect(alphaHistory.locator('[data-history-message]')).toHaveCount(52);
+    await expect(anchor).toBeFocused();
+    expect(Math.abs((await anchor.boundingBox())!.y - top!)).toBeLessThan(4);
+    await expect(alphaHistory.getByRole('button', { name: 'Inicio del historial' })).toBeDisabled();
+    await expect(bravoHistory.getByText('Alfa historial 1', { exact: true })).toHaveCount(0);
+    await expect(bravoHistory.locator('[data-history-message]')).toHaveCount(50);
+
+    await bravoHistory.getByRole('button', { name: 'Cargar mensajes anteriores' }).press('Enter');
+    await expect(bravoHistory.getByText('Bravo historial 1', { exact: true })).toBeAttached();
+    await expect(bravoHistory.locator('[data-history-message]')).toHaveCount(52);
+    await expect(alphaHistory.getByText('Bravo historial 1', { exact: true })).toHaveCount(0);
+
+    const liveText = 'Alfa mensaje posterior a la paginación';
+    await postWebhook(request, companies[0], { messages: [{
+      id: 'wamid.' + randomUUID(), from: contact, timestamp, type: 'text', text: { body: liveText },
+    }] });
+    await expect(alphaHistory.getByText(liveText, { exact: true })).toBeAttached();
+    await expect(alphaHistory.locator('[data-history-message]')).toHaveCount(53);
+    await expect(alphaHistory.getByText('Alfa historial 1', { exact: true })).toBeAttached();
+    await expect(bravoHistory.getByText(liveText, { exact: true })).toHaveCount(0);
+
+    expect(closeSocket).toBeDefined();
+    online = false;
+    await contexts[0].setOffline(true);
+    await closeSocket!();
+    const missed = 'Alfa mensaje recibido sin conexión después de paginar';
+    await postWebhook(request, companies[0], { messages: [{
+      id: 'wamid.' + randomUUID(), from: contact, timestamp, type: 'text', text: { body: missed },
+    }] });
+    await expect(alphaHistory.getByText(missed, { exact: true })).toHaveCount(0);
+    online = true;
+    await contexts[0].setOffline(false);
+    await expect(alphaHistory.getByText(missed, { exact: true })).toBeAttached();
+    await expect(alphaHistory.locator('[data-history-message]')).toHaveCount(54);
+    await expect(alphaHistory.getByText('Alfa historial 1', { exact: true })).toBeAttached();
+    await expect(bravoHistory.getByText(missed, { exact: true })).toHaveCount(0);
+  } finally {
+    await Promise.all(contexts.map((context) => context.close()));
+  }
+});

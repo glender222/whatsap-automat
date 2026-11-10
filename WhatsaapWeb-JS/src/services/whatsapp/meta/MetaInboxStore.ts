@@ -127,9 +127,30 @@ export class MetaInboxStore {
   }
 
   async getMessages(chatId: string, limit = 50, before = 0): Promise<Record<string, unknown>[]> {
+    return this.formatHistory(await this.readHistory(chatId, limit, { before }), chatId);
+  }
+
+  async getMessagePage(chatId: string, limit: number, anchorId?: number) {
+    const rows = await this.readHistory(chatId, limit + 1, { anchorId });
+    const page = rows.slice(0, limit);
+    return {
+      messages: this.formatHistory(page, chatId),
+      nextAnchorId: rows.length > limit ? Number(rows[limit - 1].id) : null,
+    };
+  }
+
+  private async readHistory(chatId: string, limit: number, { before = 0, anchorId }: { before?: number; anchorId?: number }) {
     const params: unknown[] = [this.companyId, this.normalizePhone(chatId), limit];
     let beforeSql = '';
-    if (before > 0) {
+    if (anchorId !== undefined) {
+      params.push(anchorId);
+      beforeSql = `AND EXISTS (
+        SELECT 1 FROM messages anchor
+        WHERE anchor.id = $4 AND anchor.company_id = c.company_id AND anchor.conversation_id = c.id
+          AND ((m.occurred_at, m.id) < (anchor.occurred_at, anchor.id)
+            OR (anchor.occurred_at IS NULL AND (m.occurred_at IS NOT NULL OR m.id < anchor.id)))
+      )`;
+    } else if (before > 0) {
       params.push(new Date(before < 1e12 ? before * 1000 : before));
       beforeSql = `AND m.occurred_at < $${params.length}`;
     }
@@ -137,8 +158,11 @@ export class MetaInboxStore {
     const result = await this.query(
       `SELECT m.*, a.provider_media_id, a.mime_type, a.filename, a.size_bytes
        FROM conversations c
-       JOIN messages m ON m.conversation_id = c.id
-       LEFT JOIN message_attachments a ON a.message_id = m.id
+       JOIN messages m ON m.conversation_id = c.id AND m.company_id = c.company_id
+       LEFT JOIN LATERAL (
+         SELECT provider_media_id, mime_type, filename, size_bytes FROM message_attachments
+         WHERE message_id = m.id ORDER BY (provider_media_id IS NULL), id LIMIT 1
+       ) a ON TRUE
        WHERE c.company_id = $1
          AND c.channel = 'whatsapp'
          AND c.external_conversation_id = $2
@@ -148,7 +172,11 @@ export class MetaInboxStore {
       params
     );
 
-    return result.rows.reverse().map((row) => ({
+    return result.rows;
+  }
+
+  private formatHistory(rows: Awaited<ReturnType<MetaInboxStore['readHistory']>>, chatId: string) {
+    return rows.reverse().map((row) => ({
       id: row.provider_message_id || String(row.id),
       body: row.body,
       fromMe: row.direction === 'outbound',

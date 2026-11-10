@@ -24,7 +24,7 @@ const conversationColumns = `id, company_id, channel, external_conversation_id, 
   EXISTS (SELECT 1 FROM conversation_send_claims s WHERE s.tenant_id = conversations.company_id
     AND s.conversation_id = conversations.id AND s.state = 'unknown_delivery') AS has_unresolved_delivery`;
 
-function encodeCursor(direction: Cursor['direction'], id: number): string {
+export function encodeCursor(direction: Cursor['direction'], id: number): string {
   return Buffer.from(`${direction}:${id}`).toString('base64url');
 }
 

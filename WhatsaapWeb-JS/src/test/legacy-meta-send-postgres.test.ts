@@ -812,4 +812,40 @@ fs.truncateSync(file, ${overLimit});
     assert.equal(other.lastMessagePreview, 'Recent Bravo');
     assert.equal(other.unreadCount, 1);
   });
+
+  await t.test('history pages preserve equal timestamps and resolve cursors inside the tenant and chat', async () => {
+    const sender = '12025550147';
+    const timestamp = String(Math.floor(Date.now() / 1000));
+    for (const [index, companyId] of [tenantA, tenantB].entries()) {
+      const inbox = new MetaInboxStore({ companyId });
+      for (let i = 0; i < 6; i++) {
+        await inbox.persistInboundMessage({ message: {
+          id: 'wamid.page-' + i, from: sender, type: 'text', timestamp, text: { body: `${index}/${i}` },
+        } });
+      }
+    }
+    async function read(companyId: number, query: string, chatId = sender) {
+      const response = await nativeFetch(`${api}/api/chats/${chatId}/messages?limit=2${query}`, {
+        headers: { authorization: `Bearer ${token(companyId, 'ADMIN')}` },
+      });
+      return { status: response.status, body: await response.json() };
+    }
+    const first = await read(tenantA, '');
+    assert.equal(first.status, 200);
+    assert.match(first.body.nextCursor, /^[\w-]+$/);
+    const second = await read(tenantA, '&cursor=' + first.body.nextCursor);
+    assert.equal(second.status, 200);
+    assert.match(second.body.nextCursor, /^[\w-]+$/);
+    const third = await read(tenantA, '&cursor=' + second.body.nextCursor);
+    assert.equal(third.status, 200);
+    assert.equal(third.body.nextCursor, null);
+    assert.deepEqual([third, second, first].flatMap(({ body }) => body.data.map((message: { body: string }) => message.body)),
+      ['0/0', '0/1', '0/2', '0/3', '0/4', '0/5']);
+    assert.deepEqual((await read(tenantB, '&cursor=' + first.body.nextCursor)).body.data, []);
+    assert.deepEqual((await read(tenantA, '&cursor=' + first.body.nextCursor, phone)).body.data, []);
+    assert.deepEqual((await read(tenantB, '')).body.data.map((message: { body: string }) => message.body), ['1/4', '1/5']);
+    assert.equal((await read(tenantA, '&cursor=2147483648')).status, 400);
+    assert.equal((await read(tenantA, `&cursor=${first.body.nextCursor}&before=${timestamp}`)).status, 400);
+    assert.deepEqual((await read(tenantA, '&before=' + timestamp)).body, { success: true, data: [], total: 0 });
+  });
 });

@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import type { RefObject } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { isAxiosError } from 'axios';
 import { CheckCheck, ChevronDown, ChevronRight, TerminalSquare } from 'lucide-react';
 import ChatFilePreview from './ChatFilePreview';
 import AudioMessage from '../extras/AudioMessage';
@@ -216,11 +216,19 @@ const AudioMessageWrapper: React.FC<{ mediaUrl: string; messageId: string }> = (
   return <AudioMessage url={audioUrl} />;
 };
 
+export interface OlderHistoryControls {
+  available: boolean;
+  loading: boolean;
+  requested: boolean;
+  error: string;
+  load: () => Promise<void>;
+}
+
 interface MessagesPanelProps {
   selectedChat: string | null;
   loadingMessages: boolean;
   messages: WhatsAppMessage[];
-  messagesEndRef: RefObject<HTMLDivElement | null>;
+  olderHistory: OlderHistoryControls;
   onImageClick?: (msg: WhatsAppMessage) => void; 
   onServiceCompleted?: () => void;
   agentActivity?: AgentActivityTurn[];
@@ -356,7 +364,7 @@ const MessagesPanel: React.FC<MessagesPanelProps> = ({
   selectedChat,
   loadingMessages,
   messages,
-  messagesEndRef,
+  olderHistory,
   onImageClick,
   onServiceCompleted,
   agentActivity = [],
@@ -370,11 +378,32 @@ const MessagesPanel: React.FC<MessagesPanelProps> = ({
   const previewMime = previewingDoc?.media?.mimetype ?? previewingDoc?.mimetype ?? '';
   const timeline = useMemo(() => buildTimeline(messages, agentActivity), [messages, agentActivity]);
 
-  useEffect(() => {
-    if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: 'auto' });
+  const scroller = useRef<HTMLDivElement>(null);
+  const followLatest = useRef(true);
+  const loadAnchor = useRef<{ row: HTMLElement; top: number; button: HTMLButtonElement } | null>(null);
+
+  useLayoutEffect(() => {
+    const element = scroller.current;
+    if (!element) return;
+    const anchor = loadAnchor.current;
+    if (anchor && !olderHistory.loading) {
+      if (anchor.row.isConnected) {
+        element.scrollTop += anchor.row.getBoundingClientRect().top - anchor.top;
+        if (!olderHistory.error && document.activeElement === anchor.button) anchor.row.focus({ preventScroll: true });
+      }
+      loadAnchor.current = null;
+    } else if (followLatest.current) {
+      element.scrollTop = element.scrollHeight;
     }
-  }, [messages, selectedChat]);
+  }, [timeline, olderHistory.error, olderHistory.loading]);
+
+  function loadPreviousPage(event: React.MouseEvent<HTMLButtonElement>) {
+    if (!olderHistory.available || olderHistory.loading) return;
+    const row = scroller.current?.querySelector<HTMLElement>('[data-history-message]');
+    if (row) loadAnchor.current = { row, top: row.getBoundingClientRect().top, button: event.currentTarget };
+    followLatest.current = false;
+    void olderHistory.load();
+  }
 
   // Al cambiar de chat, obtener estado de sesión automáticamente
   useEffect(() => {
@@ -392,7 +421,7 @@ const MessagesPanel: React.FC<MessagesPanelProps> = ({
           setSessionStatus(response.hasActiveSession ? 'active' : response.status);
         }
       } catch (err) {
-        if ((err as any)?.response?.status === 429) {
+        if (isAxiosError(err) && err.response?.status === 429) {
           console.info('Estado de sesión omitido temporalmente por rate limit; se conserva el estado actual.');
           return;
         }
@@ -448,7 +477,12 @@ const MessagesPanel: React.FC<MessagesPanelProps> = ({
   };
 
   return (
-    <div className="relative flex-1 overflow-y-auto px-4 py-3 min-h-0 bg-gray-50 dark:bg-gray-900" style={{ overflowX: 'hidden' }}>
+    <div ref={scroller} role="region" aria-label="Historial de mensajes"
+      className="relative flex-1 overflow-x-hidden overflow-y-auto px-4 py-3 min-h-0 bg-gray-50 dark:bg-gray-900"
+      onScroll={(event) => {
+        const element = event.currentTarget;
+        followLatest.current = element.scrollHeight - element.scrollTop - element.clientHeight < 64;
+      }}>
       {/* Barra superior sticky con botones */}
       <div
         className="sticky top-0 w-full flex justify-between items-center z-30 bg-transparent"
@@ -507,10 +541,21 @@ const MessagesPanel: React.FC<MessagesPanelProps> = ({
               <div className="text-center text-gray-400 dark:text-gray-500 pt-10">No hay mensajes en este chat</div>
             ) : (
               <>
+                {(olderHistory.available || olderHistory.requested) && (
+                  <div className="mb-3 flex flex-col items-center gap-2">
+                    <button type="button" aria-disabled={olderHistory.loading || !olderHistory.available}
+                      onClick={loadPreviousPage}
+                      className="min-h-11 rounded-lg border border-subtle bg-surface px-4 text-sm font-medium text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-600 aria-disabled:text-secondary">
+                      {olderHistory.available ? 'Cargar mensajes anteriores' : 'Inicio del historial'}
+                    </button>
+                    {olderHistory.loading && <p role="status" className="text-xs text-secondary">Cargando mensajes anteriores…</p>}
+                    {olderHistory.error && <p role="alert" className="text-xs text-red-700 dark:text-red-300">{olderHistory.error} Vuelve a intentarlo.</p>}
+                  </div>
+                )}
                 {timeline.map((item) => item.type === 'activity' ? (
                     <AgentActivityRow key={`activity-${item.turn.id}`} turn={item.turn} />
                   ) : (
-                  <div key={item.messageItem.id} className={`mb-2 flex ${item.messageItem.fromMe ? 'justify-end' : 'justify-start'}`}>
+                  <div key={item.messageItem.id} data-history-message tabIndex={-1} className={`mb-2 flex ${item.messageItem.fromMe ? 'justify-end' : 'justify-start'}`}>
                     <div
                       className={`rounded-xl px-3 py-2 max-w-xs ${
                         item.messageItem.fromMe ? 'bg-green-100 dark:bg-green-900/40 text-right' : 'bg-white dark:bg-gray-800 text-left'
@@ -568,7 +613,6 @@ const MessagesPanel: React.FC<MessagesPanelProps> = ({
                     </div>
                   </div>
                 ))}
-                <div ref={messagesEndRef} />
               </>
             )}
           </div>

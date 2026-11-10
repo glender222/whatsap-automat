@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { useAtom, useSetAtom } from 'jotai';
-import MessagesPanel from './bandeja de chats/MessagesPanel';
+import MessagesPanel, { type OlderHistoryControls } from './bandeja de chats/MessagesPanel';
 import MessageInputBar from './bandeja de chats/MessageInputBar';
 import CanonicalSendStatus from './CanonicalSendStatus';
 import type { CanonicalComposer } from '../hooks/useCanonicalComposer';
@@ -25,6 +25,7 @@ import { agentStateAtom, setChatActivityAtom } from '../../../jotai/slices/agent
 interface ChatContainerProps {
   selectedChat: string | null;
   loadingMessages: boolean;
+  olderHistory: OlderHistoryControls;
   message: string;
   setMessage: React.Dispatch<React.SetStateAction<string>>;
   messages: WhatsAppMessage[];
@@ -38,6 +39,7 @@ interface ChatContainerProps {
 const ChatContainer: React.FC<ChatContainerProps> = ({
   selectedChat,
   loadingMessages,
+  olderHistory,
   message,
   setMessage,
   messages,
@@ -66,7 +68,6 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
   const [agentActivity, setAgentActivity] = useState<AgentActivityTurn[]>([]);
   const [agentState] = useAtom(agentStateAtom);
   const setChatActivity = useSetAtom(setChatActivityAtom);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
   const emojiPickerRef = useRef<HTMLDivElement>(null);
   const composerInputRef = useRef<HTMLTextAreaElement>(null);
   const pendingEmojiCaret = useRef<{ input: HTMLTextAreaElement; offset: number }>(null);
@@ -92,12 +93,6 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
       composerInputRef.current?.focus();
     }
   }, [composer.canSend, composer.notice, composer.owns]);
-
-  useEffect(() => {
-    if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [messages, selectedChat]);
 
   useEffect(() => {
     if (!selectedChat) {
@@ -153,7 +148,7 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
     return () => {
       mounted = false;
     };
-  }, [selectedChat]);
+  }, [selectedChat, setChatActivity]);
 
   useEffect(() => {
     if (!selectedChat) return;
@@ -333,7 +328,7 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
             selectedChat={selectedChat}
             loadingMessages={loadingMessages}
             messages={messages}
-            messagesEndRef={messagesEndRef}
+            olderHistory={olderHistory}
             onImageClick={onImageClick}
             onServiceCompleted={customerHistory.reload}
             agentActivity={agentActivity}

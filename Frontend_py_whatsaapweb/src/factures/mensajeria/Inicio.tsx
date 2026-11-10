@@ -41,7 +41,7 @@ export default function Inicio() {
   } = useTagsManagement();
   const { chats, reloadChats, isLoadingChats, chatsError } = useChatsManagement(selectedTagId);
   const {
-    messages, selectedChat, loadingMessages, messageError, reloadMessages, selectChat, handleNewMessage,
+    messages, selectedChat, loadingMessages, olderHistory, messageError, reloadMessages, selectChat, handleNewMessage,
     addOptimisticMessage, updateOptimisticMessage, markMessageError,
   } = useMessagesManagement();
   const {
@@ -174,6 +174,7 @@ export default function Inicio() {
               key={selectedChat}
               selectedChat={selectedChat}
               loadingMessages={loadingMessages}
+              olderHistory={olderHistory}
               messages={messages}
               message={drafts[selectedChat] || ''}
               setMessage={setDraft}

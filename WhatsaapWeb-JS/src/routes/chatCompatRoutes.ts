@@ -7,6 +7,7 @@ import { explicitTemplateName, legacyHumanSend } from '../middleware/legacyHuman
 import { withTenantTransaction } from '../db/TenantScopedUoW';
 import { OperationalRecordRepositoryPg, OperationalRecordService } from '../modules/operations';
 import AgentService from '../services/ai/AgentService';
+import { encodeCursor, parseConversationPage } from '../services/conversations/ConversationQueryService';
 
 const multer = require('multer') as any;
 
@@ -35,9 +36,28 @@ export function createChatCompatRoutes(whatsappService: WhatsAppService): Router
   router.get('/:chatId/messages', requireChatTenantAccess, async (req: Request, res: Response, next: NextFunction) => {
     try {
       const companyId = resolveWhatsappCompanyId(req as JwtRequest);
-      const limit = parseInt(String(req.query.limit || '50'), 10);
+      const chatId = String(req.params.chatId);
+      const rawLimit = req.query.limit || '50';
+      const limit = parseInt(String(rawLimit), 10);
+      const rawCursor = req.query.cursor;
+      const cursor = parseConversationPage({ cursor: rawCursor }, 50)?.cursor;
+      const inbox = whatsappService.provider === 'meta-cloud' ? whatsappService.getMetaStore(companyId) : null;
+      if (rawCursor !== undefined && (!inbox || req.query.before !== undefined || cursor?.direction !== 'older')) {
+        res.status(400).json({ success: false, message: 'El cursor del historial no es válido.' });
+        return;
+      }
+      if (inbox && req.query.before === undefined) {
+        if (typeof rawLimit !== 'string' || !/^\d{1,3}$/.test(rawLimit) || limit < 1 || limit > 200) {
+          res.status(400).json({ success: false, message: 'El historial admite entre 1 y 200 mensajes por página.' });
+          return;
+        }
+        const { messages, nextAnchorId } = await inbox.getMessagePage(chatId, limit, cursor?.id);
+        const nextCursor = nextAnchorId === null ? null : encodeCursor('older', nextAnchorId);
+        res.json({ success: true, data: messages, total: messages.length, nextCursor });
+        return;
+      }
       const before = parseInt(String(req.query.before || '0'), 10);
-      const messages = await whatsappService.getChatMessages(String(req.params.chatId), limit, before, companyId);
+      const messages = await whatsappService.getChatMessages(chatId, limit, before, companyId);
       res.json({ success: true, data: messages, total: messages.length });
     } catch (error) {
       next(error);

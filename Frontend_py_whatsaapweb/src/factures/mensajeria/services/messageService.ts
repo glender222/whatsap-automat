@@ -43,17 +43,20 @@ function getSendErrorMessage(error: any): string {
 export async function getMessagesByChat(
   chatId: string,
   limit: number = 50,
-  signal?: AbortSignal
-): Promise<WhatsAppMessage[]> {
+  signal?: AbortSignal,
+  cursor?: string,
+): Promise<{ messages: WhatsAppMessage[]; nextCursor: string | null }> {
   try {
-    const response = await api.get<{ success: boolean; data: WhatsAppMessage[]; total: number }>(
+    const response = await api.get<{ success: boolean; data: WhatsAppMessage[]; nextCursor?: string | null }>(
       `/chats/${encodeURIComponent(chatId)}/messages`,
-      { params: { limit }, signal }
+      { params: { limit, cursor }, signal }
     );
-    if (!response.data.success || !Array.isArray(response.data.data)) {
+    const { success, data, nextCursor } = response.data;
+    if (!success || !Array.isArray(data) || (nextCursor != null && typeof nextCursor !== 'string') ||
+        (cursor !== undefined && (nextCursor === undefined || nextCursor === cursor))) {
       throw new Error('El historial de mensajes no es válido.');
     }
-    return response.data.data;
+    return { messages: data, nextCursor: nextCursor ?? null };
   } catch (error) {
     if (signal?.aborted) throw error;
     const response = (error as { response?: { status?: number; data?: { message?: string } } })?.response;

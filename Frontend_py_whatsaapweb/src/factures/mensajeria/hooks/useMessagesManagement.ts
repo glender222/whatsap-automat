@@ -1,21 +1,62 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useAtom, useSetAtom } from 'jotai';
+import { useAtom, useSetAtom, useStore } from 'jotai';
 import { chatsAtom, loadingMessagesAtom, messagesAtom, selectedChatAtom } from '../../../jotai/slices/messagesAtoms';
 import { normalizeMessageTimestamp } from '../../../shared/types/wsp';
 import type { WhatsAppMessage } from '../../../shared/types/wsp';
 import { markChatAsRead } from '../services/chatService';
 import { getMessagesByChat } from '../services/messageService';
 
+const pageSize = 50;
+
 export function useMessagesManagement() {
+  const store = useStore();
   const [messages, setMessages] = useAtom(messagesAtom);
   const [selectedChat, setSelectedChat] = useAtom(selectedChatAtom);
   const [loadingMessages, setLoadingMessages] = useAtom(loadingMessagesAtom);
   const setChats = useSetAtom(chatsAtom);
   const selectedChatRef = useRef(selectedChat);
-  const loadedHistory = useRef<string | null>(null);
+  const loadedHistory = useRef<{ chatId: string; ids: Set<string> } | null>(null);
   const historyRequest = useRef<{ chatId: string; arrivals: Set<string> } | null>(null);
   const [messageError, setMessageError] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
+  const olderRequest = useRef<AbortController | null>(null);
+  const boundary = useRef<{ cursor: string | null; paging: boolean } | null>(null);
+  const [older, setOlder] = useState({ available: false, loading: false, requested: false, error: '' });
+
+  const resetOlder = useCallback((cursor: string | null) => {
+    olderRequest.current?.abort();
+    olderRequest.current = null;
+    boundary.current = { cursor, paging: false };
+    setOlder({ available: Boolean(cursor), loading: false, requested: false, error: '' });
+  }, []);
+
+  useEffect(() => () => olderRequest.current?.abort(), []);
+
+  const loadOlder = useCallback(async () => {
+    const chatId = selectedChatRef.current;
+    const page = boundary.current;
+    if (!chatId || !page?.cursor || olderRequest.current) return;
+    const controller = new AbortController();
+    olderRequest.current = controller;
+    page.paging = true;
+    setOlder({ available: true, loading: true, requested: true, error: '' });
+    try {
+      const { messages: history, nextCursor } = await getMessagesByChat(chatId, pageSize, controller.signal, page.cursor);
+      if (controller.signal.aborted) return;
+      page.cursor = nextCursor;
+      setMessages((current) => {
+        const ids = new Set(current.map((message) => message.id));
+        return [...history.filter((message) => !ids.has(message.id)), ...current];
+      });
+      setOlder({ available: Boolean(nextCursor), loading: false, requested: true, error: '' });
+    } catch {
+      if (!controller.signal.aborted) {
+        setOlder({ available: true, loading: false, requested: true, error: 'No se pudieron cargar los mensajes anteriores.' });
+      }
+    } finally {
+      if (olderRequest.current === controller) olderRequest.current = null;
+    }
+  }, [setMessages]);
 
   const handleNewMessage = useCallback((incoming: WhatsAppMessage) => {
     if (incoming.chatId !== selectedChatRef.current) return;
@@ -40,6 +81,7 @@ export function useMessagesManagement() {
     if (selectedChatRef.current === nextChat) return;
     selectedChatRef.current = nextChat;
     loadedHistory.current = null;
+    resetOlder(null);
     setSelectedChat(nextChat);
     setMessages([]);
     setMessageError(null);
@@ -50,7 +92,7 @@ export function useMessagesManagement() {
         setChats((current) => current.map((chat) => chat.id === nextChat ? { ...chat, unreadCount: 0 } : chat));
       }).catch(() => undefined);
     }
-  }, [setChats, setLoadingMessages, setMessages, setSelectedChat]);
+  }, [resetOlder, setChats, setLoadingMessages, setMessages, setSelectedChat]);
 
   useEffect(() => {
     if (!selectedChat) return;
@@ -58,23 +100,33 @@ export function useMessagesManagement() {
     const request = { chatId: selectedChat, arrivals: new Set<string>() };
     historyRequest.current = request;
     const isCurrent = () => !controller.signal.aborted && selectedChatRef.current === selectedChat;
-    if (loadedHistory.current !== selectedChat) setLoadingMessages(true);
+    if (loadedHistory.current?.chatId !== selectedChat) setLoadingMessages(true);
     setMessageError(null);
 
-    getMessagesByChat(selectedChat, 50, controller.signal)
-      .then((history) => {
+    getMessagesByChat(selectedChat, pageSize, controller.signal)
+      .then(({ messages: history, nextCursor }) => {
         if (!isCurrent()) return;
-        loadedHistory.current = selectedChat;
         const ids = new Set(history.map((message) => message.id));
+        const current = store.get(messagesAtom);
+        // Retain older pages only if the refreshed head overlaps the visible history.
+        // After a long disconnect, restart from the fresh page to avoid a hidden gap.
+        const previousHead = loadedHistory.current;
+        const retainOlder = boundary.current?.paging && previousHead?.chatId === selectedChat &&
+          history.some((message) => previousHead.ids.has(message.id));
+        loadedHistory.current = { chatId: selectedChat, ids };
+        if (!retainOlder) resetOlder(nextCursor);
         const newest = Math.max(0, ...history.map((message) => normalizeMessageTimestamp(message.timestamp)));
         // A socket event received during this request can be newer than the snapshot
         // even if both messages have the same provider timestamp.
-        setMessages((current) => [
-          ...history,
-          ...current.filter((message) => message.chatId === selectedChat && !ids.has(message.id) &&
-            (request.arrivals.has(message.id) || message.id.startsWith('temp-file-') ||
-              normalizeMessageTimestamp(message.timestamp) > newest)),
-        ]);
+        const previous: WhatsAppMessage[] = [];
+        const arrivals: WhatsAppMessage[] = [];
+        for (const message of current) {
+          if (message.chatId !== selectedChat || ids.has(message.id)) continue;
+          if (request.arrivals.has(message.id) || message.id.startsWith('temp-file-') ||
+              normalizeMessageTimestamp(message.timestamp) > newest) arrivals.push(message);
+          else if (retainOlder && !message.id.startsWith('temp-')) previous.push(message);
+        }
+        setMessages([...previous, ...history, ...arrivals]);
       })
       .catch((error: unknown) => {
         if (isCurrent()) {
@@ -90,7 +142,7 @@ export function useMessagesManagement() {
       controller.abort();
       if (historyRequest.current === request) historyRequest.current = null;
     };
-  }, [revision, selectedChat, setLoadingMessages, setMessages]);
+  }, [resetOlder, revision, selectedChat, setLoadingMessages, setMessages, store]);
 
   const addOptimisticMessage = useCallback((message: WhatsAppMessage) => {
     if (message.chatId === selectedChatRef.current) {
@@ -119,6 +171,7 @@ export function useMessagesManagement() {
 
   return {
     messages, selectedChat, loadingMessages, messageError, selectChat, handleNewMessage,
+    olderHistory: { ...older, load: loadOlder },
     reloadMessages, addOptimisticMessage, updateOptimisticMessage, markMessageError,
   };
 }

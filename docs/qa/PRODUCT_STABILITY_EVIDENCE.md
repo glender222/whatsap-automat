@@ -70,6 +70,15 @@ Las pruebas de Studio y despacho acotado pasaron 18 casos con PostgreSQL y un pr
 
 Para reproducirlo con el entorno de MSG-01, ejecutar `npm run test:e2e -- e2e/inbox.integration.spec.ts -g 'active tag'`. La prueba SQL está incluida en `legacy-meta-send-postgres.test.ts`.
 
+## MSG-05. Historial con más de una página
+
+- **Antes.** Con 52 mensajes persistidos en un solo segundo, la primera consulta devolvía 50. Usar la fecha de su primer mensaje como límite devolvía cero, aunque quedaban dos mensajes.
+- **Cambio.** El historial de Meta admite `nextCursor` y `cursor` en `/api/chats/:chatId/messages`. PostgreSQL ordena por fecha e identificador y verifica que el ancla pertenezca a la conversación y empresa autenticadas. Se admiten de 1 a 200 mensajes por página. Las consultas existentes con `before` conservan la respuesta por fecha y el proveedor WebJS sigue usando su ruta habitual.
+- **Después.** Dos empresas con los mismos identificadores de proveedor y el mismo segundo recuperaron los 52 mensajes de su propia conversación, en escritorio y móvil. El cursor de Alfa devolvió una página vacía en Bravo. En Alfa, un `503` en la página anterior mostró un reintento y conservó los 50 mensajes. Al recuperar la página, la primera fila visible conservó posición y foco. Tras un mensaje en vivo y otro recibido sin conexión, el historial conservó las páginas cargadas al reconectarse.
+- Si la página más reciente tras la reconexión carece de mensajes en común con la última página recibida, el historial vuelve a paginar desde el resultado reciente para que el tramo intermedio sea accesible.
+
+Para reproducirlo, usar el entorno de MSG-01 y ejecutar `npm run test:e2e -- e2e/inbox.integration.spec.ts -g 'history loads messages'`. `legacy-meta-send-postgres.test.ts` cubre también tres páginas consecutivas, el cursor de otra conversación y la consulta anterior por fecha.
+
 ## IA-01. Evaluación de ejecución por revisión y empresa
 
 - El evaluador interno carga una revisión inmutable y una suite guardada bajo RLS. Verifica las afirmaciones y el presupuesto del conjunto antes de llamar al proveedor. La ejecución reclama un UUID persistido y guarda las huellas de la revisión y de la suite, los resultados de las afirmaciones y las referencias de consumo. El resumen omite el texto de entrada y salida.
@@ -93,7 +102,7 @@ Para reproducirlo, aplicar la migración 056 en la base local de pruebas y ejecu
 
 | Recorrido | Evidencia pendiente |
 | --- | --- |
-| Bandeja en tiempo real | Filtro por etiqueta, reconexión y reorden de webhooks cubiertos en MSG-04. Ampliar la evidencia a paginación e historial en conversaciones grandes. |
-| Envío y recepción | Extender los casos de reorden y duplicados ya probados a la bandeja. Verificar timeout, reintento, historial paginado, adjuntos, ventana de atención y toma de control. Contar las llamadas al proveedor de prueba y comprobar persistencia e identidad. |
+| Bandeja en tiempo real | Filtro por etiqueta, reconexión, reorden de webhooks e historial paginado cubiertos en MSG-04 y MSG-05. |
+| Envío y recepción | Verificar timeout, reintento, adjuntos, ventana de atención y toma de control desde la interfaz. Contar las llamadas al proveedor de prueba y comprobar persistencia e identidad. |
 | Harness IA | Borrador, validación, evaluación de ejecución, publicación y ejecución de una revisión inmutable. Comprobar permisos, límites, cancelación, recuperación y efectos concurrentes. |
 | Flujo operativo y navegación | Atención, pedido, pago, aprobación y conexión. Recorrer como administrador y operador, con teclado y diferentes tamaños de pantalla. |
