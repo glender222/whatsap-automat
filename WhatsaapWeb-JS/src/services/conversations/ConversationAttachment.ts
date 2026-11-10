@@ -83,7 +83,7 @@ export async function uploadConversationAttachment(
 
   if (kind !== 'video') return upload(file);
   try {
-    return await withCompatibleVideo(file, upload, { inspectMp4: true });
+    return await withCompatibleVideo(file, upload, { inspectInput: true });
   } catch (error) {
     if (error instanceof ConversationAttachmentError) throw error;
     const videoError = error as { code?: string; statusCode?: number };

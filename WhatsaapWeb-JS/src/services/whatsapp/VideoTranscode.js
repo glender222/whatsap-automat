@@ -62,11 +62,26 @@ async function isReusableMp4(filePath) {
   );
 }
 
-async function withCompatibleVideo(file, send, { inspectMp4 = false } = {}) {
+function conversionFailed() {
+  return videoError('VIDEO_CONVERSION_FAILED', 422, 'No se pudo convertir el video a MP4 compatible.');
+}
+
+async function withCompatibleVideo(file, send, { inspectInput = false } = {}) {
   const parsedName = path.parse(file.originalname || 'video');
-  if (file.mimetype === 'video/mp4' && parsedName.ext.toLowerCase() === '.mp4' &&
-      (!inspectMp4 || await isReusableMp4(file.path))) {
+  const extension = parsedName.ext.toLowerCase();
+  if (file.mimetype === 'video/mp4' && extension === '.mp4' &&
+      (!inspectInput || await isReusableMp4(file.path))) {
     return send(file);
+  }
+
+  // FFmpeg can exit successfully after reporting a truncated WebM.
+  if (inspectInput && (file.mimetype === 'video/webm' || extension === '.webm')) {
+    try {
+      await isReusableMp4(file.path);
+    } catch (error) {
+      if (error.code !== 'INVALID_VIDEO') throw error;
+      throw conversionFailed();
+    }
   }
 
   const outputPath = `${file.path}-converted.mp4`;
@@ -83,7 +98,7 @@ async function withCompatibleVideo(file, send, { inspectMp4 = false } = {}) {
       if (error.code === 'ENOENT') {
         throw videoError('VIDEO_CONVERSION_UNAVAILABLE', 503, 'La conversión de video no está disponible.');
       }
-      throw videoError('VIDEO_CONVERSION_FAILED', 422, 'No se pudo convertir el video a MP4 compatible.');
+      throw conversionFailed();
     }
 
     const { size } = await stat(outputPath);

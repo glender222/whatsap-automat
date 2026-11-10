@@ -385,9 +385,11 @@ test('legacy HTTP routes never send or persist free-form Meta text and preserve 
     assert.equal(after.messages, beforeA.messages + 5);
 
     const beforeBadInput = attempts.length;
-    const corrupt = await send(chat, video({ chatId: phone }, Buffer.from('corrupt webm')));
-    assert.equal(corrupt.status, 422);
-    assert.equal(corrupt.body.error, 'VIDEO_CONVERSION_FAILED');
+    for (const input of [Buffer.from('corrupt webm'), source.subarray(0, -1000)]) {
+      const corrupt = await send(chat, video({ chatId: phone }, input));
+      assert.equal(corrupt.status, 422);
+      assert.equal(corrupt.body.error, 'VIDEO_CONVERSION_FAILED');
+    }
     for (const input of [Buffer.from('not an mp4'), compatibleMp4.subarray(0, -1000), source.subarray(0, -1000)]) {
       const damaged = await send(chat, declaredMp4(input));
       assert.equal(damaged.status, 422);
