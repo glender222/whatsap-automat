@@ -254,9 +254,11 @@ test('real API isolates two companies through auth, signed ingress, inbox, socke
   assert.ok(report.checks.some((check: { code: string; status: string }) => check.code === 'DB-PG-001' && check.status === 'PASS'));
 
   const approvals = '/api/v1/ai/approvals';
-  const station = { nombre: 'Operador QA', email: `${randomUUID()}@example.invalid`, password: randomUUID() };
-  const { employee } = await api('/api/auth/create-station', 200, owner.accessToken, station);
-  const stationSession = await api('/api/auth/login', 200, undefined, station);
+  const station = { nombre: 'Operador QA', email: `${randomUUID()}@example.invalid` };
+  const { employee, tempPassword } = await api('/api/auth/create-station', 200, owner.accessToken, station);
+  assert.ok(typeof tempPassword === 'string' && /^[A-Za-z0-9!@#$%^&*]{12}$/.test(tempPassword),
+    'Creating a station without a password must return a temporary credential');
+  const stationSession = await api('/api/auth/login', 200, undefined, { ...station, password: tempPassword });
   assert.equal(stationSession.user.id, employee.id);
   assert.equal(stationSession.user.companyId, owner.user.companyId);
   const employeeToken = stationSession.accessToken;
