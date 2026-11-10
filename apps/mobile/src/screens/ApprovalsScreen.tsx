@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect } from '@react-navigation/native';
 import { uuid } from 'expo';
 import ArrowLeft from 'lucide-react-native/icons/arrow-left';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -10,6 +9,7 @@ import {
   type MobileApproval, type MobileApprovalCommand, type MobileApprovalDecision,
 } from '../services/apiClient';
 import { canDecideMobileApproval, canReviewRiskOnMobile } from '../services/approvalPolicy';
+import { useApprovalFeed } from '../services/approvalFeed';
 import { useSession } from '../services/sessionContext';
 import { useRefreshOnFocus } from '../services/useRefreshOnFocus';
 import { DARK_THEME as colors, type RootStackParamList } from '../types/navigation';
@@ -54,40 +54,61 @@ function Action({ label, onPress, disabled = false }: { label: string; onPress: 
 }
 
 export function ApprovalsScreen({ navigation }: NativeStackScreenProps<RootStackParamList, 'Approvals'>) {
-  const [items, setItems] = useState<MobileApproval[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [hasMore, setHasMore] = useState(false);
-  const [error, setError] = useState('');
-  const offset = useRef(0);
+  const { isSessionActive } = useSession();
+  const { page, loading, error, refresh, dismiss } = useApprovalFeed();
+  const [nextPage, setNextPage] = useState<{ anchor: string; items: MobileApproval[]; offset: number; hasMore: boolean }>();
+  const [moreError, setMoreError] = useState('');
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const reading = useRef(false);
+  const pagination = useRef(0);
+  const anchor = JSON.stringify(page.map(({ id }) => id));
+  const older = nextPage?.anchor === anchor ? nextPage : undefined;
+  const items = older ? [...page, ...older.items] : page;
+  const hasMore = older?.hasMore ?? page.length === APPROVAL_PAGE_SIZE;
 
-  const load = useCallback(async (start = 0) => {
-    if (reading.current) return;
+  useEffect(() => {
+    pagination.current++;
+    setNextPage(undefined);
+    setMoreError('');
+  }, [anchor]);
+
+  async function loadMore() {
+    if (reading.current || refreshing || !isSessionActive()) return;
     reading.current = true;
-    setLoading(true);
-    setError('');
+    setLoadingMore(true);
+    setMoreError('');
+    const started = pagination.current;
+    const offset = older?.offset ?? page.length;
     try {
-      const page = await apiClient.listApprovals(start);
-      setItems((current) => {
-        if (start === 0) return page;
-        const shown = new Set(current.map(({ id }) => id));
-        return [...current, ...page.filter(({ id }) => !shown.has(id))];
+      const next = await apiClient.listApprovals(offset);
+      if (!isSessionActive() || started !== pagination.current) return;
+      const shown = new Set(items.map(({ id }) => id));
+      setNextPage({
+        anchor, offset: offset + next.length, hasMore: next.length === APPROVAL_PAGE_SIZE,
+        items: [...(older?.items ?? []), ...next.filter(({ id }) => !shown.has(id))],
       });
-      offset.current = start + page.length;
-      setHasMore(page.length === APPROVAL_PAGE_SIZE);
     } catch (cause) {
-      setError(readError(cause, 'No se pudo cargar la lista de aprobaciones.'));
+      if (!isSessionActive() || started !== pagination.current) return;
+      setMoreError(readError(cause, 'No se pudo cargar la siguiente página.'));
       if (cause instanceof MobileApiError && cause.status === 403) {
-        setItems([]);
-        setHasMore(false);
+        setNextPage(undefined);
+        void refresh(true);
       }
     } finally {
       reading.current = false;
-      setLoading(false);
+      setLoadingMore(false);
     }
-  }, []);
+  }
 
-  useFocusEffect(useCallback(() => { void load(); }, [load]));
+  async function refreshList() {
+    setRefreshing(true);
+    pagination.current++;
+    setNextPage(undefined);
+    setMoreError('');
+    await refresh(true);
+    setRefreshing(false);
+  }
 
   return (
     <SafeAreaView style={styles.screen}>
@@ -96,11 +117,11 @@ export function ApprovalsScreen({ navigation }: NativeStackScreenProps<RootStack
         data={items}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.content}
-        refreshControl={<RefreshControl refreshing={loading && items.length > 0} onRefresh={() => void load()} />}
-        ListHeaderComponent={error ? (
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refreshList()} />}
+        ListHeaderComponent={error || moreError ? (
           <View style={styles.card}>
-            <Text accessibilityRole="alert" style={styles.alert}>{error}</Text>
-            <Action label="Volver a intentar" onPress={() => void load()} disabled={loading} />
+            <Text accessibilityRole="alert" style={styles.alert}>{error || moreError}</Text>
+            <Action label="Volver a intentar" onPress={() => void refreshList()} disabled={refreshing} />
           </View>
         ) : undefined}
         ListEmptyComponent={loading ? <ActivityIndicator accessibilityLabel="Cargando aprobaciones" color={colors.accent} /> :
@@ -110,14 +131,17 @@ export function ApprovalsScreen({ navigation }: NativeStackScreenProps<RootStack
           const risk = riskLabels.get(item.risk) || 'Sin verificar';
           return (
             <Pressable accessibilityRole="button" accessibilityLabel={`Revisar ${title}, riesgo ${risk}`}
-              style={styles.card} onPress={() => navigation.navigate('ApprovalDetail', { approvalId: item.id })}>
+              style={styles.card} onPress={() => {
+                dismiss(item.id);
+                navigation.navigate('ApprovalDetail', { approvalId: item.id });
+              }}>
               <Text style={styles.heading}>{title}</Text>
               <Text style={styles.secondary}>Riesgo {risk} · Vence {dateLabel(item.expiresAt)}</Text>
             </Pressable>
           );
         }}
         ListFooterComponent={hasMore ? (
-          <Action label="Cargar más aprobaciones" disabled={loading} onPress={() => void load(offset.current)} />
+          <Action label="Cargar más aprobaciones" disabled={loadingMore || refreshing} onPress={() => void loadMore()} />
         ) : undefined}
       />
     </SafeAreaView>
@@ -127,6 +151,7 @@ export function ApprovalsScreen({ navigation }: NativeStackScreenProps<RootStack
 export function ApprovalDetailScreen({ route, navigation }: NativeStackScreenProps<RootStackParamList, 'ApprovalDetail'>) {
   const { approvalId } = route.params;
   const { approvalAttempts } = useSession();
+  const { refresh: refreshApprovalList } = useApprovalFeed();
   const [approval, setApproval] = useState<MobileApproval>();
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -187,6 +212,7 @@ export function ApprovalDetailScreen({ route, navigation }: NativeStackScreenPro
       setApproval((current) => current && {
         ...current, status: result.status, policyVersion: Math.max(current.policyVersion, command.expectedVersion + 1),
       });
+      void refreshApprovalList(false, true);
       setNotice(result.status === 'approved' ? 'La aprobación se registró.' : 'El rechazo se registró.');
     } catch (cause) {
       if (cause instanceof MobileApiError && cause.status >= 400 && cause.status < 500 && cause.status !== 408) {

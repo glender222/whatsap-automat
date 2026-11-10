@@ -1,7 +1,9 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AccessibilityInfo,
   ActivityIndicator,
   FlatList,
+  Platform,
   Pressable,
   RefreshControl,
   StyleSheet,
@@ -10,13 +12,14 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect } from '@react-navigation/native';
+import { useIsFocused } from '@react-navigation/native';
 import ClipboardCheck from 'lucide-react-native/icons/clipboard-check';
 import LogOut from 'lucide-react-native/icons/log-out';
 import MessageSquare from 'lucide-react-native/icons/message-square';
 import Search from 'lucide-react-native/icons/search';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { apiClient, type MobileConversation } from '../services/apiClient';
+import { useApprovalFeed } from '../services/approvalFeed';
 import { useSession } from '../services/sessionContext';
 import { useRefreshOnFocus } from '../services/useRefreshOnFocus';
 import { DARK_THEME as colors, type RootStackParamList } from '../types/navigation';
@@ -41,7 +44,10 @@ function timeLabel(timestamp?: number) {
 }
 
 export function InboxScreen({ navigation }: Props) {
-  const { session, signOut } = useSession();
+  const { session, signOut, isSessionActive } = useSession();
+  const { canReview, alertIds, dismiss, refresh: refreshApprovals } = useApprovalFeed();
+  const focused = useIsFocused();
+  const announced = useRef<string | undefined>(undefined);
   const [conversations, setConversations] = useState<MobileConversation[]>([]);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
@@ -50,19 +56,7 @@ export function InboxScreen({ navigation }: Props) {
   const [loadingMore, setLoadingMore] = useState(false);
   const [canLoadMore, setCanLoadMore] = useState(false);
   const [error, setError] = useState('');
-  const [canReviewApprovals, setCanReviewApprovals] = useState(false);
   const offset = useRef(0);
-
-  useFocusEffect(useCallback(() => {
-    let active = true;
-    setCanReviewApprovals(false);
-    void apiClient.getCurrentWorkspace().then((workspace) => {
-      if (active) setCanReviewApprovals(workspace.capabilities.includes('approvals.review'));
-    }).catch(() => {
-      if (active) setCanReviewApprovals(false);
-    });
-    return () => { active = false; };
-  }, []));
 
   const load = useCallback(async () => {
     try {
@@ -88,7 +82,7 @@ export function InboxScreen({ navigation }: Props) {
   async function refreshList() {
     setRefreshing(true);
     offset.current = 0;
-    await refresh();
+    await Promise.all([refresh(), refreshApprovals(true)]);
     setRefreshing(false);
   }
 
@@ -120,6 +114,21 @@ export function InboxScreen({ navigation }: Props) {
       return [item.name, item.id, item.lastMessagePreview].some((text) => text?.toLocaleLowerCase().includes(query));
     });
   }, [conversations, filter, search, session.userId]);
+  const approvalId = canReview ? alertIds[0] : undefined;
+  const approvalNotice = alertIds.length > 1 ? 'Hay aprobaciones nuevas pendientes.' : 'Hay una nueva aprobación pendiente.';
+
+  useEffect(() => {
+    if (Platform.OS === 'ios' && focused && approvalId && announced.current !== approvalId) {
+      announced.current = approvalId;
+      AccessibilityInfo.announceForAccessibility(approvalNotice);
+    }
+  }, [approvalId, approvalNotice, focused]);
+
+  function openApproval(id: string) {
+    if (!isSessionActive()) return;
+    dismiss(id);
+    navigation.navigate('ApprovalDetail', { approvalId: id });
+  }
 
   return (
     <SafeAreaView style={styles.screen}>
@@ -134,11 +143,28 @@ export function InboxScreen({ navigation }: Props) {
           </Pressable>
         </View>
 
-        {canReviewApprovals ? (
+        {canReview ? (
           <Pressable style={styles.approvals} accessibilityRole="button" onPress={() => navigation.navigate('Approvals')}>
             <ClipboardCheck size={18} color={colors.accent} />
             <Text style={styles.action}>Aprobaciones</Text>
           </Pressable>
+        ) : null}
+
+        {approvalId ? (
+          <View style={styles.approvalNotice}>
+            <Text accessibilityLiveRegion="polite" accessibilityRole="alert" style={styles.approvalNoticeText}>
+              {approvalNotice}
+            </Text>
+            <View style={styles.noticeActions}>
+              <Pressable accessibilityRole="button" style={styles.textButton} onPress={() => openApproval(approvalId)}>
+                <Text style={styles.action}>Ver aprobación</Text>
+              </Pressable>
+              <Pressable accessibilityRole="button" accessibilityLabel="Descartar aviso de aprobación"
+                style={styles.textButton} onPress={() => dismiss(approvalId)}>
+                <Text style={styles.secondary}>Descartar</Text>
+              </Pressable>
+            </View>
+          </View>
         ) : null}
 
         <View style={styles.search}>
@@ -239,6 +265,9 @@ const styles = StyleSheet.create({
   title: { color: colors.textPrimary, fontSize: 25, fontWeight: '800' },
   iconButton: { width: 44, height: 44, borderRadius: 10, backgroundColor: colors.surface, justifyContent: 'center', alignItems: 'center' },
   approvals: { minHeight: 44, alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, borderRadius: 10, backgroundColor: colors.surface },
+  approvalNotice: { paddingHorizontal: 12, paddingTop: 8, borderWidth: 1, borderColor: colors.border, borderRadius: 10, backgroundColor: colors.surface },
+  approvalNoticeText: { color: colors.textPrimary, lineHeight: 20 },
+  noticeActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 16 },
   search: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, minHeight: 46, backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1, borderRadius: 10 },
   searchInput: { flex: 1, minHeight: 44, color: colors.textPrimary, fontSize: 16 },
   filters: { flexDirection: 'row', flexWrap: 'wrap', paddingVertical: 12, paddingHorizontal: 16, gap: 8 },

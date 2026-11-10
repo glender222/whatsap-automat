@@ -7,6 +7,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { apiClient, handleUnauthorized, type MobileApprovalCommand, type MobileSendCommand } from './src/services/apiClient';
 import { authStorage, type AuthSession } from './src/services/authStorage';
 import { SessionContext } from './src/services/sessionContext';
+import { ApprovalFeedProvider } from './src/services/approvalFeed';
 import { SignInScreen } from './src/screens/SignInScreen';
 import { InboxScreen } from './src/screens/InboxScreen';
 import { ChatDetailScreen } from './src/screens/ChatDetailScreen';
@@ -115,15 +116,17 @@ export default function App() {
   } else if (session) {
     screen = (
       <SessionContext.Provider value={{ session, signOut, isSessionActive, pendingReplies, rememberReply, forgetReply, approvalAttempts: approvalAttempts.current }}>
-        <NavigationContainer theme={navigationTheme}>
-          <Stack.Navigator screenOptions={{ headerShown: false }}>
-            <Stack.Screen name="Inbox" component={InboxScreen} />
-            <Stack.Screen name="ChatDetail" component={ChatDetailScreen} />
-            <Stack.Screen name="AttachmentDetail" component={AttachmentDetailScreen} />
-            <Stack.Screen name="Approvals" component={ApprovalsScreen} />
-            <Stack.Screen name="ApprovalDetail" component={ApprovalDetailScreen} />
-          </Stack.Navigator>
-        </NavigationContainer>
+        <ApprovalFeedProvider>
+          <NavigationContainer theme={navigationTheme}>
+            <Stack.Navigator screenOptions={{ headerShown: false }}>
+              <Stack.Screen name="Inbox" component={InboxScreen} />
+              <Stack.Screen name="ChatDetail" component={ChatDetailScreen} />
+              <Stack.Screen name="AttachmentDetail" component={AttachmentDetailScreen} />
+              <Stack.Screen name="Approvals" component={ApprovalsScreen} />
+              <Stack.Screen name="ApprovalDetail" component={ApprovalDetailScreen} />
+            </Stack.Navigator>
+          </NavigationContainer>
+        </ApprovalFeedProvider>
       </SessionContext.Provider>
     );
   }

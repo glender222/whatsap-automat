@@ -33,6 +33,8 @@ El botón **Adjuntar archivo** admite imágenes PNG y JPEG de hasta 5 MB y los f
 
 La bandeja muestra **Aprobaciones** cuando el servidor concede `approvals.review`. Una decisión ordinaria requiere confirmación y usa la versión de la solicitud y una clave que se conserva durante la sesión para reintentar la misma decisión. Las solicitudes de riesgo alto, financiero, irreversible o sin verificar permanecen visibles con la decisión bloqueada hasta contar con los controles de verificación correspondientes.
 
+La bandeja muestra un aviso interno al detectar solicitudes nuevas en la primera página de aprobaciones. La primera consulta establece el punto de partida de la sesión. La bandeja y la lista comparten una actualización cada 15 segundos en primer plano y al retomar la app. El aviso contiene un texto genérico y abre el detalle autenticado. Los avisos desaparecen al salir de la cuenta, al perder el permiso o al dejar de figurar como pendientes. Las notificaciones del sistema con la app en segundo plano requieren el registro y la entrega push.
+
 En WhatsApp Cloud, la conversación permite seleccionar cada adjunto disponible. El cliente descarga bajo demanda hasta 10 MiB desde el servidor autenticado. La vista previa de imágenes usa memoria. **Descargar archivo** guarda una copia en el navegador o en la carpeta elegida mediante el selector nativo. La aplicación no crea archivos temporales para este recorrido. Queda pendiente probar la vista previa y el selector en Android e iOS físicos.
 
 ## Distribución
