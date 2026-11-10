@@ -31,3 +31,18 @@ export interface BoundedTextAdapter {
 export function boundedTextCost(promptTokens: number, completionTokens: number, cachedTokens = 0): number {
   return Math.ceil(((promptTokens - cachedTokens) * 750 + cachedTokens * 75 + completionTokens * 4_500) / 1_000);
 }
+
+export function isBoundedText(value: unknown): value is string {
+  return typeof value === 'string' && Boolean(value.trim()) && value.length <= 4096 && !/[\u0000\uD800-\uDFFF]/u.test(value);
+}
+
+export function boundedTextBudget(maxCompletionTokens: number, timeoutMs: number) {
+  const capability = boundedTextCapability;
+  if (!Number.isSafeInteger(maxCompletionTokens) || maxCompletionTokens < 1 || maxCompletionTokens > capability.maxCompletionTokens ||
+      !Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > capability.maxTimeoutMs) return null;
+  // Reserve the whole context window to account for provider-added formatting without estimating tokenization.
+  return {
+    maxTokens: capability.maxPromptTokens + maxCompletionTokens,
+    maxCostMicroUsd: boundedTextCost(capability.maxPromptTokens, maxCompletionTokens),
+  };
+}

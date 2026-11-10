@@ -2,6 +2,7 @@ import { ByokService } from './byok/ByokService';
 import { QuotaManager } from './QuotaManager';
 import { TokenCostLedger } from './TokenCostLedger';
 import { CostCalculator } from './CostCalculator';
+import { deniedStrictCapability, type ModelGatewayAdmission, type StrictModelGateway } from './StrictModelGateway';
 import { IModelAdapter } from './adapters/IModelAdapter';
 import { OpenAiAdapter } from './adapters/OpenAiAdapter';
 import { AnthropicAdapter } from './adapters/AnthropicAdapter';
@@ -27,7 +28,8 @@ export class ModelGateway implements IModelGateway {
     private readonly quotaManager: QuotaManager = new QuotaManager(),
     private readonly ledger: TokenCostLedger = new TokenCostLedger(),
     private readonly customFetch?: FetchFunction,
-    private readonly embeddingMode: 'provider' | 'synthetic' = 'provider'
+    private readonly embeddingMode: 'provider' | 'synthetic' = 'provider',
+    private readonly admission?: ModelGatewayAdmission,
   ) {}
 
   /**
@@ -48,6 +50,8 @@ export class ModelGateway implements IModelGateway {
     const request = parseResult.data;
     const tenantId = Number(request.tenantId);
     const startTime = Date.now();
+    const strict = await this.resolveAdmission(tenantId);
+    if (strict) return strict.complete(tenantId, request);
 
     // 1. Enforce atomic quota limit before dispatching
     await this.quotaManager.assertWithinQuota(tenantId);
@@ -159,6 +163,9 @@ export class ModelGateway implements IModelGateway {
   ): Promise<TestByokConnectionResultV1> {
     const startTime = Date.now();
     try {
+      const strict = await this.resolveAdmission(tenantId);
+      if (strict) return await strict.testConnection(tenantId, params);
+
       let resolvedApiKey = params.apiKey;
       let resolvedBaseUrl = params.baseUrl;
 
@@ -209,6 +216,9 @@ export class ModelGateway implements IModelGateway {
    */
   async embed(request: EmbeddingRequest): Promise<EmbeddingResult> {
     const tenantId = Number(request.tenantId);
+    if (await this.resolveAdmission(tenantId)) {
+      throw deniedStrictCapability('A bounded embedding profile is unavailable');
+    }
     const provider = request.provider || 'openai';
     const model = request.model || (provider === 'local_openai' ? 'nomic-embed-text' : 'text-embedding-3-small');
     const startTime = Date.now();
@@ -305,6 +315,19 @@ export class ModelGateway implements IModelGateway {
       model,
       latencyMs,
     };
+  }
+
+  private async resolveAdmission(tenantId: number): Promise<StrictModelGateway | null> {
+    if (!this.admission) return null;
+    let mode: Awaited<ReturnType<ModelGatewayAdmission['modeForTenant']>>;
+    try {
+      mode = await this.admission.modeForTenant(tenantId);
+    } catch {
+      throw Object.assign(new Error('AI quota admission could not be verified'), { code: 'AI_ADMISSION_UNAVAILABLE', statusCode: 503 });
+    }
+    if (mode === 'legacy') return null;
+    if (mode === 'strict') return this.admission.strict;
+    throw Object.assign(new Error('AI provider dispatch is unavailable for this tenant'), { code: 'AI_ADMISSION_UNAVAILABLE', statusCode: 503 });
   }
 
   /**

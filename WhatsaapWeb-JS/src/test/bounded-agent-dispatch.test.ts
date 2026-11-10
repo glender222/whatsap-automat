@@ -10,8 +10,14 @@ import { Pool } from 'pg';
 import { TenantScopedUoW } from '../db/TenantScopedUoW';
 import { AiQuotaCapacityError, AiQuotaReservationConflictError, AiQuotaReservationStore } from '../services/ai/gateway/AiQuotaReservationStore';
 import { boundedTextCapability } from '../services/ai/gateway/BoundedTextCompletion';
+import { dispatchBoundedText } from '../services/ai/gateway/BoundedTextDispatcher';
+import { ModelGateway } from '../services/ai/gateway/ModelGateway';
+import { QuotaManager } from '../services/ai/gateway/QuotaManager';
+import { StrictModelGateway, type ModelGatewayAdmission } from '../services/ai/gateway/StrictModelGateway';
 import { TokenCostLedger } from '../services/ai/gateway/TokenCostLedger';
 import { OpenAiBoundedTextAdapter } from '../services/ai/gateway/adapters/OpenAiBoundedTextAdapter';
+import { ByokService } from '../services/ai/gateway/byok/ByokService';
+import type { ModelGatewayRequest } from '../services/ai/gateway/types';
 import { BoundedAgentDispatch, preflightBoundedAgentDispatch } from '../services/ai/studio/BoundedAgentDispatch';
 
 const databaseUrl = process.env.AI_QUOTA_RESERVATIONS_TEST_DATABASE_URL;
@@ -65,6 +71,16 @@ test('dispatch preflight binds text, tenant and revision to explicit cost, token
   }
 });
 
+test('shared dispatcher fails closed if a caller underestimates the compiled bound', async () => {
+  const plan = preflightBoundedAgentDispatch({ tenantId: 1, graph: revision(1), input: 'Fixture', timeoutMs: 1000 });
+  assert.ok(plan.ok);
+  const unexpected = async () => assert.fail('Admission must reject before storage or provider dispatch');
+  assert.deepEqual(await dispatchBoundedText({ reserve: unexpected, claim: unexpected, settle: unexpected }, {
+    capabilityId: boundedTextCapability.id, complete: unexpected,
+  }, { tenantId: 1, attemptId: randomUUID(), operation: 'completion', plan: { ...plan, maxTokens: 1 },
+    isByok: false, started: performance.now() }), { status: 'capability_unavailable' });
+});
+
 async function startFixture(t: TestContext) {
   const requests: Record<string, unknown>[] = [];
   let stalledBodyClosed = false;
@@ -91,10 +107,10 @@ async function startFixture(t: TestContext) {
         return;
       }
       const promptTokens = 12;
-      const completionTokens = input === 'overrun' ? 41 : 4;
+      const completionTokens = input === 'overrun' ? 41 : Math.min(4, body.max_completion_tokens);
       const usage = {
         prompt_tokens: promptTokens, completion_tokens: completionTokens, total_tokens: promptTokens + completionTokens,
-        prompt_tokens_details: { cached_tokens: 2 }, completion_tokens_details: { reasoning_tokens: 3 },
+        prompt_tokens_details: { cached_tokens: 2 }, completion_tokens_details: { reasoning_tokens: Math.min(3, completionTokens) },
       };
       res.end(JSON.stringify({
         model, service_tier: input === 'unexpected-tier' ? 'priority' : 'default',
@@ -220,5 +236,140 @@ test('bounded dispatch via a loopback provider fixture and real quota store', {
     const { items } = await ledger.query(tenantId);
     assert.deepEqual(items.map((entry) => entry.status), ['failed', 'budget_exhausted', 'success']);
     assert.deepEqual(items.map((entry) => entry.totalTokens), [16, 53, 16]);
+  });
+});
+
+test('injected strict ModelGateway admission shares quota with eval and preserves legacy tenants', {
+  skip: !databaseUrl && 'AI_QUOTA_RESERVATIONS_TEST_DATABASE_URL is required',
+}, async (t) => {
+  const pool = new Pool({ connectionString: databaseUrl });
+  t.after(() => pool.end());
+  const uow = new TenantScopedUoW(pool);
+  const quota = new AiQuotaReservationStore(uow);
+  const ledger = new TokenCostLedger(uow);
+  const { adapter, requests } = await startFixture(t);
+  const modes = new Map<number, 'legacy' | 'draining' | 'strict'>();
+  const transportScopes: { tenantId: number; explicitKey: boolean }[] = [];
+  const strict = new StrictModelGateway(quota, async ({ tenantId, probeApiKey }) => {
+    transportScopes.push({ tenantId, explicitKey: probeApiKey !== undefined });
+    return { adapter, isByok: true };
+  });
+  const admission: ModelGatewayAdmission = {
+    modeForTenant: async (tenantId) => {
+      const mode = modes.get(tenantId);
+      if (!mode) throw new Error('synthetic policy lookup failure');
+      return mode;
+    },
+    strict,
+  };
+
+  class FixtureByok extends ByokService {
+    override async resolveDecryptedCredential() {
+      return { apiKey: 'legacy-local-fixture-key', baseUrl: null, defaultModel: null, isByok: true };
+    }
+  }
+
+  const legacyCalls: string[] = [];
+  const byok = new FixtureByok();
+  const gateway = new ModelGateway(byok, new QuotaManager(uow), ledger, async (url) => {
+    legacyCalls.push(String(url));
+    if (String(url).endsWith('/embeddings')) {
+      return Response.json({ data: [{ index: 0, embedding: [0, 1] }], usage: { prompt_tokens: 2 } });
+    }
+    return Response.json({ choices: [{ message: { content: 'Legacy fixture' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 8, completion_tokens: 1, total_tokens: 9 } });
+  }, 'provider', admission);
+
+  async function tenant(mode?: 'legacy' | 'draining' | 'strict', tokens = 10_000_000) {
+    const tenantId = randomInt(500_000_000, 900_000_000);
+    await uow.run(tenantId, async (db) => {
+      await db.query('INSERT INTO tenants (id, name, slug) VALUES ($1, $2, $3)', [tenantId, 'Gateway admission test', `admission-${randomUUID()}`]);
+      await db.query('INSERT INTO tenant_ai_quotas (tenant_id, monthly_token_limit) VALUES ($1, $2)', [tenantId, tokens]);
+    });
+    if (mode) modes.set(tenantId, mode);
+    return tenantId;
+  }
+
+  function completion(tenantId: number, input = 'normal'): ModelGatewayRequest {
+    return {
+      schemaVersion: 1, tenantId, provider: 'openai', model, maxTokens: 40, timeoutMs: 1000,
+      messages: [{ role: 'system', content: 'Fixture prompt' }, { role: 'user', content: input }],
+    };
+  }
+
+  await t.test('rejects unsupported complete, embed and connection profiles before transport resolution', async () => {
+    const tenantId = await tenant('strict');
+    for (const override of [{ model: 'gpt-5.4-mini' }, { maxTokens: undefined }, { temperature: 0.5 }, { workspaceId: 1 }]) {
+      await assert.rejects(gateway.complete({ ...completion(tenantId), ...override }), { code: 'POLICY_DENIED' });
+    }
+    await assert.rejects(gateway.embed({ tenantId, input: ['text'] }), { code: 'POLICY_DENIED' });
+    const synthetic = new ModelGateway(byok, new QuotaManager(uow), ledger, undefined, 'synthetic', admission);
+    await assert.rejects(synthetic.embed({ tenantId, input: ['text'] }), { code: 'POLICY_DENIED' });
+    assert.equal((await gateway.testConnection(tenantId, { provider: 'openai', baseUrl: 'https://example.invalid' })).ok, false);
+    assert.equal((await gateway.testConnection(tenantId, { provider: 'anthropic' })).ok, false);
+    assert.deepEqual(transportScopes, []);
+    assert.deepEqual(requests, []);
+    assert.deepEqual(legacyCalls, []);
+  });
+
+  await t.test('accounts strict completion and connection probe using the same ledger and limits', async () => {
+    const tenantId = await tenant('strict');
+    const result = await gateway.complete(completion(tenantId));
+    assert.equal(result.text, 'Fixture output');
+    assert.equal(result.costMicroUsd, 26);
+    assert.deepEqual(result.usage, { promptTokens: 12, completionTokens: 4, totalTokens: 16 });
+    assert.equal((await gateway.testConnection(tenantId, { provider: 'openai', apiKey: 'probe-fixture-only' })).ok, true);
+    assert.equal(requests.at(-1)?.max_completion_tokens, 1);
+    assert.deepEqual(transportScopes.slice(-2), [{ tenantId, explicitKey: false }, { tenantId, explicitKey: true }]);
+    const { items } = await ledger.query(tenantId);
+    assert.deepEqual(items.map((entry) => [entry.operation, entry.totalTokens, entry.costMicroUsd]),
+      [['completion', 13, 13], ['completion', 16, 26]]);
+    const noQuota = await tenant('strict', 400_000);
+    const sent = requests.length;
+    assert.equal((await gateway.testConnection(noQuota, { provider: 'openai' })).ok, false);
+    assert.equal(requests.length, sent);
+  });
+
+  await t.test('ordinary and eval holds contend while a smaller ordinary attempt still fits after uncertainty', async () => {
+    const tenantId = await tenant('strict', 800_060);
+    const evaluation = new BoundedAgentDispatch(quota, adapter, true);
+    const evalAttempt = { tenantId, graph: revision(tenantId), input: 'normal', attemptId: randomUUID(), timeoutMs: 1000 };
+    const initialCalls = requests.length;
+    await assert.rejects(gateway.complete(completion(tenantId, 'missing-usage')), { code: 'MODEL_OUTCOME_UNCONFIRMED' });
+    await assert.rejects(evaluation.dispatch(evalAttempt), AiQuotaCapacityError);
+    const smaller = await gateway.complete({ ...completion(tenantId), maxTokens: 1 });
+    assert.equal(smaller.usage.completionTokens, 1);
+    assert.equal(requests.length, initialCalls + 2);
+    const rows = await uow.run(tenantId, (db) => db.query(
+      'SELECT operation, status, max_tokens FROM ai_quota_reservations WHERE tenant_id = $1 ORDER BY created_at', [tenantId]
+    ));
+    assert.deepEqual(rows.rows, [
+      { operation: 'completion', status: 'claimed', max_tokens: 400_040 },
+      { operation: 'completion', status: 'settled', max_tokens: 400_001 },
+    ]);
+
+    const reverse = await tenant('strict', 800_060);
+    const reverseEval = { ...evalAttempt, tenantId: reverse, graph: revision(reverse), input: 'missing-usage' };
+    assert.equal((await evaluation.dispatch(reverseEval)).status, 'uncertain');
+    await assert.rejects(gateway.complete(completion(reverse)), AiQuotaCapacityError);
+    assert.equal(requests.length, initialCalls + 3);
+  });
+
+  await t.test('legacy operations remain available and draining or policy failure cannot fall back', async () => {
+    const legacy = await tenant('legacy');
+    const legacyRequest = { ...completion(legacy), model: 'gpt-4o-mini', messages: [{ role: 'user' as const, content: 'normal' }] };
+    assert.equal((await gateway.complete(legacyRequest)).text, 'Legacy fixture');
+    assert.deepEqual((await gateway.embed({ tenantId: legacy, input: ['normal'] })).embeddings, [[0, 1]]);
+    assert.equal((await gateway.testConnection(legacy, { provider: 'openai' })).ok, true);
+    assert.equal(legacyCalls.length, 3);
+
+    const initialCalls = requests.length;
+    for (const id of [await tenant('draining'), await tenant()]) {
+      await assert.rejects(gateway.complete(completion(id)), { code: 'AI_ADMISSION_UNAVAILABLE' });
+      await assert.rejects(gateway.embed({ tenantId: id, input: ['text'] }), { code: 'AI_ADMISSION_UNAVAILABLE' });
+      assert.equal((await gateway.testConnection(id, { provider: 'openai' })).ok, false);
+    }
+    assert.equal(requests.length, initialCalls);
+    assert.equal(legacyCalls.length, 3);
   });
 });
