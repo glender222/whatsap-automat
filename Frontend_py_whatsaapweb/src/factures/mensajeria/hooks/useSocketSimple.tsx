@@ -1,5 +1,6 @@
 
 import { useEffect, useRef } from 'react';
+import { isAxiosError } from 'axios';
 import { Socket } from 'socket.io-client';
 import SocketService from '../../../utils/socket';
 import { readSession } from '../../../shared/auth/session';
@@ -15,10 +16,12 @@ interface UseSocketSimpleProps {
   selectedChat: string | null;
   onNewMessage: (message: MessageInfo) => void;
   onChatUpdate: (updater: (prevChats: ChatInfo[]) => ChatInfo[]) => void;
+  onConnect: () => void;
+  onUnlistedChat: () => void;
   chats: ChatInfo[];
 }
 
-export const useSocketSimple = ({ selectedChat, onNewMessage, onChatUpdate, chats }: UseSocketSimpleProps) => {
+export const useSocketSimple = ({ selectedChat, onNewMessage, onChatUpdate, onConnect, onUnlistedChat, chats }: UseSocketSimpleProps) => {
   const socketRef = useRef<Socket | null>(null);
   const lastReadMarkRef = useRef<Record<string, number>>({});
 
@@ -60,22 +63,14 @@ export const useSocketSimple = ({ selectedChat, onNewMessage, onChatUpdate, chat
       console.log('⏳ Esperando conexión del socket...');
     }
 
-    // Listener para cuando se conecta el socket
-    const handleConnect = () => {
-      console.log('✅ Socket conectado - ID:', socket.id);
-      // ⚠️ NO emitir 'request-chats' aquí
-      // Los chats se cargan vía /tags/{id}/chats/full en Inicio.tsx
-      // El socket solo mantiene updates de mensajes y reordenamientos
-    };
-
-    socket.on('connect', handleConnect);
+    socket.on('connect', onConnect);
 
     return () => {
-      socket.off('connect', handleConnect);
+      socket.off('connect', onConnect);
       // NO desconectar aquí, ya que otros componentes pueden necesitar el socket
       // Cleanup se maneja en el nivel superior (App.tsx)
     };
-  }, []); // [] = solo se ejecuta una vez al montar
+  }, [onConnect]);
 
   // Configurar listeners cuando cambien las dependencias
   useEffect(() => {
@@ -92,6 +87,7 @@ export const useSocketSimple = ({ selectedChat, onNewMessage, onChatUpdate, chat
 
       // Llamar al callback con timestamp ya en ms
       onNewMessage(msg);
+      if (msg.chatId && !chats.some((chat) => chat.id === msg.chatId)) onUnlistedChat();
 
       // Si el usuario está en el chat, marcar como leído automáticamente
       if (msg.chatId === selectedChat && !msg.fromMe) {
@@ -101,13 +97,14 @@ export const useSocketSimple = ({ selectedChat, onNewMessage, onChatUpdate, chat
           lastReadMarkRef.current[msg.chatId] = now;
           try {
             await markChatAsRead(msg.chatId);
-          } catch (error: any) {
-            if (error?.response?.status === 429 || error?.message?.includes('Demasiadas solicitudes')) {
+          } catch (error: unknown) {
+            const status = isAxiosError(error) ? error.response?.status : undefined;
+            if (status === 429 || (error instanceof Error && error.message.includes('Demasiadas solicitudes'))) {
               console.info('[WhatsApp Socket] marcado como leído omitido por rate limit temporal');
             } else {
               console.warn('Error al marcar mensaje como leído automáticamente', {
-                status: error?.response?.status || null,
-                code: error?.code || null,
+                status: status ?? null,
+                code: isAxiosError(error) ? error.code ?? null : null,
               });
             }
           }
@@ -128,46 +125,21 @@ export const useSocketSimple = ({ selectedChat, onNewMessage, onChatUpdate, chat
       // Extraer preview
       const preview = (msg.body && msg.body.trim()) ? msg.body.substring(0, 120) : (msg.mediaUrl ? '[Media]' : null);
 
-      // Actualizar/insertar chat y reordenar SOLO si hay un mensaje nuevo
+      // La API decide la pertenencia al filtro activo. El socket solo actualiza filas visibles.
       onChatUpdate((prevChats: ChatInfo[]) => {
-        const copy = [...prevChats];
-        const idx = copy.findIndex(c => c.id === msg.chatId);
+        const index = prevChats.findIndex((chat) => chat.id === msg.chatId);
+        if (index === -1) return prevChats;
 
-        if (idx > -1) {
-          const existing = { ...copy[idx] };
-          // Actualizar solo si el mensaje es más reciente
-          if ((msg.timestamp || 0) >= (existing.lastMessageTimestamp || 0)) {
-            existing.lastMessageTimestamp = msg.timestamp;
-            if (preview != null) existing.lastMessagePreview = preview;
-
-            // Lógica de unread count mejorada
-            if (!msg.fromMe) {
-              // Si NO estoy en ese chat, incrementar unread
-              if (selectedChat !== msg.chatId) {
-                existing.unreadCount = (existing.unreadCount || 0) + 1;
-              } else {
-                // Si estoy en el chat, mantener como leído (no incrementar)
-                existing.unreadCount = 0;
-              }
-            } else {
-              // Si es mi mensaje, siempre marcar como leído
-              existing.unreadCount = 0;
-            }
-          }
-          copy[idx] = existing;
-        } else {
-          // Solo agregar si es un chat completamente nuevo
-          copy.push({
-            id: msg.chatId || 'unknown',
-            name: msg.sender || (msg.chatId || 'Desconocido'),
-            lastMessageTimestamp: msg.timestamp,
-            lastMessagePreview: preview,
-            unreadCount: msg.fromMe ? 0 : 1,
-          });
-        }
-
-        // Solo reordenar si hubo un cambio real de timestamp
-        return sortChatsByActivity(copy);
+        const existing = prevChats[index];
+        if ((msg.timestamp || 0) < (existing.lastMessageTimestamp || 0)) return prevChats;
+        const next = [...prevChats];
+        next[index] = {
+          ...existing,
+          lastMessageTimestamp: msg.timestamp,
+          lastMessagePreview: preview ?? existing.lastMessagePreview,
+          unreadCount: msg.fromMe || selectedChat === msg.chatId ? 0 : (existing.unreadCount || 0) + 1,
+        };
+        return sortChatsByActivity(next);
       });
     };
 
@@ -195,7 +167,7 @@ export const useSocketSimple = ({ selectedChat, onNewMessage, onChatUpdate, chat
       socket.off('message', handleMessage);
       socket.off('message-replaced', handleMessageReplaced);
     };
-  }, [selectedChat, onNewMessage, onChatUpdate, chats]);
+  }, [selectedChat, onNewMessage, onChatUpdate, onUnlistedChat, chats]);
 
   useEffect(() => {
     const socket = socketRef.current;

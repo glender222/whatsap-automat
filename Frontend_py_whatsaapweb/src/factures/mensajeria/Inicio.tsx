@@ -10,7 +10,7 @@ import ChatContainer from './components/ChatContainer';
 import ConversationHeader from './components/MobileHeader';
 import { chatsAtom } from '../../jotai/slices/messagesAtoms';
 import { userAtom } from '../../jotai/slices/authAtoms';
-import type { WhatsAppChat, WhatsAppMessage } from '../../shared/types/wsp';
+import type { WhatsAppMessage } from '../../shared/types/wsp';
 import { useSocketSimple } from './hooks/useSocketSimple';
 import { useChatsManagement } from './hooks/useChatsManagement';
 import { useMessagesManagement } from './hooks/useMessagesManagement';
@@ -52,15 +52,27 @@ export default function Inicio() {
     galleryOpen, galleryImages, galleryAllMedia, galleryUserInfo, galleryIndex, handleOpenGallery, closeGallery,
   } = useGalleryModal();
 
-  const onChatUpdate = useCallback((update: (current: WhatsAppChat[]) => WhatsAppChat[]) => {
-    setChats((current) => {
-      // La pertenencia a la etiqueta la determina la API, no un evento de Socket.IO.
-      const visibleIds = new Set(current.map((chat) => chat.id));
-      return update(current).filter((chat) => visibleIds.has(chat.id));
-    });
-  }, [setChats]);
+  const inboxRefresh = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reloadUnlistedChats = useCallback(() => {
+    if (inboxRefresh.current !== null) return;
+    inboxRefresh.current = setTimeout(() => {
+      inboxRefresh.current = null;
+      reloadChats();
+    }, 150);
+  }, [reloadChats]);
+  useEffect(() => () => {
+    if (inboxRefresh.current !== null) clearTimeout(inboxRefresh.current);
+    inboxRefresh.current = null;
+  }, []);
 
-  useSocketSimple({ selectedChat, chats, onNewMessage: handleNewMessage, onChatUpdate });
+  const refreshOnConnection = useCallback(() => {
+    reloadUnlistedChats();
+    reloadMessages();
+  }, [reloadMessages, reloadUnlistedChats]);
+  useSocketSimple({
+    selectedChat, chats, onNewMessage: handleNewMessage, onChatUpdate: setChats,
+    onConnect: refreshOnConnection, onUnlistedChat: reloadUnlistedChats,
+  });
 
   useEffect(() => {
     selectChat(requestedChat ?? '');

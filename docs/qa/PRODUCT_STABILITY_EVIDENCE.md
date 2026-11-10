@@ -17,13 +17,27 @@ npx playwright install chromium
 npm run test:e2e -- e2e/theme.spec.ts
 ```
 
-Para usar Chrome instalado en el sistema se puede ejecutar `PLAYWRIGHT_CHANNEL=chrome npm run test:e2e -- e2e/theme.spec.ts`. Las pruebas de apariencia usan respuestas HTTP de prueba y dos sesiones de navegador. La comprobación de permisos entre empresas requiere API y PostgreSQL reales.
+Para usar Chrome instalado en el sistema se puede ejecutar `PLAYWRIGHT_CHANNEL=chrome npm run test:e2e -- e2e/theme.spec.ts`. Las pruebas de apariencia usan respuestas HTTP de prueba y dos sesiones de navegador.
+
+## MSG-01. Conversaciones nuevas y recuperación de la bandeja
+
+- **Antes.** Chrome abrió dos bandejas vacías conectadas por Socket.IO. El backend confirmó los webhooks firmados y el historial HTTP devolvió el texto correcto por empresa. La prueba falló porque el mensaje nuevo de Alfa seguía ausente de su bandeja.
+- **Cambio.** Socket.IO actualiza las filas existentes. Cuando llega un mensaje de una conversación ausente, la bandeja consulta el filtro activo por HTTP. Al conectar de nuevo, también consulta el historial seleccionado.
+- **Después.** La prueba pasó con backend compilado y PostgreSQL con RLS. Alfa y Bravo recibieron mensajes diferentes con el mismo contacto e identificador del proveedor. Cada bandeja mostró su propio texto. Al cortar la conexión de Alfa, otro mensaje quedó guardado y apareció al reconectar mediante una recarga automática del historial. Bravo no lo vio.
+
+La prueba utiliza un backend local con la configuración sintética del job `product-smoke` en [CI](../../.github/workflows/ci.yml). Se requiere PostgreSQL en `127.0.0.1`, una base separada con nombre terminado en `_smoke`, las migraciones aplicadas y el token de fixture `synthetic-local-token`. Con las variables del backend exportadas y `PRODUCT_SMOKE_URL` apuntando a ese servidor, ejecutar desde `Frontend_py_whatsaapweb`:
+
+```sh
+npm run test:e2e -- e2e/inbox.integration.spec.ts
+```
+
+Las pruebas de Studio y despacho acotado pasaron 18 casos con PostgreSQL y un proveedor local de prueba. Confirman el aislamiento de revisiones y las cuotas, además de que la ruta de publicación actual devuelve `501`.
 
 ## Recorridos por cerrar
 
 | Recorrido | Evidencia pendiente |
 | --- | --- |
-| Bandeja en tiempo real | Conversación nueva, filtro activo, recuperación tras corte de Socket.IO y cambios de entrega. Verificar pantalla, API y filas por empresa. |
+| Bandeja en tiempo real | Filtro por etiqueta y cambios de entrega con un historial abierto. Extender la evidencia de navegador de MSG-01. |
 | Envío y recepción | Reorden, duplicados, timeout, reintento, historial paginado, adjuntos, ventana de atención y toma de control. Contar las llamadas al proveedor de prueba y comprobar persistencia e identidad. |
 | Harness IA | Borrador, validación, evaluación de ejecución, publicación y ejecución de una revisión inmutable. Comprobar permisos, límites, cancelación, recuperación y efectos concurrentes. |
 | Flujo operativo y navegación | Atención, pedido, pago, aprobación y conexión. Recorrer como administrador y operador, con teclado y diferentes tamaños de pantalla. |

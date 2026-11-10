@@ -13,7 +13,7 @@
     "properties": [
       {
         "name": "whatsap:lock-sha256:Frontend_py_whatsaapweb",
-        "value": "4a32a0001e9adadec0c4309964ff8ad0ce3233096a22345003f4e03a624c185f"
+        "value": "4a39cbb836824909ae1bc3681320eaf35b501b1dcd344306098c6c027fe0bd92"
       },
       {
         "name": "whatsap:lock-sha256:WhatsaapWeb-JS",
@@ -2542,6 +2542,35 @@
         {
           "name": "whatsap:npm:scope",
           "value": "runtime"
+        }
+      ]
+    },
+    {
+      "bom-ref": "whatsap:Frontend_py_whatsaapweb#node_modules/@playwright/test",
+      "type": "library",
+      "name": "@playwright/test",
+      "version": "1.65.0",
+      "purl": "pkg:npm/%40playwright/test@1.65.0",
+      "scope": "excluded",
+      "licenses": [
+        {
+          "license": {
+            "name": "Apache-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "whatsap:workspace",
+          "value": "Frontend_py_whatsaapweb"
+        },
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/@playwright/test"
+        },
+        {
+          "name": "whatsap:npm:scope",
+          "value": "development"
         }
       ]
     },
@@ -10372,6 +10401,64 @@
         {
           "name": "whatsap:npm:scope",
           "value": "runtime"
+        }
+      ]
+    },
+    {
+      "bom-ref": "whatsap:Frontend_py_whatsaapweb#node_modules/playwright",
+      "type": "library",
+      "name": "playwright",
+      "version": "1.65.0",
+      "purl": "pkg:npm/playwright@1.65.0",
+      "scope": "excluded",
+      "licenses": [
+        {
+          "license": {
+            "name": "Apache-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "whatsap:workspace",
+          "value": "Frontend_py_whatsaapweb"
+        },
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/playwright"
+        },
+        {
+          "name": "whatsap:npm:scope",
+          "value": "development"
+        }
+      ]
+    },
+    {
+      "bom-ref": "whatsap:Frontend_py_whatsaapweb#node_modules/playwright-core",
+      "type": "library",
+      "name": "playwright-core",
+      "version": "1.65.0",
+      "purl": "pkg:npm/playwright-core@1.65.0",
+      "scope": "excluded",
+      "licenses": [
+        {
+          "license": {
+            "name": "Apache-2.0"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "name": "whatsap:workspace",
+          "value": "Frontend_py_whatsaapweb"
+        },
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/playwright-core"
+        },
+        {
+          "name": "whatsap:npm:scope",
+          "value": "development"
         }
       ]
     },
@@ -49680,6 +49767,7 @@
         "whatsap:Frontend_py_whatsaapweb#node_modules/@emoji-mart/data",
         "whatsap:Frontend_py_whatsaapweb#node_modules/@emoji-mart/react",
         "whatsap:Frontend_py_whatsaapweb#node_modules/@eslint/js",
+        "whatsap:Frontend_py_whatsaapweb#node_modules/@playwright/test",
         "whatsap:Frontend_py_whatsaapweb#node_modules/@types/node",
         "whatsap:Frontend_py_whatsaapweb#node_modules/@types/qrcode",
         "whatsap:Frontend_py_whatsaapweb#node_modules/@types/react",
@@ -50069,6 +50157,12 @@
       "dependsOn": [
         "whatsap:Frontend_py_whatsaapweb#node_modules/@nodelib/fs.scandir",
         "whatsap:Frontend_py_whatsaapweb#node_modules/fastq"
+      ]
+    },
+    {
+      "ref": "whatsap:Frontend_py_whatsaapweb#node_modules/@playwright/test",
+      "dependsOn": [
+        "whatsap:Frontend_py_whatsaapweb#node_modules/playwright"
       ]
     },
     {
@@ -51525,6 +51619,16 @@
       "dependsOn": [
         "whatsap:Frontend_py_whatsaapweb#node_modules/ce-la-react"
       ]
+    },
+    {
+      "ref": "whatsap:Frontend_py_whatsaapweb#node_modules/playwright",
+      "dependsOn": [
+        "whatsap:Frontend_py_whatsaapweb#node_modules/playwright-core"
+      ]
+    },
+    {
+      "ref": "whatsap:Frontend_py_whatsaapweb#node_modules/playwright-core",
+      "dependsOn": []
     },
     {
       "ref": "whatsap:Frontend_py_whatsaapweb#node_modules/pngjs",
