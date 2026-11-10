@@ -99,7 +99,7 @@ export const paymentsService = {
     return data;
   },
 
-  async list(filters: PaymentListFilters = {}): Promise<PaymentVoucherPage> {
+  async list(filters: PaymentListFilters = {}, signal?: AbortSignal): Promise<PaymentVoucherPage> {
     const response = await api.get('/payments', {
       params: {
         status: filters.status,
@@ -110,7 +110,7 @@ export const paymentsService = {
         endDate: filters.endDate,
         limit: filters.limit ?? 50,
         offset: filters.offset ?? 0,
-      },
+      }, signal,
     });
     return unwrap<PaymentVoucherPage>(response);
   },

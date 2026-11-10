@@ -31,6 +31,11 @@ Para usar Chrome instalado en el sistema se puede ejecutar `PLAYWRIGHT_CHANNEL=c
 
 Para reproducir UX-02 y UX-03, ejecutar `npm run test:e2e -- e2e/orders-navigation.spec.ts e2e/theme.spec.ts` desde el frontend.
 
+## UX-04. Una respuesta tardía cambia los resultados del filtro de pagos
+
+- **Antes.** Chrome recibió la respuesta de «Validados» y después la de «Con voucher». El filtro «Validados» seguía marcado, pero la tabla pasó a mostrar el comprobante pendiente.
+- **Después.** Cambiar el filtro cancela la consulta anterior. La tabla y el contador solo usan el resultado asociado a la consulta vigente. Si falla, «Volver a cargar pagos» repite el filtro activo. La regresión en `e2e/payment-filters.spec.ts` reproduce el orden invertido y comprueba la recuperación de un `503`.
+
 ## MSG-01. Conversaciones nuevas y recuperación de la bandeja
 
 - **Antes.** Chrome abrió dos bandejas vacías conectadas por Socket.IO. El backend confirmó los webhooks firmados y el historial HTTP devolvió el texto correcto por empresa. La prueba falló porque el mensaje nuevo de Alfa seguía ausente de su bandeja.

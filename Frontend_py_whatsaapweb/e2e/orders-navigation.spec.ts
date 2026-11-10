@@ -8,7 +8,7 @@ const secondPageOrder = {
 
 for (const { role, viewport } of [
   { role: 'ADMIN', viewport: { width: 1280, height: 800 } },
-  { role: 'OPERATOR', viewport: { width: 390, height: 680 } },
+  { role: 'EMPLEADO', viewport: { width: 390, height: 680 } },
 ]) {
   test(`regresa a la página del listado de pedidos como ${role}`, async ({ page, context }) => {
     await page.setViewportSize(viewport);
@@ -44,9 +44,9 @@ for (const { role, viewport } of [
 
     await page.goto('/gestion-web/inicio');
     const navigation = page.getByRole('navigation', { name: 'Espacio de trabajo' });
-    if (role === 'OPERATOR') await page.getByRole('button', { name: 'Abrir navegación' }).press('Enter');
+    if (role === 'EMPLEADO') await page.getByRole('button', { name: 'Abrir navegación' }).press('Enter');
     await navigation.getByRole('link', { name: 'Pedidos', exact: true }).press('Enter');
-    if (role === 'OPERATOR') {
+    if (role === 'EMPLEADO') {
       await expect(navigation).toBeHidden();
       await expect(page.getByRole('heading', { level: 1, name: 'Pedidos' })).toBeFocused();
     }

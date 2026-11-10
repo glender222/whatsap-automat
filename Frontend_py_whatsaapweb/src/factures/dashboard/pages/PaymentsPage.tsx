@@ -11,7 +11,6 @@ import {
   paymentsService,
 } from '../services/paymentsService';
 
-type LoadState = 'loading' | 'ready' | 'error';
 type StatusFilter = 'all' | 'collect_payment' | PaymentVoucherStatus;
 
 const STATUS_TONE: Record<PaymentProcessStatus, string> = {
@@ -144,44 +143,45 @@ function productSummary(row: PaymentProcessSummary): string {
 }
 
 export default function PaymentsPage() {
-  const [rows, setRows] = useState<PaymentProcessSummary[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loadState, setLoadState] = useState<LoadState>('loading');
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [query, setQuery] = useState<{ status: StatusFilter }>({ status: 'all' });
+  const [response, setResponse] = useState<{
+    query: typeof query;
+    result?: { rows: PaymentProcessSummary[]; total: number };
+  }>();
   const [actionInProgress, setActionInProgress] = useState<number | null>(null);
   const [validationError, setValidationError] = useState<{ voucherId: number; message: string } | null>(null);
   const [rejecting, setRejecting] = useState<{ id: number; reason: string } | null>(null);
   const [selectedRow, setSelectedRow] = useState<PaymentProcessSummary | null>(null);
 
-  const load = useCallback(async () => {
-    setLoadState('loading');
-    try {
-      const data = await paymentsService.list({
-        status: statusFilter === 'all' || statusFilter === 'collect_payment' ? undefined : statusFilter,
-        limit: 100,
-      });
-      const filteredRows = statusFilter === 'collect_payment'
-        ? data.rows.filter((row) => row.processStatus === 'collect_payment')
-        : data.rows;
-      setRows(filteredRows);
-      setTotal(statusFilter === 'collect_payment' ? filteredRows.length : data.total);
-      setLoadState('ready');
-    } catch (error) {
-      console.error('Error cargando proceso de pagos:', error);
-      setLoadState('error');
-    }
-  }, [statusFilter]);
+  const current = response?.query === query ? response : undefined;
+  const rows = current?.result?.rows ?? [];
+  const total = current?.result?.total;
+  const refresh = useCallback(() => setQuery((previous) => ({ ...previous })), []);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    const controller = new AbortController();
+    const { status } = query;
+    paymentsService.list({
+      status: status === 'all' || status === 'collect_payment' ? undefined : status,
+      limit: 100,
+    }, controller.signal).then((data) => {
+      if (controller.signal.aborted) return;
+      const filteredRows = status === 'collect_payment'
+        ? data.rows.filter((row) => row.processStatus === 'collect_payment')
+        : data.rows;
+      setResponse({ query, result: { rows: filteredRows, total: status === 'collect_payment' ? filteredRows.length : data.total } });
+    }).catch(() => {
+      if (!controller.signal.aborted) setResponse({ query });
+    });
+    return () => controller.abort();
+  }, [query]);
 
   const handleValidate = async (id: number) => {
     setActionInProgress(id);
     setValidationError(null);
     try {
       await paymentsService.validate(id);
-      await load();
+      refresh();
     } catch (error) {
       const message = isAxiosError<{ message?: unknown }>(error) && error.response?.status === 409
         ? error.response.data?.message
@@ -203,7 +203,7 @@ export default function PaymentsPage() {
     try {
       await paymentsService.reject(rejecting.id, rejecting.reason.trim());
       setRejecting(null);
-      await load();
+      refresh();
     } catch (error) {
       console.error('Error rechazando comprobante:', error);
     } finally {
@@ -216,7 +216,7 @@ export default function PaymentsPage() {
     try {
       await paymentsService.cancelOrder(orderId);
       if (selectedRow?.orderId === orderId) setSelectedRow(null);
-      await load();
+      refresh();
     } catch (error) {
       console.error('Error cancelando pedido:', error);
     } finally {
@@ -232,7 +232,7 @@ export default function PaymentsPage() {
             <p className="text-sm font-semibold uppercase text-teal-700 dark:text-teal-300">Operaciones</p>
             <h2 className="mt-1 text-3xl font-bold text-primary">Validar Pagos</h2>
             <p className="mt-2 text-sm text-secondary">
-              Cobros y comprobantes manuales · {total} {total === 1 ? 'caso' : 'casos'}
+              Cobros y comprobantes manuales{total !== undefined && ` · ${total} ${total === 1 ? 'caso' : 'casos'}`}
             </p>
           </div>
 
@@ -244,13 +244,13 @@ export default function PaymentsPage() {
               ['validated', 'Validados'],
               ['rejected', 'Rechazados'],
             ] as Array<[StatusFilter, string]>).map(([option, label]) => {
-              const isActive = statusFilter === option;
+              const isActive = query.status === option;
               return (
                 <button
                   key={option}
                   type="button"
                   aria-pressed={isActive}
-                  onClick={() => setStatusFilter(option)}
+                  onClick={() => { if (!isActive) setQuery({ status: option }); }}
                   className={`rounded-full border px-4 py-2 text-xs font-semibold transition ${
                     isActive
                       ? 'border-teal-600 bg-teal-50 text-teal-800 dark:bg-teal-950 dark:text-teal-200'
@@ -264,16 +264,18 @@ export default function PaymentsPage() {
           </div>
         </section>
 
-        <MercadoPagoReconciliationPanel onPaymentSettled={load} />
+        <MercadoPagoReconciliationPanel onPaymentSettled={refresh} />
 
         <section aria-label="Comprobantes manuales" className="overflow-hidden rounded-2xl border border-subtle bg-surface shadow-sm">
-          {loadState === 'loading' && rows.length === 0 ? (
-            <div className="flex h-48 items-center justify-center text-secondary">
-              <Loader2 className="h-6 w-6 animate-spin text-teal-700 dark:text-teal-300" />
+          {!current ? (
+            <div role="status" className="flex h-48 items-center justify-center gap-2 text-sm text-secondary">
+              <Loader2 aria-hidden="true" className="h-6 w-6 animate-spin text-teal-700 dark:text-teal-300" />
+              Cargando pagos…
             </div>
-          ) : loadState === 'error' ? (
-            <div className="flex h-48 items-center justify-center text-sm text-secondary">
-              No se pudo cargar el proceso de pagos.
+          ) : !current.result ? (
+            <div className="flex h-48 flex-col items-center justify-center gap-2 text-sm text-secondary">
+              <p role="alert">No se pudo cargar el proceso de pagos.</p>
+              <button type="button" onClick={refresh} className="admin-button-secondary">Volver a cargar pagos</button>
             </div>
           ) : rows.length === 0 ? (
             <div className="flex h-48 flex-col items-center justify-center text-center text-sm text-secondary">
