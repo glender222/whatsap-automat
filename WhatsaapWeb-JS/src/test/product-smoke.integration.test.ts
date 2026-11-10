@@ -70,6 +70,10 @@ test('real API isolates two companies through auth, signed ingress, inbox, socke
   }));
   const [owner, other] = await Promise.all(accounts.map((account) => api('/api/auth/register', 200, undefined, account)));
   assert.notEqual(owner.user.companyId, other.user.companyId);
+  const reconciliationUnavailable = await api(
+    `/api/payments/checkout-intents/${randomUUID()}/reconcile`, 501, owner.accessToken, {},
+  );
+  assert.equal(reconciliationUnavailable.error, 'PAYMENT_RECONCILIATION_UNAVAILABLE');
   const expiredAccess = jwt.sign({ userId: owner.user.id, companyId: owner.user.companyId },
     config.jwt.secret, { expiresIn: -1 });
   assert.equal((await api('/api/auth/me', 401, expiredAccess)).code, 'ACCESS_TOKEN_EXPIRED');
