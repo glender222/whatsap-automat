@@ -3,10 +3,12 @@ import { ArrowLeft } from 'lucide-react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import GraphProblemNotice from './GraphProblemNotice';
 import {
-  draftSpec, exampleGraph, getGraphDraft, graphIdPattern, graphPath, graphProblem, readVersion, saveGraphDraft, studioPath, type GraphProblem,
+  draftSpec, exampleGraph, getGraphDraft, graphIdPattern, graphPath, graphProblem, loadStudioTextTemplate, readVersion,
+  saveGraphDraft, studioPath, type GraphProblem,
 } from './agentGraphApi';
 
 const inputClass = 'w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800';
+const initialSpec = JSON.stringify(exampleGraph, null, 2);
 
 function readSpec(raw: string): Record<string, unknown> {
   let value: unknown;
@@ -29,13 +31,16 @@ function GraphEditor({ graphId }: { graphId?: string }) {
   const navigate = useNavigate();
   const base = graphId ? graphPath(graphId) : studioPath;
   const back = graphId && from ? `${base}?version=${from}` : base;
-  const [spec, setSpec] = useState(() => JSON.stringify(exampleGraph, null, 2));
+  const [spec, setSpec] = useState(initialSpec);
   const [loaded, setLoaded] = useState(false);
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [sourceError, setSourceError] = useState<GraphProblem>();
   const [problem, setProblem] = useState<GraphProblem>();
   const [saving, setSaving] = useState(false);
+  const [loadingTemplate, setLoadingTemplate] = useState(false);
+  const [templateLoaded, setTemplateLoaded] = useState(false);
   const lock = useRef(false);
+  const templateRequest = useRef<AbortController>(null);
   const waiting = Boolean(graphId && !loaded);
 
   useEffect(() => {
@@ -54,9 +59,31 @@ function GraphEditor({ graphId }: { graphId?: string }) {
     return () => request.abort();
   }, [from, graphId, invalidSource, loadAttempt]);
 
+  useEffect(() => () => templateRequest.current?.abort(), []);
+
+  async function loadTemplate() {
+    if (lock.current || templateRequest.current) return;
+    const request = new AbortController();
+    templateRequest.current = request;
+    setLoadingTemplate(true);
+    setTemplateLoaded(false);
+    setProblem(undefined);
+    try {
+      const template = await loadStudioTextTemplate(request.signal);
+      if (request.signal.aborted) return;
+      setSpec(JSON.stringify(template, null, 2));
+      setTemplateLoaded(true);
+    } catch (cause) {
+      if (!request.signal.aborted) setProblem(graphProblem(cause, 'No pudimos cargar la plantilla de texto.'));
+    } finally {
+      templateRequest.current = null;
+      if (!request.signal.aborted) setLoadingTemplate(false);
+    }
+  }
+
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (lock.current || waiting) return;
+    if (lock.current || waiting || templateRequest.current) return;
     const form = new FormData(event.currentTarget);
     const id = graphId ?? String(form.get('graphId') ?? '').trim();
     if (!new RegExp('^' + graphIdPattern + '$').test(id)) {
@@ -93,7 +120,7 @@ function GraphEditor({ graphId }: { graphId?: string }) {
       {invalidSource && <GraphProblemNotice problem={{ message: 'La revisión de origen debe ser un número entero positivo.', fields: [] }} />}
       {waiting && !sourceError && !invalidSource && <p role="status" className="text-sm">Cargando borrador de origen…</p>}
       <form onSubmit={save} className="space-y-4 rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-900 sm:p-5">
-        <fieldset disabled={waiting || saving} className="min-w-0 space-y-4 disabled:opacity-60">
+        <fieldset disabled={waiting || saving || loadingTemplate} className="min-w-0 space-y-4 disabled:opacity-60">
           {!graphId && (
             <label className="block space-y-1 text-sm font-medium">
               <span>Identificador del grafo</span>
@@ -104,15 +131,24 @@ function GraphEditor({ graphId }: { graphId?: string }) {
           )}
           <div className="rounded-lg bg-gray-50 p-3 text-sm dark:bg-gray-800">
             <p>Define <code>entryNodeId</code>, <code>policyRef</code>, <code>nodes</code>, <code>edges</code> y <code>limits</code>. El servidor asigna la versión y la huella de cada revisión.</p>
-            {!graphId && <p className="mt-1">El ejemplo inicial sirve para revisar la estructura de un grafo.</p>}
+            {!graphId && (
+              <div className="mt-2 space-y-2">
+                <p>La plantilla de texto incluye el modelo y los límites de la evaluación. Revisa la instrucción inicial antes de guardar.</p>
+                <button type="button" className="admin-button-secondary" onClick={() => void loadTemplate()}>
+                  {spec === initialSpec ? 'Usar plantilla de texto' : 'Reemplazar con plantilla de texto'}
+                </button>
+              </div>
+            )}
           </div>
           <label className="block space-y-1 text-sm font-medium">
             <span>Especificación del grafo en JSON</span>
-            <textarea value={spec} onChange={(event) => { setSpec(event.target.value); setProblem(undefined); }}
+            <textarea value={spec} onChange={(event) => { setSpec(event.target.value); setTemplateLoaded(false); setProblem(undefined); }}
               rows={19} spellCheck={false} className={inputClass + ' resize-y font-mono'} />
           </label>
           <button type="submit" className="min-h-11 rounded-md bg-emerald-700 px-4 text-sm font-semibold text-white disabled:opacity-55">Guardar borrador</button>
         </fieldset>
+        {loadingTemplate && <p role="status" className="text-sm">Cargando plantilla…</p>}
+        {templateLoaded && <p role="status" className="text-sm">Plantilla de texto cargada.</p>}
         {saving && <p role="status" className="text-sm">Guardando borrador…</p>}
         {problem && <GraphProblemNotice problem={problem} />}
       </form>

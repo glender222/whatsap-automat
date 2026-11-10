@@ -17,6 +17,8 @@ El modo `strict` bloquea el runtime anterior de respuestas de WhatsApp y las eje
 
 En Agent Studio, una empresa en modo `strict` puede guardar su credencial desde «Credencial de OpenAI» dentro de «Evaluación y publicación». La clave se envía únicamente al backend y el campo se vacía tras guardar. «Credencial guardada» confirma el almacenamiento. La evaluación confirma si el proveedor devuelve una respuesta y un consumo válidos. Las evaluaciones, publicaciones y reintentos de texto acotado pertenecen al modo `provider` de esa empresa. En pausa, se conservan la revisión activa y la consulta o cancelación de evaluaciones. Las solicitudes nuevas de evaluación, publicación y ejecución reciben un error de disponibilidad.
 
+Desde «Nuevo grafo», «Usar plantilla de texto» carga la topología y el modelo de texto actuales con un presupuesto de revisión para dos casos. El presupuesto contempla la reserva máxima de contexto antes de cada solicitud. El consumo se liquida con los valores devueltos por el proveedor. Cargar la plantilla y guardar el borrador no llama al modelo.
+
 Para reproducir, aplicar las migraciones en PostgreSQL de prueba con un rol sin bypass de RLS. Exportar `AI_QUOTA_RESERVATIONS_TEST_DATABASE_URL` y ejecutar desde `WhatsaapWeb-JS`:
 
 ```sh

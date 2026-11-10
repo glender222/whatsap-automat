@@ -167,6 +167,15 @@ export async function getGraphDraft(id: string, version: number | undefined, sig
   return data;
 }
 
+export async function loadStudioTextTemplate(signal: AbortSignal) {
+  const { data } = await api.get<GraphSpec>(base + '/templates/linear-text', { signal });
+  if (!data || typeof data.entryNodeId !== 'string' || typeof data.policyRef !== 'string' ||
+      !Array.isArray(data.nodes) || !Array.isArray(data.edges) || !data.limits) {
+    throw new Error('El servidor no devolvió una plantilla de texto válida.');
+  }
+  return data;
+}
+
 export async function saveGraphDraft(id: string, spec: Record<string, unknown>, mode: 'create' | 'revision') {
   const { data } = mode === 'create'
     ? await api.post<GraphDraft>(base, { ...spec, graphId: id })

@@ -28,6 +28,36 @@ type DispatchResult = { readonly publicationEvidence: false } & (
   Exclude<BoundedTextDispatchResult, { status: 'capability_unavailable' }>
 );
 
+export function boundedTextDraftTemplate(): Pick<AgentGraphVersionV1, 'entryNodeId' | 'policyRef' | 'nodes' | 'edges' | 'limits'> {
+  const maxTokens = 128;
+  const scenarioCount = 2;
+  const budget = boundedTextBudget(maxTokens, 10_000);
+  if (!budget) throw new Error('The bounded text template has an invalid budget');
+  return {
+    entryNodeId: 'inicio',
+    policyRef: 'politica-interna',
+    nodes: [{
+      id: 'inicio',
+      kind: 'agent',
+      config: {
+        provider: boundedTextCapability.provider,
+        model: boundedTextCapability.model,
+        prompt: 'Responde en español de forma breve. Usa la información del mensaje y pide el dato que falte.',
+        maxTokens,
+      },
+    }, { id: 'fin', kind: 'end', config: {} }],
+    edges: [{ id: 'finalizar', from: 'inicio', to: 'fin' }],
+    limits: {
+      maxSteps: 2,
+      maxDelegations: 0,
+      maxParallelNodes: 1,
+      maxDurationSeconds: 30,
+      maxModelTokens: budget.maxTokens * scenarioCount,
+      maxCostMicroUsd: budget.maxCostMicroUsd * scenarioCount,
+    },
+  };
+}
+
 export function preflightBoundedAgentDispatch(command: Omit<DispatchCommand, 'attemptId'>): DispatchPreflight {
   const { tenantId, graph, input, timeoutMs } = command;
   if (!Number.isSafeInteger(tenantId) || tenantId < 1 || graph.tenantId !== String(tenantId)) {

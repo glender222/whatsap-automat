@@ -20,7 +20,7 @@ import type { StudioAccess, StudioProviderAccess, StudioVerification } from '../
 import { AiDispatchUnavailableError } from '../services/ai/gateway/TenantAiDispatchPolicy';
 import { AiQuotaCapacityError, AiQuotaReservationConflictError } from '../services/ai/gateway/AiQuotaReservationStore';
 import { boundedTextCapability, isBoundedText } from '../services/ai/gateway/BoundedTextCompletion';
-import { preflightBoundedAgentDispatch } from '../services/ai/studio/BoundedAgentDispatch';
+import { boundedTextDraftTemplate, preflightBoundedAgentDispatch } from '../services/ai/studio/BoundedAgentDispatch';
 import {
   listDrafts,
   loadDraft,
@@ -276,6 +276,10 @@ export default function createAgentStudioRoutes(
     const draft = await actor.runInScope((db) => saveDraft(db, actor.tenantId, actor.userId, graphId, spec, true));
     if (draft) res.status(201).json(draft);
     else problem(res, 'CONFLICT', 'An agent graph with this ID already exists.');
+  }));
+
+  router.get('/templates/linear-text', guarded(async (_req, res) => {
+    res.json(boundedTextDraftTemplate());
   }));
 
   router.get('/:id', withDraft((res, draft) => { res.json(draft); }));

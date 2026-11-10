@@ -46,7 +46,7 @@ async function main() {
         phoneNumberId, status: 'configured',
         ...(send && { accessToken: 'synthetic-local-token', graphVersion: 'v25.0' }),
       });
-      if (studio) {
+      if (studio && !studioProvider) {
         await tenantScopedUoW.run(data.user.companyId, (db) => db.query(`
           INSERT INTO tenant_ai_quotas (tenant_id, monthly_token_limit, monthly_cost_limit_micro_usd)
           VALUES ($1, 10000000, 10000000)

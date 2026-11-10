@@ -133,17 +133,27 @@ if (process.env.STUDIO_PROVIDER_FIXTURE === '1') {
     try {
       const [alpha, bravo] = await Promise.all(companies.map(async ({ auth }, index) => {
         const headers = { authorization: `Bearer ${auth.accessToken}` };
-        const response = await request.post(apiPath, { headers, data: { ...graph, graphId } });
+        const context = contexts[index];
+        await context.addInitScript((session) => localStorage.setItem('auth', JSON.stringify(session)), auth);
+        const page = await context.newPage();
+        await page.goto('/dashboard/ia/estudio');
+        await page.getByRole('link', { name: 'Nuevo grafo' }).click();
+        await page.getByLabel('Identificador del grafo').fill(graphId);
+        const template = page.getByRole('button', { name: 'Usar plantilla de texto' });
+        await expect(template).toBeEnabled();
+        await template.press('Enter');
+        await expect(page.getByRole('status').filter({ hasText: 'Plantilla de texto cargada.' })).toBeVisible();
+        const saved = page.waitForResponse((response) => response.url() === apiPath &&
+          response.request().method() === 'POST', { timeout: 8000 });
+        await page.getByRole('button', { name: 'Guardar borrador' }).press('Enter');
+        const response = await saved;
         expect(response.status()).toBe(201);
         const draft = await response.json();
         const legacyKey = `studio-verification/${draft.tenantId}/${graphId}/1/${draft.specHash}`;
         const attempt = { runId: randomUUID(), suiteId: randomUUID() };
-        const context = contexts[index];
-        await context.addInitScript(({ auth, legacyKey, attempt }) => {
-          localStorage.setItem('auth', JSON.stringify(auth));
+        await page.addInitScript(({ legacyKey, attempt }) => {
           sessionStorage.setItem(legacyKey, JSON.stringify(attempt));
-        }, { auth, legacyKey, attempt });
-        const page = await context.newPage();
+        }, { legacyKey, attempt });
         await page.goto(pagePath);
         const panel = page.getByRole('region', { name: 'Evaluación y publicación' });
         await expect(panel.getByText(/Proveedor OpenAI/)).toBeVisible();
@@ -164,6 +174,10 @@ if (process.env.STUDIO_PROVIDER_FIXTURE === '1') {
       await alpha.panel.getByRole('textbox', { name: 'Nombre de la suite' }).fill('Suite proveedor Alfa');
       await alpha.panel.getByRole('textbox', { name: 'Entrada de prueba' }).fill('Entrada proveedor Alfa');
       await alpha.panel.getByRole('textbox', { name: 'Patrón esperado' }).fill('Entrada proveedor Alfa$');
+      await alpha.panel.getByRole('button', { name: 'Agregar caso' }).press('Enter');
+      const second = alpha.panel.getByRole('group', { name: 'Caso 2' });
+      await second.getByRole('textbox', { name: 'Entrada de prueba' }).fill('Segundo caso Alfa');
+      await second.getByRole('textbox', { name: 'Patrón esperado' }).fill('Segundo caso Alfa$');
       await alpha.panel.getByRole('button', { name: 'Guardar suite' }).press('Enter');
       const evaluate = alpha.panel.getByRole('button', { name: 'Evaluar revisión' });
       await expect(evaluate).toBeEnabled();
@@ -177,6 +191,7 @@ if (process.env.STUDIO_PROVIDER_FIXTURE === '1') {
       await alpha.page.reload();
       await alpha.panel.getByRole('button', { name: 'Consultar evaluación guardada' }).press('Enter');
       await expect(alpha.panel.getByText('Evaluación aprobada', { exact: true })).toBeVisible();
+      await expect(alpha.panel.getByText(/Caso \d · Aprobado/)).toHaveCount(2);
       await alpha.panel.getByRole('button', { name: 'Publicar para proveedor' }).press('Enter');
       await expect(alpha.panel.getByText('Revisión activa para proveedor · 1')).toBeVisible();
       await alpha.panel.getByRole('textbox', { name: 'Entrada para la revisión publicada' }).fill('Publicación Alfa');

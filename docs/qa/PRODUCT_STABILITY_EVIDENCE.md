@@ -193,6 +193,10 @@ Con las mismas variables exportadas en el frontend, ejecutar `npm run test:e2e -
 - **Navegador.** Dos administradores en pantallas de 390 px vieron la acción de configurar credenciales. Alfa guardó su clave en Studio y el formulario borró el valor. Evaluó con teclado, recuperó el resultado al recargar, publicó y ejecutó. Bravo siguió sin credencial y con el botón deshabilitado, incluso al enviar desde un formulario obsoleto de Alfa después de cambiar de sesión. La sesión de proveedor ignoró un UUID guardado bajo el modo de verificación.
 - **Alcance.** El navegador usa la composición predeterminada de la aplicación y un proveedor HTTP local. Quedan el piloto con una credencial real y los perfiles del runtime con herramientas. [Reproducción](AI_PROVIDER_ADMISSION.md).
 
+### Crear la revisión desde el navegador
+
+El ejemplo inicial del editor validaba estructura, pero no preparaba el modelo ni la reserva de contexto. El recorrido de proveedor ahora empieza en «Nuevo grafo» para las dos empresas. El servidor genera una plantilla compatible a partir de la capacidad vigente. Alfa guarda la revisión desde la interfaz y evalúa dos casos con el presupuesto de la plantilla. Antes del cambio, el recorrido fallaba al buscar el control para cargarla.
+
 ## IA-07. Derivación del agente en modos de solo lectura y prueba
 
 - **Antes.** Una solicitud de la herramienta de pagos desactivada creó un ticket en modo Asistido. La derivación por una respuesta inválida del modelo también podía invocar el servicio de tickets directamente.
