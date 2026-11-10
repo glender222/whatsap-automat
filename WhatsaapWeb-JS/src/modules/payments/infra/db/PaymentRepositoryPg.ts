@@ -15,6 +15,15 @@ import { PaymentCheckoutIntentRepositoryPg } from './PaymentCheckoutIntentReposi
 
 type Row = Record<string, any>;
 
+function rethrowVoucherWriteError(error: unknown): never {
+  if ((error as { code?: string } | null)?.code === 'PWA01') {
+    throw Object.assign(new Error('El pedido ya tiene un pago conciliado de Mercado Pago'), {
+      statusCode: 409, code: 'ORDER_PAYMENT_ALREADY_SETTLED',
+    });
+  }
+  throw error;
+}
+
 export class PaymentRepositoryPg {
   constructor(private readonly pool: Queryable) {}
 
@@ -270,7 +279,7 @@ export class PaymentRepositoryPg {
         input.notes ?? null,
         JSON.stringify(input.metadata || {}),
       ]
-    );
+    ).catch(rethrowVoucherWriteError);
     const voucher = result.rows[0];
     if (!voucher) throw Object.assign(new Error('Referencia de comprobante no encontrada'), { statusCode: 404 });
     return this.mapVoucher(voucher);
@@ -371,7 +380,7 @@ export class PaymentRepositoryPg {
           JSON.stringify({ voucherId, orderConfirmed, orderReconciliationRequired: voucher.order_reconciliation_required === true, source: 'payments' })]
       );
       return this.mapVoucher(voucher);
-    });
+    }).catch(rethrowVoucherWriteError);
   }
 
   private mapVoucher(row: Row): PaymentVoucher {

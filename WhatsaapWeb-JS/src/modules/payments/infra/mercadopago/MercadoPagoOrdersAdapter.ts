@@ -12,6 +12,10 @@ const expiryMarginMs = 15_000;
 const maxCheckoutWindowMs = 24 * 60 * 60 * 1000;
 const maxResponseBytes = 128 * 1024;
 
+export function isMercadoPagoOrderId(value: unknown): value is string {
+  return typeof value === 'string' && providerOrderId.test(value);
+}
+
 type GatewayScope = {
   companyId: number;
   gatewayId: string;
@@ -29,6 +33,7 @@ type Created = { kind: 'created'; orderId: string; checkoutUrl: string; expiresA
 type PaymentObservation = 'unpaid' | 'pending' | 'failed' | 'partial' | 'paid_candidate' | 'reconciliation_required';
 type Observed = {
   kind: 'observed'; orderId: string; status: string; statusDetail: string; amountPaid: string; payment: PaymentObservation;
+  providerPayment: PaymentObservation; providerExpiresAt: number | undefined;
 };
 
 const validationErrors = new Set([
@@ -109,7 +114,7 @@ function matchedOrder(
   value: unknown, context: OrdersContext, credential: GatewayCredential, expectedId?: string,
 ): (Record<string, unknown> & { id: string }) | undefined {
   const order = record(value);
-  if (!order || typeof order.id !== 'string' || !providerOrderId.test(order.id) ||
+  if (!order || !isMercadoPagoOrderId(order.id) ||
       (expectedId !== undefined && order.id !== expectedId) || order.type !== 'online' || order.processing_mode !== 'manual' ||
       order.country_code !== 'PER' || order.currency !== 'PEN' || order.user_id !== credential.sellerId ||
       order.external_reference !== context.intent.externalReference || cents(order.total_amount) !== cents(context.intent.amount)) return;
@@ -183,17 +188,11 @@ function creditEvidence(order: Record<string, unknown>): { credited: bigint; uns
   return { credited, unsettled };
 }
 
-function paymentStatus(order: Record<string, unknown>, { intent, validUntil }: LookupInput, paid: bigint, now: number): PaymentObservation {
-  const total = cents(intent.amount)!;
+function providerPaymentStatus(order: Record<string, unknown>, total: bigint, paid: bigint): PaymentObservation {
   const evidence = creditEvidence(order);
   if (paid > total || evidence?.credited !== paid || order.status === 'refunded' ||
       order.status_detail === 'partially_refunded' || (paid > 0n && (order.status === 'canceled' || order.status === 'failed'))) {
     return 'reconciliation_required';
-  }
-  if (paid > 0n) {
-    const expiry = providerExpiry(order);
-    if (intent.state !== 'prepared' || expiry === undefined || expiry > validUntil || now >= expiry ||
-        (intent.reservationExpiresAt !== null && !(Date.parse(intent.reservationExpiresAt) > now))) return 'reconciliation_required';
   }
   if (paid > 0n && paid < total) {
     return ['processed', 'processing', 'action_required'].includes(String(order.status)) ? 'partial' : 'reconciliation_required';
@@ -253,7 +252,7 @@ export class MercadoPagoOrdersAdapter {
   }
 
   async lookup(input: LookupInput): Promise<Observed | Uncertain | NotSent> {
-    if (!validContext(input) || !providerOrderId.test(input.orderId) || !Number.isSafeInteger(input.validUntil) ||
+    if (!validContext(input) || !isMercadoPagoOrderId(input.orderId) || !Number.isSafeInteger(input.validUntil) ||
         input.validUntil <= 0) return { kind: 'not_sent', reason: 'invalid_snapshot' };
     const credential = await this.credential(input);
     if (!credential) return { kind: 'not_sent', reason: 'credential_unavailable' };
@@ -266,10 +265,18 @@ export class MercadoPagoOrdersAdapter {
         !/^[a-z_]{1,48}$/.test(order.status) || !/^[a-z0-9_]{1,64}$/.test(order.status_detail)) {
       return { kind: 'uncertain', reason: 'response', status: response.status };
     }
+    const providerPayment = providerPaymentStatus(order, cents(input.intent.amount)!, paid);
+    const providerExpiresAt = providerExpiry(order);
+    const now = this.now();
+    const reservationExpiresAt = input.intent.reservationExpiresAt;
+    const withinWindow = input.intent.state === 'prepared' &&
+      providerExpiresAt !== undefined && providerExpiresAt <= input.validUntil && providerExpiresAt > now &&
+      (reservationExpiresAt === null || Date.parse(reservationExpiresAt) > now);
     return {
       kind: 'observed', orderId: order.id, status: order.status, statusDetail: order.status_detail,
       amountPaid: `${paid / 100n}.${String(paid % 100n).padStart(2, '0')}`,
-      payment: paymentStatus(order, input, paid, this.now()),
+      providerPayment, providerExpiresAt,
+      payment: paid > 0n && !withinWindow ? 'reconciliation_required' : providerPayment,
     };
   }
 
