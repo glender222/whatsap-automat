@@ -5,14 +5,14 @@ import { requireJwt } from '../middleware/jwtAuth';
 import { resolveTenantContext, tenantContext } from '../middleware/tenantContext';
 import {
   ApprovalAlreadyDecidedError, ApprovalCasConflictError, ApprovalExpiredError,
-  ApprovalIdempotencyConflictError, ApprovalNotFoundError, hitlApprovalService,
+  ApprovalIdempotencyConflictError, ApprovalNotFoundError, ApprovalReviewError, hitlApprovalService,
 } from '../services/ai/broker';
 import { getCurrentWorkspace } from '../services/workspaces/WorkspaceQueryService';
 
 const identifier = /^[A-Za-z0-9_.:-]{1,128}$/;
 
-function problem(req: Request, res: Response, code: StandardErrorCode, detail: string, status?: number) {
-  const error = createProblemDetails({ code, detail, instance: req.path, correlationId: randomUUID() });
+function problem(req: Request, res: Response, code: StandardErrorCode, detail: string, status?: number, reason?: string) {
+  const error = createProblemDetails({ code, detail, instance: req.path, correlationId: randomUUID(), metadata: reason ? { reason } : undefined });
   return res.status(status ?? error.status).type('application/problem+json').json({ ...error, status: status ?? error.status });
 }
 
@@ -62,7 +62,7 @@ export default function createApprovalRoutes(): Router {
   router.post('/:id/decision', async (req, res) => {
     const id = String(req.params.id);
     const key = req.get('Idempotency-Key');
-    const { decision, expectedVersion, reason } = req.body ?? {};
+    const { decision, expectedVersion, reason, password } = req.body ?? {};
     if (!identifier.test(id)) return problem(req, res, StandardErrorCode.NOT_FOUND, 'Approval was not found');
     if (!key || !identifier.test(key) || !['approved', 'rejected'].includes(decision) ||
         !Number.isSafeInteger(expectedVersion) || expectedVersion < 1 || expectedVersion > 2147483647 ||
@@ -71,12 +71,17 @@ export default function createApprovalRoutes(): Router {
     }
     const actor = resolveTenantContext(req);
     try {
-      const result = await hitlApprovalService.decideApproval({
-        tenantId: actor.tenantId, approvalId: id, actorId: String(actor.userId), actorRole: 'admin',
-        decision, expectedVersion, reason, idempotencyKey: key,
+      const result = await hitlApprovalService.decideReviewerApproval({
+        tenantId: actor.tenantId, approvalId: id, actorId: String(actor.userId), sessionRole: actor.role,
+        decision, expectedVersion, reason, password, idempotencyKey: key,
       });
       return res.json(result);
     } catch (error) {
+      if (error instanceof ApprovalReviewError) {
+        const code = error.statusCode === 429 ? StandardErrorCode.RATE_LIMITED
+          : error.statusCode === 422 ? StandardErrorCode.VALIDATION_ERROR : StandardErrorCode.POLICY_DENIED;
+        return problem(req, res, code, error.message, error.statusCode, error.code);
+      }
       if (error instanceof ApprovalNotFoundError) return problem(req, res, StandardErrorCode.NOT_FOUND, 'Approval was not found');
       if (error instanceof ApprovalExpiredError) return problem(req, res, StandardErrorCode.CONFLICT, 'Approval has expired', 410);
       if (error instanceof ApprovalCasConflictError || error instanceof ApprovalAlreadyDecidedError ||

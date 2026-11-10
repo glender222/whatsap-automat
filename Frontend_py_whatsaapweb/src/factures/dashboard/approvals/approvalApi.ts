@@ -1,5 +1,5 @@
 import { isAxiosError } from 'axios';
-import { api } from '../../../shared/axios/http';
+import { api, type AuthRequestConfig } from '../../../shared/axios/http';
 
 export const approvalsPath = '/dashboard/aprobaciones';
 export const approvalPageSize = 20;
@@ -76,7 +76,12 @@ export function approvalHttpStatus(error: unknown) {
 }
 
 export function approvalProblem(error: unknown, fallback: string) {
+  const reason = isAxiosError(error) ? error.response?.data?.metadata?.reason : undefined;
+  if (reason === 'APPROVAL_REAUTH_REQUIRED') return 'Ingresa tu contraseña actual para registrar la decisión.';
+  if (reason === 'APPROVAL_REAUTH_INVALID') return 'No pudimos verificar tu contraseña. Revísala e inténtalo de nuevo.';
+  if (reason === 'APPROVAL_REAUTH_LIMITED') return 'Se alcanzó el límite de intentos. Espera unos minutos antes de continuar.';
   switch (approvalHttpStatus(error)) {
+    case 401: return 'Vuelve a introducir tu contraseña si la sesión sigue activa.';
     case 403: return 'Tu espacio de trabajo no tiene permiso para revisar aprobaciones.';
     case 404: return 'La solicitud ya no está disponible en esta empresa.';
     case 409: return 'La solicitud cambió o ya fue decidida. Revisa el estado actualizado antes de continuar.';
@@ -108,12 +113,23 @@ export async function readApproval(id: string, tenantId: string, signal: AbortSi
   return data;
 }
 
-export async function decideApproval(intent: DecisionIntent, session: string) {
+export async function decideApproval(intent: DecisionIntent, session: string, password?: string) {
   if (currentApprovalSession() !== session) throw new Error('La sesión cambió. Vuelve a abrir esta solicitud.');
+  if (password !== undefined) {
+    const origin = typeof window === 'undefined' ? undefined : window.location.href;
+    const target = new URL(api.defaults.baseURL || '/', origin);
+    if (target.protocol !== 'https:' && !(target.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(target.hostname))) {
+      throw new Error('La verificación de contraseña requiere una conexión HTTPS.');
+    }
+  }
+  const config: AuthRequestConfig = {
+    headers: { 'Idempotency-Key': intent.key },
+    replayOnAuthRenewal: password === undefined,
+  };
   const { data } = await api.post<{ approvalId: string; status: Decision; decidedAt: string }>(
     `${endpoint}/${encodeURIComponent(intent.approvalId)}/decision`,
-    { decision: intent.decision, expectedVersion: intent.expectedVersion, reason: intent.reason },
-    { headers: { 'Idempotency-Key': intent.key } },
+    { decision: intent.decision, expectedVersion: intent.expectedVersion, reason: intent.reason, password },
+    config,
   );
   if (data?.approvalId !== intent.approvalId || data.status !== intent.decision || !isDate(data.decidedAt)) {
     throw new Error('El servidor no confirmó la decisión solicitada.');

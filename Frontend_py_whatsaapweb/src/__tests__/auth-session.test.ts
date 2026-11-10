@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test, { type TestContext } from 'node:test';
 import { AxiosError, type InternalAxiosRequestConfig } from 'axios';
 import { api } from '../shared/axios/http';
+import { decideApproval } from '../factures/dashboard/approvals/approvalApi';
 
 function response(config: InternalAxiosRequestConfig, status: number, data = {}) {
   return { config, status, statusText: String(status), data, headers: {} };
@@ -137,4 +138,23 @@ test('a protected download recognizes an expired JWT returned as a JSON blob', a
     return response(config, 200, file);
   };
   assert.equal((await api.get('/reports/operations/export', { responseType: 'blob' })).data, file);
+});
+
+test('an expired approval password request renews the session without replaying the password', async (t) => {
+  useAuthFixture(t);
+  session('expired-access', 'active-refresh');
+  const calls: Array<string | undefined> = [];
+  api.defaults.adapter = async (config) => {
+    calls.push(config.url);
+    if (config.url === '/auth/refresh') {
+      assert.ok(!String(config.data).includes('local-password-fixture'));
+      return response(config, 200, { success: true, data: { accessToken: 'fresh-access' } });
+    }
+    assert.equal(JSON.parse(config.data).password, 'local-password-fixture');
+    throw expired(config);
+  };
+  await assert.rejects(decideApproval({ approvalId: 'test', decision: 'approved', expectedVersion: 1,
+    reason: 'Reviewed fixture', key: 'approval-attempt' }, 'active-refresh', 'local-password-fixture'), AxiosError);
+  assert.deepEqual(calls, ['/v1/approvals/test/decision', '/auth/refresh']);
+  assert.equal(localStorage.getItem('accessToken'), 'fresh-access');
 });

@@ -158,6 +158,7 @@ jobs:
           WORKFLOW_CONSOLE_SMOKE: '1'
           MARKETPLACE_TEST_DATABASE_URL: postgres://whatsap_smoke:ci-runtime-only@127.0.0.1:5432/whatsap_automat_smoke
           AGENT_STUDIO_TEST_DATABASE_URL: postgres://whatsap_smoke:ci-runtime-only@127.0.0.1:5432/whatsap_automat_smoke
+          AI_QUOTA_RESERVATIONS_TEST_DATABASE_URL: postgres://whatsap_smoke:ci-runtime-only@127.0.0.1:5432/whatsap_automat_smoke
           AGENT_DOMAINS_TEST_DATABASE_URL: postgres://whatsap_smoke:ci-runtime-only@127.0.0.1:5432/whatsap_automat_smoke
           CHANNEL_CONNECTIONS_TEST_DATABASE_URL: postgres://whatsap_smoke:ci-runtime-only@127.0.0.1:5432/whatsap_automat_smoke
           CONVERSATION_SEND_TEST_DATABASE_URL: postgres://whatsap_smoke:ci-runtime-only@127.0.0.1:5432/whatsap_automat_smoke
@@ -174,7 +175,7 @@ jobs:
             sudo apt-get update
             sudo apt-get install --yes --no-install-recommends ffmpeg
           fi
-          node --import tsx --test --test-concurrency=3 src/test/campaign-persistence.integration.test.ts src/test/marketplace-postgres.test.ts src/test/agent-studio-postgres.test.ts src/test/agent-domains-postgres.test.ts src/test/channel-connections-postgres.test.ts src/test/workflow-console.integration.test.ts src/test/conversation-send-postgres.test.ts src/test/attachment-rls-postgres.test.ts src/test/challenger_f8_immutability_compliance.test.ts src/test/operation-executions-postgres.test.ts src/test/catalog-inventory-postgres.test.ts src/test/orders-postgres.test.ts src/test/payment-gateway-postgres.test.ts src/test/legacy-meta-send-postgres.test.ts
+          node --import tsx --test --test-concurrency=3 src/test/campaign-persistence.integration.test.ts src/test/marketplace-postgres.test.ts src/test/agent-studio-postgres.test.ts src/test/ai-quota-reservations-postgres.test.ts src/test/agent-domains-postgres.test.ts src/test/channel-connections-postgres.test.ts src/test/workflow-console.integration.test.ts src/test/conversation-send-postgres.test.ts src/test/attachment-rls-postgres.test.ts src/test/challenger_f8_immutability_compliance.test.ts src/test/operation-executions-postgres.test.ts src/test/catalog-inventory-postgres.test.ts src/test/orders-postgres.test.ts src/test/payment-gateway-postgres.test.ts src/test/legacy-meta-send-postgres.test.ts
       - name: Ejecutar workflows con el worker compilado y Temporal
         env:
           DB_NAME: whatsap_automat_temporal_smoke

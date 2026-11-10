@@ -149,7 +149,8 @@ export default function ApprovalsPage() {
       </div>}
       {current?.workspace && session && (!approvalId ? <ApprovalsQueue workspace={current.workspace} />
         : approvalIdPattern.test(approvalId) ? (
-          <ApprovalDetail key={approvalId} id={approvalId} tenantId={current.workspace.tenantId} session={session} />
+          <ApprovalDetail key={approvalId} id={approvalId} tenantId={current.workspace.tenantId} session={session}
+            canReauthenticate={current.workspace.capabilities.includes('approvals.reauthenticate')} />
         ) : <p role="alert" className={panel + ' text-sm'}>El identificador de solicitud no es válido.</p>)}
     </section>
   );

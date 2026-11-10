@@ -98,6 +98,10 @@ Consulte los archivos de especificación formal:
 
 La cola de aprobaciones en web y móvil se actualiza por REST. La API comprueba `approvals.review` en cada solicitud. El Blueprint y el paquete de contratos conservan los tipos de eventos de aprobación para futuras integraciones.
 
+Los espacios con `approvals.reauthenticate` admiten decisiones sensibles. Para `high`, `send`, `financial` y `destructive`, la API canónica y la ruta anterior exigen un motivo y la contraseña actual del operador. La decisión vuelve a comprobar la membresía y el rol vigentes en la misma transacción que actualiza la solicitud. Los intentos incorrectos se comparten entre procesos y rutas. Cinco intentos fallidos en una ventana de diez minutos bloquean la verificación hasta que termine la ventana.
+
+Envía la contraseña mediante HTTPS y solo al confirmar la decisión. Ante una respuesta incierta, consulta el estado con `GET /api/v1/approvals/{id}`. Si continúa pendiente, solicita otra vez la contraseña y conserva el motivo, la versión y la clave de idempotencia de la decisión original.
+
 El contrato incluye operaciones previstas. En la API v1 de conversaciones se pueden consultar la lista, el detalle y el historial, además de tomar el control, pausar o reanudar la IA. Los cambios CAS identifican al operador con su sesión. La lista y el historial devuelven primero los registros de mayor identificador. En conversaciones migradas del esquema anterior, `connectionId` usa una referencia de compatibilidad `legacy:<tenant>:<canal>`.
 
 Agent Studio conserva cada borrador como una revisión numerada e inmutable. Para leer o validar una revisión anterior, indica `?version=N`. La validación comprueba la estructura sin ejecutar el grafo y devuelve `publicationEvidence: false`. El simulador de regresión de `/api/v1/ai/eval/simulate` devuelve resultados sintéticos. La publicación requiere ejecutar una evaluación de servidor con un conjunto de pruebas autorizado, asociar su evidencia al tenant, la revisión y su hash, y usar esa revisión exacta en el runtime.

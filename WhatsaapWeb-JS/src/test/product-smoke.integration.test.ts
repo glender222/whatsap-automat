@@ -279,6 +279,7 @@ test('real API isolates two companies through auth, signed ingress, inbox, socke
   assert.equal(ownerWorkspace.workspaceName, 'Principal');
   assert.deepEqual(ownerWorkspace.roles, ['owner']);
   assert.ok(ownerWorkspace.capabilities.includes('approvals.review'));
+  assert.ok(ownerWorkspace.capabilities.includes('approvals.reauthenticate'));
   const operatorWorkspace = await api(workspacePath, 200, employeeToken);
   assert.equal(operatorWorkspace.workspaceId, ownerWorkspace.workspaceId);
   assert.deepEqual(operatorWorkspace.roles, ['member']);
@@ -313,8 +314,8 @@ test('real API isolates two companies through auth, signed ingress, inbox, socke
     items: [], nextCursor: null, pageSummary: { retryCount: 0, deliveryUnknownCount: 0 },
   });
   await api(`/api/v1/channel-connections/${connectionId}/validate`, 403, employeeToken, {});
-  const createApproval = (expiresInSeconds: number) => hitlApprovalService.createApprovalRequest({
-    tenantId: owner.user.companyId, runId: randomUUID(), toolName: 'test-review', risk: 'financial',
+  const createApproval = (expiresInSeconds: number, risk = 'financial') => hitlApprovalService.createApprovalRequest({
+    tenantId: owner.user.companyId, runId: randomUUID(), toolName: 'test-review', risk,
     effectKey: randomUUID(), proposedActionHash: 'synthetic-action-hash', expiresInSeconds,
     inputPayload: { lineItems: [{ description: 'QA only', api_key: 'fixture-secret' }] },
   });
@@ -324,7 +325,8 @@ test('real API isolates two companies through auth, signed ingress, inbox, socke
   setSocketIo(fixtureSocket);
   const [approval, expired] = await Promise.all([createApproval(60), createApproval(-1)]);
   assert.equal(fixtureBroadcast.mock.callCount(), 0, 'Creating approvals must not broadcast to socket rooms');
-  const decision = { decision: 'approved', expectedVersion: 1, decidedBy: other.user.id };
+  const decision = { decision: 'approved', expectedVersion: 1, decidedBy: other.user.id, reason: 'Reviewed fixture' };
+  const verifiedDecision = { ...decision, password: accounts[0].password };
   await api(approvals, 403, employeeToken);
   assert.deepEqual(await api(approvals, 200, other.accessToken), []);
   const pending = await api(approvals, 200, owner.accessToken);
@@ -333,13 +335,15 @@ test('real API isolates two companies through auth, signed ingress, inbox, socke
   const approvalPath = `${approvals}/${approval.id}/decision`;
   await api(approvalPath, 403, employeeToken, decision);
   await api(approvalPath, 404, other.accessToken, decision);
-  await api(approvalPath, 409, owner.accessToken, { ...decision, expectedVersion: 2 });
-  await api(`${approvals}/${expired.id}/decision`, 410, owner.accessToken, decision);
+  assert.equal((await api(approvalPath, 403, owner.accessToken, decision)).error, 'APPROVAL_REAUTH_REQUIRED');
+  assert.equal((await api(approvalPath, 403, owner.accessToken, { ...decision, password: randomUUID() })).error, 'APPROVAL_REAUTH_INVALID');
+  await api(approvalPath, 409, owner.accessToken, { ...verifiedDecision, expectedVersion: 2 });
+  await api(`${approvals}/${expired.id}/decision`, 410, owner.accessToken, verifiedDecision);
   assert.equal((await hitlApprovalService.getApprovalById(owner.user.companyId, expired.id))?.status, 'pending');
-  const approved = await api(approvalPath, 200, owner.accessToken, decision);
+  const approved = await api(approvalPath, 200, owner.accessToken, verifiedDecision);
   assert.equal(approved.decidedBy, String(owner.user.id));
   assert.equal(approved.status, 'approved');
-  await api(approvalPath, 409, owner.accessToken, decision);
+  await api(approvalPath, 409, owner.accessToken, verifiedDecision);
   const auditRows = await withTenantTransaction(owner.user.companyId, (client) => client.query(
     `SELECT actor_user_id FROM operational_actions
      WHERE company_id = $1 AND action_type = 'approval_decision' AND metadata_json->>'approvalId' = $2`,
@@ -347,9 +351,9 @@ test('real API isolates two companies through auth, signed ingress, inbox, socke
   ));
   assert.deepEqual(auditRows.rows.map((row) => String(row.actor_user_id)), [String(owner.user.id)]);
 
-  const retryApproval = await createApproval(60);
+  const retryApproval = await createApproval(60, 'write');
   const canonicalApprovals = '/api/v1/approvals';
-  assert.deepEqual(await client.approvals.list({ risk: 'financial' }), [retryApproval]);
+  assert.deepEqual(await client.approvals.list({ risk: 'write' }), [retryApproval]);
   assert.deepEqual(await client.approvals.get(retryApproval.id), retryApproval);
   assert.equal((await client.approvals.get(expired.id)).status, 'expired');
   await api(canonicalApprovals, 403, employeeToken);
@@ -373,6 +377,8 @@ test('real API isolates two companies through auth, signed ingress, inbox, socke
   assert.equal((await updateOwnerMembership('member')).rowCount, 1);
   try {
     await api(canonicalApprovals, 403, owner.accessToken);
+    await api(approvals, 403, owner.accessToken);
+    await api(approvalPath, 403, owner.accessToken, verifiedDecision);
     await api(`${canonicalApprovals}/${retryApproval.id}`, 403, owner.accessToken);
     assert.equal((await canonicalDecision(owner.accessToken)).status, 403);
   } finally {
@@ -390,6 +396,38 @@ test('real API isolates two companies through auth, signed ingress, inbox, socke
     [retryApproval.id]
   ));
   assert.equal(replayAudit.rowCount, 1);
+
+  const sensitive = await createApproval(60, 'destructive');
+  const sensitivePath = `${base}${canonicalApprovals}/${sensitive.id}/decision`;
+  const sensitiveKey = randomUUID();
+  const reject = (payload: object, token = owner.accessToken) => fetch(sensitivePath, {
+    method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'Idempotency-Key': sensitiveKey },
+    body: JSON.stringify({ decision: 'rejected', expectedVersion: 1, ...payload }),
+  });
+  const passwordRequired = await reject({ reason: 'Reviewed fixture' });
+  assert.equal(passwordRequired.status, 403);
+  assert.equal((await passwordRequired.json()).metadata.reason, 'APPROVAL_REAUTH_REQUIRED');
+  assert.equal((await reject({ password: accounts[0].password })).status, 422);
+  assert.equal((await reject({ reason: 'Reviewed fixture', password: accounts[0].password }, other.accessToken)).status, 404);
+  const invalidAttempts = await Promise.all(Array.from({ length: 5 }, () => reject({ reason: 'Reviewed fixture', password: randomUUID() })));
+  assert.ok(invalidAttempts.every(({ status }) => status === 403));
+  const limited = await reject({ reason: 'Reviewed fixture', password: accounts[0].password });
+  assert.equal(limited.status, 429);
+  assert.equal((await limited.json()).metadata.reason, 'APPROVAL_REAUTH_LIMITED');
+  assert.equal((await client.approvals.get(sensitive.id)).status, 'pending');
+  await withTenantTransaction(owner.user.companyId, (db) => db.query(
+    'UPDATE approval_reauth_attempts SET window_ends_at = clock_timestamp() WHERE tenant_id = $1 AND actor_id = $2',
+    [owner.user.companyId, owner.user.id],
+  ));
+  const accepted = await reject({ reason: 'Reviewed fixture', password: accounts[0].password });
+  assert.equal(accepted.status, 200);
+  assert.equal((await accepted.json()).status, 'rejected');
+  const { rows: [sensitiveAudit] } = await withTenantTransaction(owner.user.companyId, (db) => db.query(
+    `SELECT metadata_json FROM operational_actions WHERE action_type = 'approval_decision' AND metadata_json->>'approvalId' = $1`,
+    [sensitive.id],
+  ));
+  assert.equal(sensitiveAudit.metadata_json.reauthentication, 'current_password');
+  assert.ok(!JSON.stringify(sensitiveAudit).includes(accounts[0].password));
   assert.equal((await employeeSocket.timeout(2000).emitWithAck('join_conversation', chatId)).success, true);
   assert.deepEqual(employeeApprovalEvents, []);
 

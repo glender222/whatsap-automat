@@ -1071,7 +1071,7 @@ paths:
   /approvals/{id}/decision:
     post:
       summary: Aprobar o rechazar solicitud
-      description: Registra la decisión y su auditoría en una transacción. Repetir la misma solicitud con la misma clave devuelve la decisión original.
+      description: Registra la decisión y su auditoría en una transacción. Los riesgos high, send, financial y destructive requieren motivo y contraseña actual. La misma decisión y clave devuelven el resultado original tras verificar los permisos y la contraseña cuando corresponda.
       operationId: decideApproval
       security:
         - BearerAuth: []
@@ -1115,6 +1115,12 @@ paths:
                 $ref: '#/components/schemas/ProblemDetails'
         '422':
           $ref: '#/components/responses/ValidationError'
+        '429':
+          description: Límite de intentos de reautenticación alcanzado
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
 
   /marketplace/extensions:
     get:
@@ -2216,6 +2222,11 @@ components:
         reason:
           type: string
           maxLength: 1000
+        password:
+          type: string
+          writeOnly: true
+          maxLength: 1024
+          description: Contraseña actual del operador, obligatoria para decisiones sensibles. Límite de 1024 bytes UTF-8.
         expectedVersion:
           type: integer
           minimum: 1

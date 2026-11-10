@@ -1,4 +1,4 @@
-import axios, { CanceledError, type InternalAxiosRequestConfig } from 'axios';
+import axios, { CanceledError, type AxiosRequestConfig, type InternalAxiosRequestConfig } from 'axios';
 import { authService } from '../../factures/auth/services/authService';
 
 export const api = axios.create({
@@ -15,7 +15,8 @@ interface SessionSnapshot {
   generation: number;
 }
 
-type SessionRequest = InternalAxiosRequestConfig & { authRetryGeneration?: number };
+export type AuthRequestConfig = AxiosRequestConfig & { replayOnAuthRenewal?: boolean };
+type SessionRequest = InternalAxiosRequestConfig & { authRetryGeneration?: number; replayOnAuthRenewal?: boolean };
 
 let observedSession: SessionSnapshot = { accessToken: null, refreshToken: null, generation: 0 };
 const requestSessions = new WeakMap<InternalAxiosRequestConfig, SessionSnapshot>();
@@ -103,6 +104,7 @@ api.interceptors.response.use(
       }
     }
 
+    if (request.replayOnAuthRenewal === false) throw error;
     request.authRetryGeneration = current.generation;
     return api(request);
   },

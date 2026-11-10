@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { JwtRequest, requireJwt } from '../middleware/jwtAuth';
-import { tenantContext } from '../middleware/tenantContext';
+import { resolveTenantContext, tenantContext } from '../middleware/tenantContext';
+import { getCurrentWorkspace } from '../services/workspaces/WorkspaceQueryService';
 import {
   ByokService,
   QuotaManager,
@@ -45,10 +46,6 @@ function resolveActor(req: JwtRequest) {
     .filter((role): role is string => typeof role === 'string' && role.trim().length > 0)
     .map((role) => role.trim().toLowerCase());
   return { id, roles: [...new Set(roles)] };
-}
-
-function approverRole(roles: string[]): string | undefined {
-  return roles.find((role) => ['admin', 'owner', 'supervisor'].includes(role));
 }
 
 export interface AiRoutesOptions {
@@ -338,8 +335,9 @@ export default function createAiRoutes(options: AiRoutesOptions = {}): Router {
   router.get('/approvals', requireJwt, tenantContext(), async (req: Request, res: Response) => {
     try {
       const tenantId = resolveTenantId(req);
-      const actor = resolveActor(req);
-      if (!actor.id || !approverRole(actor.roles)) {
+      const actor = resolveTenantContext(req);
+      const workspace = actor.userId ? await getCurrentWorkspace(tenantId, actor.userId, actor.role) : null;
+      if (!workspace?.capabilities.includes('approvals.review')) {
         res.status(403).json({ success: false, error: 'POLICY_DENIED', message: 'Approval access requires an authorized reviewer' });
         return;
       }
@@ -347,6 +345,7 @@ export default function createAiRoutes(options: AiRoutesOptions = {}): Router {
       const offset = req.query.offset ? Number(req.query.offset) : 0;
 
       const approvals = await hitl.listPendingApprovals(tenantId, { limit, offset });
+      res.setHeader('Cache-Control', 'private, no-store');
       res.status(200).json({ success: true, data: approvals });
     } catch (err: any) {
       res.status(err.statusCode || 500).json({
@@ -362,13 +361,8 @@ export default function createAiRoutes(options: AiRoutesOptions = {}): Router {
     try {
       const tenantId = resolveTenantId(req);
       const approvalId = String(req.params.id);
-      const actor = resolveActor(req);
-      const actorRole = approverRole(actor.roles);
-      if (!actor.id || !actorRole) {
-        res.status(403).json({ success: false, error: 'POLICY_DENIED', message: 'Approval decisions require an authorized reviewer' });
-        return;
-      }
-      const { decision, reason, expectedVersion } = req.body;
+      const actor = resolveTenantContext(req);
+      const { decision, reason, expectedVersion, password } = req.body ?? {};
 
       if (!decision || (decision !== 'approved' && decision !== 'rejected')) {
         res.status(400).json({
@@ -379,25 +373,28 @@ export default function createAiRoutes(options: AiRoutesOptions = {}): Router {
         return;
       }
 
-      if (!Number.isSafeInteger(Number(expectedVersion)) || Number(expectedVersion) < 1) {
+      if (!Number.isSafeInteger(Number(expectedVersion)) || Number(expectedVersion) < 1 || Number(expectedVersion) > 2147483647 ||
+          (reason !== undefined && (typeof reason !== 'string' || reason.length > 1000))) {
         res.status(400).json({
           success: false,
           error: 'VALIDATION_ERROR',
-          message: "Field 'expectedVersion' is required and must be a positive integer",
+          message: 'A valid version and optional reason are required',
         });
         return;
       }
 
-      const result = await hitl.decideApproval({
+      const result = await hitl.decideReviewerApproval({
         tenantId,
         approvalId,
         decision,
         reason,
+        password,
         expectedVersion: Number(expectedVersion),
-        actorId: actor.id,
-        actorRole,
+        actorId: String(actor.userId),
+        sessionRole: actor.role,
       });
 
+      res.setHeader('Cache-Control', 'private, no-store');
       res.status(200).json({ success: true, data: result });
     } catch (err: any) {
       res.status(err.statusCode || 500).json({

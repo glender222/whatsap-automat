@@ -15,7 +15,7 @@ const decisions: Record<Decision, { label: string; confirm: string }> = {
   rejected: { label: 'Rechazar solicitud', confirm: 'Confirmar rechazo' },
 };
 type Notice = { tone: 'success' | 'error' | 'uncertain'; message: string };
-type Confirmation = { decision: Decision; expectedVersion: number };
+type Confirmation = { decision: Decision; expectedVersion: number; retry?: DecisionIntent };
 
 let attemptSession: string | null = null;
 const attempts = new Map<string, DecisionIntent>();
@@ -33,9 +33,10 @@ function DecisionDialog({ approval, confirmation, onCancel, onConfirm }: {
   approval: Approval;
   confirmation: Confirmation;
   onCancel: () => void;
-  onConfirm: (reason?: string) => void;
+  onConfirm: (reason?: string, password?: string) => void;
 }) {
-  const [reason, setReason] = useState('');
+  const [reason, setReason] = useState(confirmation.retry?.reason ?? '');
+  const [password, setPassword] = useState('');
   const [reviewed, setReviewed] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null);
   const cancel = useRef<HTMLButtonElement>(null);
@@ -56,8 +57,9 @@ function DecisionDialog({ approval, confirmation, onCancel, onConfirm }: {
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const message = reason.trim();
-    if ((requiresReason && !message) || (sensitive && !reviewed)) return;
-    onConfirm(message || undefined);
+    if ((requiresReason && !message) || (sensitive && (!reviewed || !password))) return;
+    onConfirm(message || undefined, sensitive ? password : undefined);
+    setPassword('');
   }
 
   return (
@@ -72,20 +74,26 @@ function DecisionDialog({ approval, confirmation, onCancel, onConfirm }: {
           </p>
         </div>
         {sensitive && <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-200">
-          Confirma manualmente el alcance de esta solicitud de riesgo sensible antes de registrar tu decisión.
+          Revisa el alcance de la solicitud y confirma la decisión con tu contraseña actual.
         </p>}
         <label className="block text-sm font-semibold">
           {requiresReason ? 'Motivo de la decisión' : 'Motivo de la decisión (opcional)'}
-          <textarea value={reason} onChange={(event) => setReason(event.target.value)} maxLength={1000} rows={3} required={requiresReason}
+          <textarea value={reason} onChange={(event) => setReason(event.target.value)} maxLength={1000} rows={3} required={requiresReason} readOnly={Boolean(confirmation.retry)}
             className="mt-1 w-full rounded-md border border-gray-300 bg-white p-2 text-base dark:border-gray-600 dark:bg-gray-800" />
         </label>
         {sensitive && <label className="flex min-h-11 items-start gap-2 text-sm">
           <input type="checkbox" checked={reviewed} onChange={(event) => setReviewed(event.target.checked)} required className="mt-1 h-4 w-4" />
           Revisé el alcance y el riesgo de esta solicitud.
         </label>}
+        {sensitive && <label className="block text-sm font-semibold">
+          Contraseña actual
+          <input type="password" autoComplete="current-password" value={password} maxLength={1024} required
+            onChange={(event) => setPassword(event.target.value)}
+            className="mt-1 min-h-11 w-full rounded-md border border-gray-300 bg-white p-2 text-base dark:border-gray-600 dark:bg-gray-800" />
+        </label>}
         <div className="flex flex-wrap justify-end gap-2">
           <button type="button" ref={cancel} className={secondary} onClick={onCancel}>Volver</button>
-          <button type="submit" className={primary} disabled={(requiresReason && !reason.trim()) || (sensitive && !reviewed)}>
+          <button type="submit" className={primary} disabled={(requiresReason && !reason.trim()) || (sensitive && (!reviewed || !password))}>
             {decisions[confirmation.decision].confirm}
           </button>
         </div>
@@ -94,7 +102,9 @@ function DecisionDialog({ approval, confirmation, onCancel, onConfirm }: {
   );
 }
 
-export default function ApprovalDetail({ id, tenantId, session }: { id: string; tenantId: string; session: string }) {
+export default function ApprovalDetail({ id, tenantId, session, canReauthenticate }: {
+  id: string; tenantId: string; session: string; canReauthenticate: boolean;
+}) {
   const [approval, setApproval] = useState<Approval>();
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -106,7 +116,8 @@ export default function ApprovalDetail({ id, tenantId, session }: { id: string; 
   const lock = useRef(false);
   const mounted = useRef(false);
   const heading = useRef<HTMLHeadingElement>(null);
-  const canReview = approval?.status === 'pending' && !loading && !loadError && !working;
+  const sensitive = approval ? isSensitiveApproval(approval.risk) : false;
+  const canReview = approval?.status === 'pending' && !loading && !loadError && !working && (!sensitive || canReauthenticate);
 
   const forget = useCallback((intent: DecisionIntent) => {
     const scope = scopedAttempts(session);
@@ -159,9 +170,9 @@ export default function ApprovalDetail({ id, tenantId, session }: { id: string; 
     if (approval) heading.current?.focus();
   }, [approval]);
 
-  async function submit(intent: DecisionIntent) {
+  async function submit(intent: DecisionIntent, password?: string) {
     if (!canReview || !approval || lock.current || currentApprovalSession() !== session ||
-        intent.expectedVersion !== approval.policyVersion) return;
+        intent.expectedVersion !== approval.policyVersion || (sensitive && !password)) return;
     lock.current = true;
     setConfirmation(undefined);
     setWorking(true);
@@ -169,7 +180,7 @@ export default function ApprovalDetail({ id, tenantId, session }: { id: string; 
     scopedAttempts(session)?.set(id, intent);
     setAttempt(intent);
     try {
-      const result = await decideApproval(intent, session);
+      const result = await decideApproval(intent, session, password);
       if (currentApprovalSession() !== session) return;
       forget(intent);
       setApproval((current) => current && { ...current, status: result.status, decidedAt: result.decidedAt, policyVersion: intent.expectedVersion + 1 });
@@ -190,10 +201,15 @@ export default function ApprovalDetail({ id, tenantId, session }: { id: string; 
     }
   }
 
-  function confirm(reason?: string) {
-    if (!confirmation || !approval || attempt || confirmation.expectedVersion !== approval.policyVersion) return;
+  function confirm(reason?: string, password?: string) {
+    if (!confirmation || !approval || confirmation.expectedVersion !== approval.policyVersion) return;
+    if (confirmation.retry) {
+      if (attempt === confirmation.retry) void submit(attempt, password);
+      return;
+    }
+    if (attempt) return;
     const key = Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, '0')).join('');
-    void submit({ approvalId: id, decision: confirmation.decision, expectedVersion: confirmation.expectedVersion, key, reason });
+    void submit({ approvalId: id, decision: confirmation.decision, expectedVersion: confirmation.expectedVersion, key, reason }, password);
   }
 
   return (
@@ -234,9 +250,14 @@ export default function ApprovalDetail({ id, tenantId, session }: { id: string; 
             className={decision === 'approved' ? primary : secondary}>{decisions[decision].label}</button>
         ))}
         {canReview && attempt && attempt.expectedVersion === approval?.policyVersion && (
-          <button type="button" onClick={() => void submit(attempt)} className={primary}>Reintentar la misma decisión</button>
+          <button type="button" onClick={() => sensitive
+            ? setConfirmation({ decision: attempt.decision, expectedVersion: attempt.expectedVersion, retry: attempt })
+            : void submit(attempt)} className={primary}>Reintentar la misma decisión</button>
         )}
       </div>
+      {approval?.status === 'pending' && sensitive && !canReauthenticate && (
+        <p role="status" className={subtext}>Este servidor todavía no ofrece verificación para decisiones sensibles.</p>
+      )}
       {attempt && canReview && <p className={subtext}>El reintento conserva la decisión, el motivo y la versión revisada.</p>}
       {working && <p role="status" className={subtext}>Comprobando la decisión en el servidor…</p>}
       {approval && confirmation && canReview && <DecisionDialog approval={approval} confirmation={confirmation}
