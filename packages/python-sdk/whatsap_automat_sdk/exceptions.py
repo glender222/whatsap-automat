@@ -159,3 +159,29 @@ def create_error_from_response(
         return ServiceUnavailableError(**kwargs)
     else:
         return ProblemDetailsError(status=status, **kwargs)
+
+
+_STANDARD_ERROR_CODES = frozenset((
+    "UNAUTHORIZED", "POLICY_DENIED", "APPROVAL_REQUIRED", "NOT_FOUND", "CONFLICT",
+    "VALIDATION_ERROR", "RATE_LIMITED", "UNKNOWN_DELIVERY", "RETRYABLE", "INTERNAL_ERROR",
+))
+_APPROVAL_REAUTH_REASONS = {
+    "POLICY_DENIED": ("APPROVAL_REAUTH_REQUIRED", "APPROVAL_REAUTH_INVALID"),
+    "RATE_LIMITED": ("APPROVAL_REAUTH_LIMITED",),
+    "VALIDATION_ERROR": ("VALIDATION_ERROR",),
+}
+
+
+def _sensitive_problem_details(body: Any) -> Dict[str, Any]:
+    problem: Dict[str, Any] = {"detail": "The server rejected the request."}
+    if not isinstance(body, dict):
+        return problem
+    code = body.get("code")
+    if not isinstance(code, str) or code not in _STANDARD_ERROR_CODES:
+        return problem
+    problem["code"] = code
+    metadata = body.get("metadata")
+    reason = metadata.get("reason") if isinstance(metadata, dict) else None
+    if isinstance(reason, str) and reason in _APPROVAL_REAUTH_REASONS.get(code, ()):
+        problem["metadata"] = {"reason": reason}
+    return problem

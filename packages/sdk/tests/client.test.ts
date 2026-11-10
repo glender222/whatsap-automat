@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { once } from 'node:events';
+import { createServer } from 'node:http';
 import { describe, it } from 'node:test';
 import { AutomatClient } from '../src/client';
 import { HttpClient } from '../src/http';
@@ -175,5 +177,135 @@ describe('@whatsap-automat/sdk: AutomatClient & HttpClient', () => {
     assert.equal(capturedBody.expectedVersion, 3);
     assert.equal(capturedBody.userId, 'usr_1');
     assert.equal((result as any).assignment.type, 'HUMAN');
+  });
+});
+
+
+describe('@whatsap-automat/sdk: approval reauthentication', () => {
+  const password = 'fixture-current-password';
+  const decision = { decision: 'approved' as const, expectedVersion: 3, reason: 'Reviewed refund' };
+  const capabilities = ['approvals.review', 'approvals.reauthenticate'];
+  const key = 'fixture-approval-key';
+
+  it('verifies workspace capabilities and submits the current password with the existing key', async () => {
+    const requests: string[] = [];
+    const client = AutomatClient.create({
+      baseUrl: 'http://127.0.0.1:3000',
+      fetchFn: async (url, request) => {
+        const path = new URL(url.toString()).pathname;
+        requests.push(path);
+        assert.equal(request?.redirect, 'error');
+        assert.equal(request?.cache, 'no-store');
+        if (request?.method === 'GET') {
+          assert.equal(request.body, undefined);
+          return Response.json({ capabilities });
+        }
+        assert.equal(new Headers(request?.headers).get('Idempotency-Key'), key);
+        assert.deepEqual(JSON.parse(request?.body as string), { ...decision, password });
+        return Response.json({ approvalId: 'app_99', status: 'approved' });
+      },
+    });
+    assert.equal((await client.approvals.decide('app_99', { ...decision, password }, key)).status, 'approved');
+    assert.deepEqual(requests, ['/api/v1/workspaces/current', '/api/v1/approvals/app_99/decision']);
+  });
+
+  it('blocks credential delivery if either capability is missing or the endpoint is unsafe', async () => {
+    for (const offered of [[], ['approvals.review'], ['approvals.reauthenticate']]) {
+      const methods: Array<string | undefined> = [];
+      const client = AutomatClient.create({
+        baseUrl: 'https://api.example.com',
+        fetchFn: async (_url, request) => {
+          methods.push(request?.method);
+          assert.equal(request?.body, undefined);
+          return Response.json({ capabilities: offered });
+        },
+      });
+      await assert.rejects(client.approvals.decide('app_99', { ...decision, password }, key),
+        (err) => err instanceof ProblemDetailsError && err.status === 403);
+      assert.deepEqual(methods, ['GET']);
+    }
+
+    for (const [baseUrl, id] of [['http://api.example.com', 'app_99'], ['https://api.example.com', '..']]) {
+      let calls = 0;
+      const client = AutomatClient.create({
+        baseUrl,
+        fetchFn: async () => { calls++; return Response.json({ capabilities }); },
+      });
+      await assert.rejects(client.approvals.decide(id, { ...decision, password }, key),
+        (err) => err instanceof ProblemDetailsError && err.status === 422);
+      assert.equal(calls, 0);
+    }
+  });
+
+  it('makes one password-bearing POST and redacts sensitive failure details', async () => {
+    const failures = [
+      { status: 403, code: 'POLICY_DENIED', reason: 'APPROVAL_REAUTH_INVALID' },
+      { status: 429, code: 'RATE_LIMITED', reason: 'APPROVAL_REAUTH_LIMITED' },
+      { status: 503, code: 'RETRYABLE', reason: password },
+      { status: 500, code: undefined, reason: undefined },
+    ];
+    for (const { status, code, reason } of failures) {
+      let posts = 0;
+      const client = AutomatClient.create({
+        baseUrl: 'https://api.example.com',
+        fetchFn: async (_url, request) => {
+          if (request?.method === 'GET') return Response.json({ capabilities });
+          posts++;
+          assert.equal(request?.redirect, 'error');
+          if (status === 500) throw new ProblemDetailsError({ detail: password });
+          return Response.json({
+            code, detail: password, title: password, correlationId: password,
+            metadata: { reason, reflected: password },
+          }, { status, headers: { 'retry-after': '0' } });
+        },
+      });
+      await assert.rejects(client.approvals.decide('app_99', { ...decision, password }, key), (err) => {
+        assert.ok(err instanceof ProblemDetailsError);
+        assert.equal(err.status, status);
+        assert.equal(err.code, code);
+        assert.deepEqual(err.metadata, status === 403 || status === 429 ? { reason } : undefined);
+        assert.ok(!err.message.includes(password));
+        assert.ok(!JSON.stringify(err).includes(password));
+        return true;
+      });
+      assert.equal(posts, 1);
+    }
+  });
+
+  it('blocks a real loopback 307 redirect after the single approval POST', async (t) => {
+    const paths: Array<string | undefined> = [];
+    const server = createServer((req, res) => {
+      paths.push(req.url);
+      req.resume();
+      if (req.url === '/api/v1/workspaces/current') {
+        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ capabilities }));
+        return;
+      }
+      res.writeHead(307, { location: '/redirected' }).end();
+    });
+    t.after(() => { server.close(); server.closeAllConnections(); });
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    const address = server.address();
+    assert.ok(address && typeof address !== 'string');
+    const client = AutomatClient.create({ baseUrl: `http://127.0.0.1:${address.port}` });
+    await assert.rejects(client.approvals.decide('app_99', { ...decision, password }, key), ProblemDetailsError);
+    assert.deepEqual(paths, ['/api/v1/workspaces/current', '/api/v1/approvals/app_99/decision']);
+  });
+
+  it('keeps existing keyed retries when the command omits a password', async () => {
+    const requests: Array<[string | null, unknown]> = [];
+    const client = AutomatClient.create({
+      baseUrl: 'https://api.example.com',
+      fetchFn: async (_url, request) => {
+        assert.equal(request?.method, 'POST');
+        assert.equal(request.redirect, undefined);
+        requests.push([new Headers(request.headers).get('Idempotency-Key'), JSON.parse(request.body as string)]);
+        if (requests.length === 1) return new Response(null, { status: 503, headers: { 'retry-after': '0' } });
+        return Response.json({ status: 'approved' });
+      },
+    });
+    assert.equal((await client.approvals.decide('app_99', decision, key)).status, 'approved');
+    assert.deepEqual(requests, [[key, decision], [key, decision]]);
   });
 });

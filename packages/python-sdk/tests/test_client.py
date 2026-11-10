@@ -27,6 +27,69 @@ from whatsap_automat_sdk import (
 )
 
 
+_APPROVAL_PASSWORD = "fixture-current-password"
+_APPROVAL_KEY = "fixture-approval-key"
+_APPROVAL_CAPABILITIES = ["approvals.review", "approvals.reauthenticate"]
+_APPROVAL_FAILURES = (
+    (403, "POLICY_DENIED", "APPROVAL_REAUTH_INVALID"),
+    (429, "RATE_LIMITED", "APPROVAL_REAUTH_LIMITED"),
+    (503, "RETRYABLE", _APPROVAL_PASSWORD),
+    (307, None, None),
+    (500, None, None),
+    (201, None, None),
+    (202, None, None),
+)
+
+
+def _approval_transport(case, capabilities, status, code=None, reason=None):
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append((request.method, request.url.path))
+        if request.method == "GET":
+            case.assertEqual(request.url.path, "/api/v1/workspaces/current")
+            case.assertEqual(request.headers["Cache-Control"], "no-cache, no-store")
+            case.assertEqual(request.content, b"")
+            return httpx.Response(200, json={"capabilities": capabilities})
+        case.assertEqual(request.url.path, "/api/v1/approvals/app_99/decision")
+        case.assertEqual(request.headers["idempotency-key"], _APPROVAL_KEY)
+        case.assertEqual(json.loads(request.content), {
+            "decision": "approved", "expectedVersion": 3, "reason": "Reviewed refund",
+            "password": _APPROVAL_PASSWORD,
+        })
+        if status == 200:
+            return httpx.Response(200, json={
+                "approvalId": "app_99", "status": "approved",
+                "decidedAt": "2026-11-05T01:00:00Z", "decidedBy": "usr_mgr_1",
+            })
+        if status == 201:
+            return httpx.Response(status, text=_APPROVAL_PASSWORD)
+        if status == 202:
+            return httpx.Response(status, json=_APPROVAL_PASSWORD)
+        if status == 500:
+            raise httpx.ReadError(_APPROVAL_PASSWORD, request=request)
+        if status == 307:
+            return httpx.Response(status, headers={"location": "https://other.example/redirect"})
+        return httpx.Response(status, headers={"retry-after": "0"}, json={
+            "code": code, "detail": _APPROVAL_PASSWORD, "title": _APPROVAL_PASSWORD,
+            "metadata": {"reason": reason, "reflected": _APPROVAL_PASSWORD},
+        })
+
+    return httpx.MockTransport(handler), requests
+
+
+def _assert_approval_failure(case, error, requests, status, code, reason):
+    case.assertEqual(error.status, 502 if status in (201, 202) else status)
+    case.assertEqual(error.code, code)
+    case.assertEqual(error.metadata, {"reason": reason} if status in (403, 429) else {})
+    case.assertNotIn(_APPROVAL_PASSWORD, str(error))
+    case.assertNotIn(_APPROVAL_PASSWORD, repr(vars(error)))
+    case.assertIsNone(error.__context__)
+    case.assertEqual(requests, [
+        ("GET", "/api/v1/workspaces/current"), ("POST", "/api/v1/approvals/app_99/decision"),
+    ])
+
+
 class TestAutomatClient(unittest.TestCase):
     """Test suite for synchronous AutomatClient and core functionality."""
 
@@ -418,12 +481,77 @@ class TestAutomatClient(unittest.TestCase):
         self.assertEqual(captured_body["decision"], "approved")
         self.assertEqual(captured_body["expectedVersion"], 3)
         self.assertEqual(captured_body["reason"], "Approved refund")
+        self.assertNotIn("password", captured_body)
         self.assertEqual(res.status, "approved")
         self.assertEqual(res.decided_by, "usr_mgr_1")
+
+    def test_sensitive_approval_success(self) -> None:
+        transport, requests = _approval_transport(self, _APPROVAL_CAPABILITIES, 200)
+        with AutomatClient(base_url="http://127.0.0.1:3000", transport=transport) as client:
+            result = client.approvals.decide(
+                "app_99", "approved", 3, "Reviewed refund", _APPROVAL_KEY, password=_APPROVAL_PASSWORD,
+            )
+        self.assertEqual(result.status, "approved")
+        self.assertEqual([method for method, _ in requests], ["GET", "POST"])
+
+    def test_sensitive_approval_errors_are_redacted_and_never_retried(self) -> None:
+        for status, code, reason in _APPROVAL_FAILURES:
+            with self.subTest(status=status):
+                transport, requests = _approval_transport(self, _APPROVAL_CAPABILITIES, status, code, reason)
+                with AutomatClient(base_url="https://api.example.com", transport=transport) as client:
+                    with self.assertRaises(ProblemDetailsError) as caught:
+                        client.approvals.decide(
+                            "app_99", "approved", 3, "Reviewed refund", _APPROVAL_KEY, password=_APPROVAL_PASSWORD,
+                        )
+                _assert_approval_failure(self, caught.exception, requests, status, code, reason)
+
+    def test_sensitive_approval_blocks_old_server_and_unprotected_transport(self) -> None:
+        transport, requests = _approval_transport(self, ["approvals.review"], 200)
+        with AutomatClient(base_url="https://api.example.com", transport=transport) as client:
+            with self.assertRaises(PolicyDeniedError):
+                client.approvals.decide("app_99", "approved", 3, password=_APPROVAL_PASSWORD)
+        self.assertEqual(requests, [("GET", "/api/v1/workspaces/current")])
+        requests.clear()
+        with AutomatClient(base_url="http://api.example.com", transport=transport) as client:
+            with self.assertRaises(ValidationError):
+                client.approvals.decide("app_99", "approved", 3, password=_APPROVAL_PASSWORD)
+        self.assertEqual(requests, [])
 
 
 class TestAsyncAutomatClient(unittest.IsolatedAsyncioTestCase):
     """Test suite for asynchronous AsyncAutomatClient."""
+
+    async def test_sensitive_approval_success(self) -> None:
+        transport, requests = _approval_transport(self, _APPROVAL_CAPABILITIES, 200)
+        async with AsyncAutomatClient(base_url="https://api.example.com", transport=transport) as client:
+            result = await client.approvals.decide(
+                "app_99", "approved", 3, "Reviewed refund", _APPROVAL_KEY, password=_APPROVAL_PASSWORD,
+            )
+        self.assertEqual(result.status, "approved")
+        self.assertEqual([method for method, _ in requests], ["GET", "POST"])
+
+    async def test_sensitive_approval_errors_are_redacted_and_never_retried(self) -> None:
+        for status, code, reason in _APPROVAL_FAILURES:
+            with self.subTest(status=status):
+                transport, requests = _approval_transport(self, _APPROVAL_CAPABILITIES, status, code, reason)
+                async with AsyncAutomatClient(base_url="https://api.example.com", transport=transport) as client:
+                    with self.assertRaises(ProblemDetailsError) as caught:
+                        await client.approvals.decide(
+                            "app_99", "approved", 3, "Reviewed refund", _APPROVAL_KEY, password=_APPROVAL_PASSWORD,
+                        )
+                _assert_approval_failure(self, caught.exception, requests, status, code, reason)
+
+    async def test_sensitive_approval_blocks_old_server_and_unprotected_transport(self) -> None:
+        transport, requests = _approval_transport(self, ["approvals.reauthenticate"], 200)
+        async with AsyncAutomatClient(base_url="https://api.example.com", transport=transport) as client:
+            with self.assertRaises(PolicyDeniedError):
+                await client.approvals.decide("app_99", "approved", 3, password=_APPROVAL_PASSWORD)
+        self.assertEqual(requests, [("GET", "/api/v1/workspaces/current")])
+        requests.clear()
+        async with AsyncAutomatClient(base_url="http://api.example.com", transport=transport) as client:
+            with self.assertRaises(ValidationError):
+                await client.approvals.decide("app_99", "approved", 3, password=_APPROVAL_PASSWORD)
+        self.assertEqual(requests, [])
 
     async def test_unkeyed_mutation_does_not_retry_a_transport_failure(self) -> None:
         attempts = 0

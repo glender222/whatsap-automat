@@ -1,4 +1,5 @@
-import { createErrorFromResponse, ProblemDetailsError } from './errors';
+import { ProblemDetailsV1, StandardErrorCode } from '@whatsap-automat/contracts';
+import { createErrorFromResponse, ProblemDetailsError, ValidationError } from './errors';
 
 export interface HttpClientOptions {
   baseUrl: string;
@@ -15,6 +16,32 @@ export interface RequestOptions {
   query?: Record<string, string | number | boolean | undefined>;
   timeoutMs?: number;
   signal?: AbortSignal;
+  sensitive?: boolean;
+}
+
+const approvalReauthReasons = new Map<string, readonly string[]>([
+  ['POLICY_DENIED', ['APPROVAL_REAUTH_REQUIRED', 'APPROVAL_REAUTH_INVALID']],
+  ['RATE_LIMITED', ['APPROVAL_REAUTH_LIMITED']],
+  ['VALIDATION_ERROR', ['VALIDATION_ERROR']],
+]);
+
+function sensitiveProblemDetails(body: unknown): Partial<ProblemDetailsV1> {
+  if (!body || typeof body !== 'object') return {};
+  const problem = body as Partial<ProblemDetailsV1>;
+  const code = Object.values(StandardErrorCode).find((known) => known === problem.code);
+  const reason = problem.metadata?.reason;
+  return {
+    ...(code && { code }),
+    ...(code && typeof reason === 'string' && approvalReauthReasons.get(code)?.includes(reason) && { metadata: { reason } }),
+  };
+}
+
+function validateSensitiveUrl(url: string): void {
+  const endpoint = new URL(url);
+  const loopback = endpoint.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(endpoint.hostname);
+  if ((endpoint.protocol !== 'https:' && !loopback) || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) {
+    throw new ValidationError({ detail: 'Password-bearing requests require HTTPS or local loopback HTTP.' });
+  }
 }
 
 export class HttpClient {
@@ -59,10 +86,11 @@ export class HttpClient {
     options: RequestOptions = {}
   ): Promise<T> {
     const url = this.buildUrl(subPath, options.query);
+    if (options.sensitive) validateSensitiveUrl(url);
     const headers = this.buildHeaders(options.headers);
     const timeout = options.timeoutMs ?? this.defaultTimeoutMs;
-    const canRetry = method === 'GET' || Object.entries(options.headers ?? {})
-      .some(([name, value]) => name.toLowerCase() === 'idempotency-key' && value.trim() !== '');
+    const canRetry = !options.sensitive && (method === 'GET' || Object.entries(options.headers ?? {})
+      .some(([name, value]) => name.toLowerCase() === 'idempotency-key' && value.trim() !== ''));
 
     let attempt = 0;
     while (true) {
@@ -70,12 +98,14 @@ export class HttpClient {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), timeout);
 
+      let responseError: ProblemDetailsError | undefined;
       try {
         const response = await this.fetch(url, {
           method,
           headers,
           body: body !== undefined ? JSON.stringify(body) : undefined,
           signal: options.signal ?? controller.signal,
+          ...(options.sensitive && { redirect: 'error', cache: 'no-store' }),
         });
 
         clearTimeout(timeoutId);
@@ -106,13 +136,18 @@ export class HttpClient {
           // Proxies can return plain-text or HTML errors.
         }
 
-        throw createErrorFromResponse(response.status, errorBody, response.headers);
+        responseError = createErrorFromResponse(
+          response.status,
+          options.sensitive ? sensitiveProblemDetails(errorBody) : errorBody,
+          response.headers,
+        );
+        throw responseError;
       } catch (err: any) {
         clearTimeout(timeoutId);
-        if (err instanceof ProblemDetailsError) {
+        if (err instanceof ProblemDetailsError && (!options.sensitive || err === responseError)) {
           throw err;
         }
-        if (err.name === 'AbortError') {
+        if (err?.name === 'AbortError') {
           throw new ProblemDetailsError({
             status: 504,
             title: 'Gateway Timeout',
@@ -126,7 +161,7 @@ export class HttpClient {
         throw new ProblemDetailsError({
           status: 500,
           title: 'Network Error',
-          detail: err.message || 'Unknown network failure',
+          detail: options.sensitive ? 'Network request failed.' : err.message || 'Unknown network failure',
         });
       }
     }

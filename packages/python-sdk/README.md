@@ -61,6 +61,14 @@ async def main():
 asyncio.run(main())
 ```
 
+## Approval reauthentication
+
+For a sensitive approval, pass the operator's current password and the decision reason to
+`client.approvals.decide(..., reason=reason, password=current_password)`. Both clients first
+check that the workspace advertises `approvals.review` and `approvals.reauthenticate`. The
+SDK uses HTTPS or local loopback HTTP and submits the password in a single request without
+following redirects. A caller-provided idempotency key is sent with the decision.
+
 ## License
 
 MIT

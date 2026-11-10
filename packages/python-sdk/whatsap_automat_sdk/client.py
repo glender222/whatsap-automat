@@ -7,15 +7,20 @@ from __future__ import annotations
 
 import asyncio
 import random
+import re
 import time
 from urllib.parse import quote
 from uuid import uuid4
 from dataclasses import dataclass
 from typing import Any, Dict, List, Literal, Mapping, Optional, TypeVar, Union
 import httpx
+from pydantic import ValidationError as ModelValidationError
 
 from .exceptions import (
+    PolicyDeniedError,
     ProblemDetailsError,
+    ValidationError,
+    _sensitive_problem_details,
     create_error_from_response,
 )
 from .models import (
@@ -45,6 +50,49 @@ def _allows_retry(method: str, headers: Optional[Mapping[str, str]]) -> bool:
         name.lower() == "idempotency-key" and value.strip()
         for name, value in (headers or {}).items()
     )
+
+
+def _approval_decision_path(approval_id: str, sensitive: bool) -> str:
+    if sensitive:
+        if not re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", approval_id) or approval_id in (".", ".."):
+            raise ValidationError(detail="Invalid approval identifier.")
+        approval_id = quote(approval_id, safe="")
+    return f"/approvals/{approval_id}/decision"
+
+
+def _require_approval_reauthentication(workspace: Any) -> None:
+    capabilities = workspace.get("capabilities") if isinstance(workspace, dict) else None
+    if not isinstance(capabilities, list) or not all(
+        cap in capabilities for cap in ("approvals.review", "approvals.reauthenticate")
+    ):
+        raise PolicyDeniedError(
+            code="POLICY_DENIED",
+            detail="This workspace does not support approval reauthentication.",
+        )
+
+
+def _validate_sensitive_url(url: httpx.URL) -> None:
+    loopback = url.scheme == "http" and url.host in ("localhost", "127.0.0.1", "::1")
+    if (url.scheme != "https" and not loopback) or url.userinfo or url.query or url.fragment:
+        raise ValidationError(detail="Password-bearing requests require HTTPS or local loopback HTTP.")
+
+
+def _response_json(response: httpx.Response, sensitive: bool) -> Any:
+    try:
+        return response.json()
+    except ValueError:
+        if not sensitive:
+            raise
+    raise ProblemDetailsError(status=502, title="Invalid response", detail="The server returned malformed JSON.")
+
+
+def _approval_decision_result(data: Any, sensitive: bool) -> ApprovalDecisionResult:
+    try:
+        return ApprovalDecisionResult.model_validate(data)
+    except ModelValidationError:
+        if not sensitive:
+            raise
+    raise ProblemDetailsError(status=502, title="Invalid response", detail="The server returned an invalid approval decision.")
 
 
 @dataclass
@@ -277,19 +325,31 @@ class ApprovalsResource:
         expected_version: int,
         reason: Optional[str] = None,
         idempotency_key: Optional[str] = None,
+        *,
+        password: Optional[str] = None,
     ) -> ApprovalDecisionResult:
         cmd = ApprovalDecisionRequest(
             decision=decision,
             expected_version=expected_version,
             reason=reason,
         )
+        sensitive = password is not None
+        path = _approval_decision_path(approval_id, sensitive)
+        body = cmd.model_dump(by_alias=True, exclude_none=True)
+        if sensitive:
+            workspace = self._client._request(
+                "GET", "/workspaces/current", headers={"Cache-Control": "no-cache, no-store"}, sensitive=True,
+            )
+            _require_approval_reauthentication(workspace)
+            body["password"] = password
         data = self._client._request(
             "POST",
-            f"/approvals/{approval_id}/decision",
-            json_body=cmd.model_dump(by_alias=True, exclude_none=True),
+            path,
+            json_body=body,
             headers={"Idempotency-Key": idempotency_key if idempotency_key is not None else uuid4().hex},
+            sensitive=sensitive,
         )
-        return ApprovalDecisionResult.model_validate(data)
+        return _approval_decision_result(data, sensitive)
 
 
 # ---------------------------------------------------------------------------
@@ -362,9 +422,13 @@ class AutomatClient:
         params: Optional[Mapping[str, Any]] = None,
         json_body: Optional[Any] = None,
         headers: Optional[Mapping[str, str]] = None,
+        *,
+        sensitive: bool = False,
     ) -> Any:
         clean_path = path if path.startswith("/") else f"/{path}"
-        can_retry = _allows_retry(method, headers)
+        if sensitive:
+            _validate_sensitive_url(self._http.base_url)
+        can_retry = not sensitive and _allows_retry(method, headers)
         attempt = 0
 
         while True:
@@ -376,12 +440,13 @@ class AutomatClient:
                     params=params,
                     json=json_body,
                     headers=headers,
+                    **({"follow_redirects": False} if sensitive else {}),
                 )
 
                 if response.is_success:
                     if response.status_code == 204 or not response.content:
                         return None
-                    return response.json()
+                    return _response_json(response, sensitive)
 
                 # Retry logic for 429 and 503
                 if can_retry and response.status_code in (429, 503) and attempt <= self.max_retries:
@@ -398,9 +463,12 @@ class AutomatClient:
                 except Exception:
                     error_body = {"detail": response.text}
 
-                raise create_error_from_response(response.status_code, error_body, response.headers)
+                problem = _sensitive_problem_details(error_body) if sensitive else error_body
+                raise create_error_from_response(response.status_code, problem, response.headers)
 
             except httpx.RequestError as exc:
+                if sensitive:
+                    break
                 if can_retry and attempt <= self.max_retries:
                     time.sleep(0.1 * (2 ** attempt))
                     continue
@@ -409,6 +477,7 @@ class AutomatClient:
                     title="Network Error",
                     detail=f"Network request failed: {exc}",
                 ) from exc
+        raise ProblemDetailsError(status=500, title="Network Error", detail="Network request failed.")
 
 
 # ---------------------------------------------------------------------------
@@ -630,19 +699,31 @@ class AsyncApprovalsResource:
         expected_version: int,
         reason: Optional[str] = None,
         idempotency_key: Optional[str] = None,
+        *,
+        password: Optional[str] = None,
     ) -> ApprovalDecisionResult:
         cmd = ApprovalDecisionRequest(
             decision=decision,
             expected_version=expected_version,
             reason=reason,
         )
+        sensitive = password is not None
+        path = _approval_decision_path(approval_id, sensitive)
+        body = cmd.model_dump(by_alias=True, exclude_none=True)
+        if sensitive:
+            workspace = await self._client._request(
+                "GET", "/workspaces/current", headers={"Cache-Control": "no-cache, no-store"}, sensitive=True,
+            )
+            _require_approval_reauthentication(workspace)
+            body["password"] = password
         data = await self._client._request(
             "POST",
-            f"/approvals/{approval_id}/decision",
-            json_body=cmd.model_dump(by_alias=True, exclude_none=True),
+            path,
+            json_body=body,
             headers={"Idempotency-Key": idempotency_key if idempotency_key is not None else uuid4().hex},
+            sensitive=sensitive,
         )
-        return ApprovalDecisionResult.model_validate(data)
+        return _approval_decision_result(data, sensitive)
 
 
 # ---------------------------------------------------------------------------
@@ -715,9 +796,13 @@ class AsyncAutomatClient:
         params: Optional[Mapping[str, Any]] = None,
         json_body: Optional[Any] = None,
         headers: Optional[Mapping[str, str]] = None,
+        *,
+        sensitive: bool = False,
     ) -> Any:
         clean_path = path if path.startswith("/") else f"/{path}"
-        can_retry = _allows_retry(method, headers)
+        if sensitive:
+            _validate_sensitive_url(self._http.base_url)
+        can_retry = not sensitive and _allows_retry(method, headers)
         attempt = 0
 
         while True:
@@ -729,12 +814,13 @@ class AsyncAutomatClient:
                     params=params,
                     json=json_body,
                     headers=headers,
+                    **({"follow_redirects": False} if sensitive else {}),
                 )
 
                 if response.is_success:
                     if response.status_code == 204 or not response.content:
                         return None
-                    return response.json()
+                    return _response_json(response, sensitive)
 
                 # Retry logic for 429 and 503
                 if can_retry and response.status_code in (429, 503) and attempt <= self.max_retries:
@@ -751,9 +837,12 @@ class AsyncAutomatClient:
                 except Exception:
                     error_body = {"detail": response.text}
 
-                raise create_error_from_response(response.status_code, error_body, response.headers)
+                problem = _sensitive_problem_details(error_body) if sensitive else error_body
+                raise create_error_from_response(response.status_code, problem, response.headers)
 
             except httpx.RequestError as exc:
+                if sensitive:
+                    break
                 if can_retry and attempt <= self.max_retries:
                     await asyncio.sleep(0.1 * (2 ** attempt))
                     continue
@@ -762,3 +851,4 @@ class AsyncAutomatClient:
                     title="Network Error",
                     detail=f"Network request failed: {exc}",
                 ) from exc
+        raise ProblemDetailsError(status=500, title="Network Error", detail="Network request failed.")
