@@ -1,4 +1,5 @@
 import type { Queryable } from '../../../../shared/UnitOfWorkPort';
+import { checkoutClaimGraceMs } from '../../domain/paymentCheckoutDispatch.types';
 
 type ReviewCode = 'provider_inconsistent' | 'provider_credit_decreased' | 'settled_payment_changed' |
   'intent_changed' | 'order_changed' | 'gateway_changed' | 'voucher_pending' | 'voucher_validated' | 'checkout_expired';
@@ -18,11 +19,17 @@ export type ObservationDecision = { state: Exclude<ObservationState, 'review_req
 export type CheckoutReconciliationRow = Pick<CheckoutReconciliation,
   'state' | 'amountPaid' | 'observedAt' | 'settledAt' | 'reviewCode'> & {
   orderId: string;
+  intentId: string | null;
   providerOrderId: string | null;
   expectedAmount: string;
   currency: 'PEN';
 };
-export type CheckoutReconciliationFilters = { orderId: string | null; beforeOrderId: string | null; limit: number };
+export type CheckoutReconciliationFilters = {
+  orderId: string | null;
+  beforeOrderId: string | null;
+  limit: number;
+  canReconcile: boolean;
+};
 
 const columns = `
   state, amount_paid::text AS "amountPaid", provider_status AS "providerStatus",
@@ -36,20 +43,29 @@ export class PaymentCheckoutReconciliationRepositoryPg {
   async list(companyId: number, filters: CheckoutReconciliationFilters) {
     const { rows } = await this.db.query(`
       SELECT d.order_id::text AS "orderId", d.provider_order_id AS "providerOrderId",
+             CASE WHEN $5::boolean AND (
+               d.state IN ('created', 'uncertain')
+               OR (d.state = 'claimed' AND d.planned_at <= statement_timestamp() - $6::integer * interval '1 millisecond')
+             ) THEN d.intent_id END AS "intentId",
              i.amount::text AS "expectedAmount", i.currency,
-             r.state, r.amount_paid::text AS "amountPaid", r.observed_at AS "observedAt",
+             COALESCE(r.state, 'awaiting_observation') AS state, r.amount_paid::text AS "amountPaid", r.observed_at AS "observedAt",
              r.settled_at AS "settledAt", r.review_code AS "reviewCode"
       FROM payment_checkout_dispatches d
-      JOIN payment_checkout_reconciliations r USING (company_id, intent_id)
+      LEFT JOIN payment_checkout_reconciliations r USING (company_id, intent_id)
       JOIN payment_checkout_intents i ON i.company_id = d.company_id AND i.id = d.intent_id
       WHERE d.company_id = $1
+        AND (r.intent_id IS NOT NULL OR d.state IN ('claimed', 'created', 'uncertain'))
         AND ($2::bigint IS NULL OR d.order_id = $2)
         AND ($3::bigint IS NULL OR d.order_id < $3)
       ORDER BY d.order_id DESC
       LIMIT $4
-    `, [companyId, filters.orderId, filters.beforeOrderId, filters.limit + 1]);
+    `, [companyId, filters.orderId, filters.beforeOrderId, filters.limit + 1, filters.canReconcile, checkoutClaimGraceMs]);
     const visible = rows.slice(0, filters.limit) as CheckoutReconciliationRow[];
-    return { rows: visible, nextBeforeOrderId: rows.length > filters.limit ? visible[visible.length - 1].orderId : null };
+    return {
+      rows: visible,
+      nextBeforeOrderId: rows.length > filters.limit ? visible[visible.length - 1].orderId : null,
+      canReconcile: filters.canReconcile,
+    };
   }
 
   async begin(companyId: number, intentId: string): Promise<number> {

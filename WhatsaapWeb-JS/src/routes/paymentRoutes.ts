@@ -7,6 +7,7 @@ import { TenantScopedUoW } from '../db/TenantScopedUoW';
 import { JwtRequest, resolveWhatsappCompanyId } from '../middleware/jwtAuth';
 import { listCheckoutReconciliations, PaymentRepositoryPg, PaymentService } from '../modules/payments';
 import { emitDashboard } from '../sockets/socketEmitter';
+import { isMercadoPagoReconciliationEnabled } from './paymentCheckoutReconciliationRuntime';
 
 const multer = require('multer') as any;
 
@@ -44,6 +45,7 @@ export default function createPaymentRoutes(database = pool): Router {
   const router = Router();
   const service = new PaymentService(new PaymentRepositoryPg(database));
   const tenantWork = new TenantScopedUoW(database);
+  const canReconcile = isMercadoPagoReconciliationEnabled();
   const mediaDir = path.join(config.whatsapp.uploadDir, 'payment-vouchers');
   fs.mkdirSync(mediaDir, { recursive: true });
   const upload = multer({
@@ -101,7 +103,7 @@ export default function createPaymentRoutes(database = pool): Router {
         companyId: resolveWhatsappCompanyId(req), actorUserId,
         sessionRole: typeof req.user?.rol === 'string' ? req.user.rol : undefined,
       }, {
-        orderId: parseOrderId(orderId), beforeOrderId: parseOrderId(beforeOrderId), limit: Number(limit),
+        orderId: parseOrderId(orderId), beforeOrderId: parseOrderId(beforeOrderId), limit: Number(limit), canReconcile,
       }, tenantWork);
       return res.json({ success: true, data });
     } catch (error) {

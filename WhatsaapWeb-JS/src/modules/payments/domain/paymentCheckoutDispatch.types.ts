@@ -1,3 +1,5 @@
+export const checkoutClaimGraceMs = 30_000;
+
 export type PaymentCheckoutDispatchState = 'claimed' | 'created' | 'uncertain' | 'rejected' | 'not_sent';
 
 export type PaymentCheckoutDispatch = {

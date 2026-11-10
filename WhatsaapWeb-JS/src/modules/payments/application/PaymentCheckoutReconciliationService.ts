@@ -1,5 +1,6 @@
 import { tenantScopedUoW, type TenantScopedUoW } from '../../../db/TenantScopedUoW';
 import { OrderError } from '../../orders';
+import { checkoutClaimGraceMs } from '../domain/paymentCheckoutDispatch.types';
 import { PaymentCheckoutDispatchRepositoryPg } from '../infra/db/PaymentCheckoutDispatchRepositoryPg';
 import { PaymentCheckoutIntentRepositoryPg } from '../infra/db/PaymentCheckoutIntentRepositoryPg';
 import {
@@ -25,7 +26,6 @@ type ReconcileResult =
   | { kind: 'retry'; reason: 'provider_unavailable' | 'provider_order_unresolved' | 'observation_superseded' };
 type LockedCheckout = Awaited<ReturnType<typeof lockCheckoutIntent>>;
 const uuid = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
-const claimGraceMs = 30_000;
 
 function requireInput(input: ReconcileInput) {
   if (![input.companyId, input.actorUserId].every((id) => Number.isInteger(id) && id > 0 && id <= 2_147_483_647) ||
@@ -92,7 +92,7 @@ export class PaymentCheckoutReconciliationService {
       const orderId = dispatch.providerOrderId ?? input.providerOrderId;
       if (dispatch.state === 'claimed' && !dispatch.providerOrderId) {
         const { rows: [clock] } = await client.query('SELECT clock_timestamp() >= $1::timestamptz AS elapsed',
-          [new Date(dispatch.plannedAt + claimGraceMs)]);
+          [new Date(dispatch.plannedAt + checkoutClaimGraceMs)]);
         if (!clock.elapsed) throw unavailableDispatch();
       }
       const lookupVersion = await new PaymentCheckoutReconciliationRepositoryPg(client).begin(companyId, intentId);

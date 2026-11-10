@@ -263,7 +263,7 @@ export default function PaymentsPage() {
           </div>
         </section>
 
-        <MercadoPagoReconciliationPanel />
+        <MercadoPagoReconciliationPanel onPaymentSettled={load} />
 
         <section aria-label="Comprobantes manuales" className="overflow-hidden rounded-2xl border border-[#D9E5DF] bg-white shadow-sm">
           {loadState === 'loading' && rows.length === 0 ? (

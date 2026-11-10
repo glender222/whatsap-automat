@@ -1,8 +1,8 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { isAxiosError } from 'axios';
 import { ChevronDown, RefreshCw } from 'lucide-react';
 import {
-  paymentsService, type MercadoPagoReconciliation, type MercadoPagoReconciliationPage,
+  paymentsService, type MercadoPagoObservation, type MercadoPagoReconciliation, type MercadoPagoReconciliationPage,
 } from '../services/paymentsService';
 
 const labels: Record<MercadoPagoReconciliation['state'], string> = {
@@ -34,7 +34,96 @@ function LedgerDate({ value }: { value: string | null }) {
   return value ? <time dateTime={value}>{dateFormat.format(new Date(value))}</time> : 'Sin registro';
 }
 
-function LedgerRow({ row }: { row: MercadoPagoReconciliation }) {
+const providerIdPattern = 'ORD(TST)?[0-9A-HJKMNP-TV-Z]{26}';
+const lookupErrors: Record<string, string> = {
+  CHECKOUT_PROVIDER_ORDER_UNRESOLVED: 'La búsqueda no identificó una orden única. Ingresa el ID que aparece en Mercado Pago.',
+  CHECKOUT_PROVIDER_ORDER_CONFLICT: 'El ID ingresado difiere de la orden registrada.',
+  CHECKOUT_DISPATCH_NOT_RECONCILABLE: 'El despacho todavía no está disponible para conciliar.',
+  CHECKOUT_OBSERVATION_SUPERSEDED: 'Otra consulta actualizó el pedido. Actualiza los registros antes de volver a consultar.',
+  PAYMENT_RECONCILIATION_UNAVAILABLE: 'El servidor deshabilitó la conciliación. Puedes seguir consultando los registros.',
+  CHECKOUT_INPUT_INVALID: 'Verifica el ID de la orden de Mercado Pago.',
+};
+
+type LookupNotice = { kind: 'error' | 'success'; message: string };
+
+function LedgerLookup({ orderId, intentId, onObserved }: {
+  orderId: string; intentId: string; onObserved: (observation: MercadoPagoObservation) => void;
+}) {
+  const [checking, setChecking] = useState(false);
+  const [notice, setNotice] = useState<LookupNotice>();
+  const [showCandidate, setShowCandidate] = useState(false);
+  const [candidate, setCandidate] = useState('');
+  const request = useRef<AbortController | null>(null);
+
+  useEffect(() => () => request.current?.abort(), []);
+
+  const reconcile = async (providerOrderId?: string) => {
+    if (request.current) return;
+    const controller = new AbortController();
+    request.current = controller;
+    setChecking(true);
+    setNotice(undefined);
+    try {
+      const observation = await paymentsService.reconcileMercadoPago(intentId, providerOrderId, controller.signal);
+      if (controller.signal.aborted) return;
+      setNotice({ kind: 'success', message: `Consulta registrada. ${labels[observation.state]}.` });
+      setShowCandidate(false);
+      setCandidate('');
+      onObserved(observation);
+    } catch (cause: unknown) {
+      if (controller.signal.aborted) return;
+      const response = isAxiosError<{ error?: string }>(cause) ? cause.response : undefined;
+      const code = response?.data?.error;
+      if (code === 'CHECKOUT_PROVIDER_ORDER_UNRESOLVED') setShowCandidate(true);
+      const message = (code && lookupErrors[code]) || (response?.status === 403
+        ? 'Solo administradores activos pueden conciliar el pedido.'
+        : 'No se pudo conciliar el pedido. Actualiza los registros antes de volver a consultar.');
+      setNotice({ kind: 'error', message });
+    } finally {
+      request.current = null;
+      if (!controller.signal.aborted) setChecking(false);
+    }
+  };
+
+  return (
+    <div className="space-y-2 sm:col-span-2 lg:col-span-3">
+      {!showCandidate ? (
+        <button type="button" className="admin-button-secondary" disabled={checking}
+          aria-label={`Consultar y conciliar el pedido #${orderId}`}
+          aria-describedby="mercadopago-reconciliation-effect" onClick={() => void reconcile()}>
+          Consultar y conciliar
+        </button>
+      ) : (
+        <form className="flex min-w-0 flex-wrap items-end gap-2" onSubmit={(event) => {
+          event.preventDefault();
+          void reconcile(candidate.trim());
+        }}>
+          <label className="flex min-w-0 flex-col gap-1 text-sm font-semibold text-[#10231C]">
+            ID de la orden de Mercado Pago
+            <input className="admin-control" type="text" value={candidate} onChange={(event) => setCandidate(event.target.value)}
+              required maxLength={32} pattern={providerIdPattern} disabled={checking} spellCheck={false} />
+          </label>
+          <button type="submit" className="admin-button-secondary" disabled={checking}
+            aria-describedby="mercadopago-reconciliation-effect">Verificar ID y conciliar</button>
+          <button type="button" className="admin-button-secondary" disabled={checking} onClick={() => {
+            setShowCandidate(false);
+            setCandidate('');
+            setNotice(undefined);
+          }}>Cancelar</button>
+        </form>
+      )}
+      {checking && <p role="status" className="text-sm text-[#5B6F66]">Consultando a Mercado Pago…</p>}
+      {notice?.kind === 'success' && <p role="status" className="text-sm font-medium text-emerald-800">{notice.message}</p>}
+      {notice?.kind === 'error' && <p role="alert" className="text-sm font-medium text-red-700">{notice.message}</p>}
+    </div>
+  );
+}
+
+function LedgerRow({ row, canReconcile, onObserved }: {
+  row: MercadoPagoReconciliation;
+  canReconcile: boolean;
+  onObserved: (observation: MercadoPagoObservation) => void;
+}) {
   const review = row.state === 'review_required';
   const tone = review ? 'bg-amber-50 text-amber-900' : row.state === 'settled'
     ? 'bg-emerald-50 text-emerald-900' : 'bg-gray-100 text-gray-800';
@@ -67,26 +156,30 @@ function LedgerRow({ row }: { row: MercadoPagoReconciliation }) {
           <dd className="font-semibold tabular-nums">{row.amountPaid === null ? 'Sin importe' : amountFormat.format(Number(row.amountPaid))}</dd>
         </div>
       </dl>
+      {canReconcile && row.intentId && <LedgerLookup key={row.intentId} orderId={row.orderId} intentId={row.intentId}
+        onObserved={onObserved} />}
     </li>
   );
 }
 
-type LoadResult = { key: string } & ({ page: MercadoPagoReconciliationPage } | { error: string });
+type LoadResult = { query: string; attempt: number; page?: MercadoPagoReconciliationPage; error?: string };
 
-function LedgerList() {
+function LedgerList({ onPaymentSettled }: { onPaymentSettled: () => void }) {
   const [search, setSearch] = useState('');
   const [orderId, setOrderId] = useState('');
   const [cursors, setCursors] = useState<Array<string | null>>([null]);
   const [attempt, setAttempt] = useState(0);
   const [response, setResponse] = useState<LoadResult>();
   const beforeOrderId = cursors[cursors.length - 1];
-  const key = `${orderId}/${beforeOrderId ?? ''}/${attempt}`;
-  const current = response?.key === key ? response : undefined;
+  const query = `${orderId}/${beforeOrderId ?? ''}`;
+  const current = response?.query === query ? response : undefined;
+  const loading = current?.attempt !== attempt;
+  const ledgerPage = current?.page;
 
   useEffect(() => {
     const controller = new AbortController();
     paymentsService.listMercadoPagoReconciliations({ orderId, beforeOrderId }, controller.signal).then((page) => {
-      if (!controller.signal.aborted) setResponse({ key, page });
+      if (!controller.signal.aborted) setResponse({ query, attempt, page });
     }).catch((error: unknown) => {
       if (controller.signal.aborted) return;
       const status = isAxiosError(error) ? error.response?.status : undefined;
@@ -95,12 +188,23 @@ function LedgerList() {
         : status === 400
           ? 'Verifica el número de pedido.'
           : 'No se pudo cargar la conciliación. Vuelve a intentar.';
-      setResponse({ key, error: message });
+      setResponse((previous) => ({
+        query, attempt, error: message,
+        page: status !== 401 && status !== 403 && previous?.query === query ? previous.page : undefined,
+      }));
     });
     return () => controller.abort();
-  }, [orderId, beforeOrderId, key]);
+  }, [orderId, beforeOrderId, query, attempt]);
 
   const refresh = () => setAttempt((value) => value + 1);
+  const refreshObservation = (previousRow: MercadoPagoReconciliation, observation: MercadoPagoObservation) => {
+    setResponse((previous) => previous?.query === query && previous.page ? {
+      ...previous,
+      page: { ...previous.page, rows: previous.page.rows.map((row) => row.orderId === previousRow.orderId ? { ...row, ...observation } : row) },
+    } : previous);
+    refresh();
+    if (observation.settledAt && !previousRow.settledAt) onPaymentSettled();
+  };
   const filter = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setOrderId(search.trim());
@@ -124,40 +228,47 @@ function LedgerList() {
             setCursors([null]);
           }}>Quitar filtro</button>}
         </form>
-        <button type="button" className="admin-button-secondary" onClick={refresh} disabled={!current}>
+        <button type="button" className="admin-button-secondary" onClick={refresh} disabled={loading}>
           <RefreshCw className="h-4 w-4" aria-hidden="true" /> Actualizar conciliación
         </button>
       </div>
 
-      {!current ? <p role="status" className="text-sm text-[#5B6F66]">Cargando conciliación…</p> :
-        'error' in current ? <p role="alert" className="text-sm font-medium text-red-700">{current.error}</p> : (
-          <>
-            {current.page.rows.length === 0 ? <p role="status" className="text-sm text-[#5B6F66]">
-              {orderId ? 'Este pedido no tiene observaciones de conciliación.' : 'Todavía no hay observaciones de Mercado Pago.'}
-            </p> : (
-              <>
-                <p role="status" className="sr-only">{current.page.rows.length === 1 ? '1 registro' : `${current.page.rows.length} registros`} en esta página.</p>
-                <ul aria-label="Registros de conciliación" className="divide-y divide-[#D9E5DF] border-y border-[#D9E5DF]">
-                  {current.page.rows.map((row) => <LedgerRow key={row.orderId} row={row} />)}
-                </ul>
-              </>
-            )}
-            {(cursors.length > 1 || current.page.nextBeforeOrderId) && (
-              <nav aria-label="Páginas de conciliación" className="flex flex-wrap items-center gap-2">
-                <button type="button" className="admin-button-secondary" disabled={cursors.length === 1}
-                  onClick={() => setCursors((values) => values.slice(0, -1))}>Anterior</button>
-                <span className="px-2 text-sm text-[#5B6F66]" role="status">Página {cursors.length}</span>
-                <button type="button" className="admin-button-secondary" disabled={!current.page.nextBeforeOrderId}
-                  onClick={() => setCursors((values) => [...values, current.page.nextBeforeOrderId])}>Siguiente</button>
-              </nav>
-            )}
-          </>
-        )}
+      {loading && <p role="status" className="text-sm text-[#5B6F66]">Cargando conciliación…</p>}
+      {!loading && current?.error && <p role="alert" className="text-sm font-medium text-red-700">{current.error}</p>}
+      {ledgerPage && (
+        <>
+          <p id="mercadopago-reconciliation-effect" className="text-sm text-[#5B6F66]">
+            {ledgerPage.canReconcile
+              ? 'Si Mercado Pago acredita el importe total y el pedido sigue vigente, la consulta puede confirmarlo y registrar el pago.'
+              : 'Solo lectura. La consulta directa a Mercado Pago está deshabilitada.'}
+          </p>
+          {ledgerPage.rows.length === 0 ? <p role="status" className="text-sm text-[#5B6F66]">
+            {orderId ? 'Este pedido no tiene observaciones de conciliación.' : 'Todavía no hay registros de Mercado Pago.'}
+          </p> : (
+            <>
+              <p role="status" className="sr-only">{ledgerPage.rows.length === 1 ? '1 registro' : `${ledgerPage.rows.length} registros`} en esta página.</p>
+              <ul aria-label="Registros de conciliación" className="divide-y divide-[#D9E5DF] border-y border-[#D9E5DF]">
+                {ledgerPage.rows.map((row) => <LedgerRow key={row.orderId} row={row} canReconcile={ledgerPage.canReconcile}
+                  onObserved={(observation) => refreshObservation(row, observation)} />)}
+              </ul>
+            </>
+          )}
+          {(cursors.length > 1 || ledgerPage.nextBeforeOrderId) && (
+            <nav aria-label="Páginas de conciliación" className="flex flex-wrap items-center gap-2">
+              <button type="button" className="admin-button-secondary" disabled={loading || cursors.length === 1}
+                onClick={() => setCursors((values) => values.slice(0, -1))}>Anterior</button>
+              <span className="px-2 text-sm text-[#5B6F66]" role="status">Página {cursors.length}</span>
+              <button type="button" className="admin-button-secondary" disabled={loading || !ledgerPage.nextBeforeOrderId}
+                onClick={() => setCursors((values) => [...values, ledgerPage.nextBeforeOrderId])}>Siguiente</button>
+            </nav>
+          )}
+        </>
+      )}
     </div>
   );
 }
 
-export default function MercadoPagoReconciliationPanel() {
+export default function MercadoPagoReconciliationPanel({ onPaymentSettled }: { onPaymentSettled: () => void }) {
   const [expanded, setExpanded] = useState(false);
   return (
     <section aria-labelledby="mercadopago-reconciliation-title" className="rounded-xl border border-[#D9E5DF] bg-white shadow-sm">
@@ -173,7 +284,7 @@ export default function MercadoPagoReconciliationPanel() {
         </button>
       </header>
       <div id="mercadopago-reconciliation-list" hidden={!expanded}>
-        {expanded && <LedgerList />}
+        {expanded && <LedgerList onPaymentSettled={onPaymentSettled} />}
       </div>
     </section>
   );

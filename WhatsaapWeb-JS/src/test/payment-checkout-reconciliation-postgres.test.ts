@@ -11,6 +11,8 @@ import { requireJwt } from '../middleware/jwtAuth';
 import { DashboardRepositoryPg } from '../modules/dashboard/infra/db/DashboardRepositoryPg';
 import { OrderRepositoryPg } from '../modules/orders';
 import createPaymentRoutes from '../routes/paymentRoutes';
+import createPaymentCheckoutReconciliationRoutes from '../routes/paymentCheckoutReconciliationRoutes';
+import createPaymentCheckoutReconciliationRuntime from '../routes/paymentCheckoutReconciliationRuntime';
 import { createTestJwt } from './fixtures/authFixtures';
 import type { Queryable } from '../shared/UnitOfWorkPort';
 import {
@@ -137,24 +139,41 @@ test('reconciles only verified checkout observations and settles once under tena
     async (scope) => scope.companyId === companyId && scope.gatewayId === String(gatewayId)
       ? { ...scope, sellerId, accessToken: 'fixture-access-token' } : null,
   );
+  const dispatcher = new PaymentCheckoutDispatchService(adapter, uow);
+  const reconciliation = new PaymentCheckoutReconciliationService(adapter, uow);
   const app = express();
-  app.use('/api/payments', requireJwt, createPaymentRoutes(db));
+  app.use(express.json());
+  const originalGate = process.env.MERCADOPAGO_RECONCILIATION_ENABLED;
+  try {
+    delete process.env.MERCADOPAGO_RECONCILIATION_ENABLED;
+    app.use('/api/payments/checkout-intents', createPaymentCheckoutReconciliationRuntime(db));
+    app.use('/api/payments', requireJwt, createPaymentRoutes(db));
+    process.env.MERCADOPAGO_RECONCILIATION_ENABLED = 'true';
+    app.use('/enabled/api/payments/checkout-intents', createPaymentCheckoutReconciliationRoutes(reconciliation));
+    app.use('/enabled/api/payments', requireJwt, createPaymentRoutes(db));
+  } finally {
+    if (originalGate === undefined) delete process.env.MERCADOPAGO_RECONCILIATION_ENABLED;
+    else process.env.MERCADOPAGO_RECONCILIATION_ENABLED = originalGate;
+  }
   app.use(require('../middleware/errorHandler').errorHandler);
   const http = app.listen(0, '127.0.0.1');
   await once(http, 'listening');
   t.after(() => new Promise<void>((resolve) => http.close(() => resolve())));
   const appAddress = http.address();
   assert.ok(appAddress && typeof appAddress !== 'string');
-  const api = (path: string, token?: string) => fetch(`http://127.0.0.1:${appAddress.port}/api/payments${path}`, {
-    headers: token ? { authorization: `Bearer ${token}` } : {},
-  });
+  const api = (path: string, token?: string, options?: { enabled?: boolean; body?: Record<string, unknown> }) => {
+    const prefix = options?.enabled ? '/enabled/api/payments' : '/api/payments';
+    return fetch(`http://127.0.0.1:${appAddress.port}${prefix}${path}`, {
+      method: options?.body === undefined ? 'GET' : 'POST',
+      headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
+      body: options?.body === undefined ? undefined : JSON.stringify(options.body),
+    });
+  };
   const token = (tenantId: number, userId: number, rol = 'ADMIN') =>
     createTestJwt({ companyId: tenantId, userId, rol }, process.env.JWT_SECRET);
   const adminToken = token(companyId, actor.actorUserId);
   const ledgerPath = '/mercadopago-reconciliations';
 
-  const dispatcher = new PaymentCheckoutDispatchService(adapter, uow);
-  const reconciliation = new PaymentCheckoutReconciliationService(adapter, uow);
   let chatSequence = 0;
 
   async function prepare(kind: 'confirmed' | 'reserved' = 'confirmed') {
@@ -338,9 +357,11 @@ test('reconciles only verified checkout observations and settles once under tena
     assert.equal(first.headers.get('cache-control'), 'no-store');
     const page = (await first.json()).data;
     assert.equal(page.rows.length, 1);
+    assert.equal(page.canReconcile, false);
+    assert.equal(page.rows[0].intentId, null);
     assert.equal(page.nextBeforeOrderId, page.rows[0].orderId);
     assert.deepEqual(Object.keys(page.rows[0]).sort(), [
-      'amountPaid', 'currency', 'expectedAmount', 'observedAt', 'orderId', 'providerOrderId', 'reviewCode', 'settledAt', 'state',
+      'amountPaid', 'currency', 'expectedAmount', 'intentId', 'observedAt', 'orderId', 'providerOrderId', 'reviewCode', 'settledAt', 'state',
     ]);
     const next = await api(`${ledgerPath}?limit=1&beforeOrderId=${page.nextBeforeOrderId}`, adminToken);
     assert.equal(next.status, 200);
@@ -349,17 +370,76 @@ test('reconciles only verified checkout observations and settles once under tena
     const orderPath = `${ledgerPath}?orderId=${second.orderId}`;
     const exact = await api(orderPath, adminToken);
     assert.equal(exact.status, 200);
-    assert.deepEqual((await exact.json()).data, { rows: [second], nextBeforeOrderId: null });
+    assert.deepEqual((await exact.json()).data, { rows: [second], nextBeforeOrderId: null, canReconcile: false });
 
     const otherToken = token(companyId + 1, actorIds.get(companyId + 1)!);
     const inaccessible = await api(orderPath, otherToken);
     assert.equal(inaccessible.status, 200);
-    assert.deepEqual((await inaccessible.json()).data, { rows: [], nextBeforeOrderId: null });
+    assert.deepEqual((await inaccessible.json()).data, { rows: [], nextBeforeOrderId: null, canReconcile: false });
     assert.equal((await api(orderPath)).status, 401);
     assert.equal((await api(orderPath, token(companyId, actor.actorUserId, 'EMPLEADO'))).status, 403);
     assert.equal((await api(orderPath, token(companyId, actorIds.get(companyId + 1)!))).status, 403);
     for (const invalidQuery of ['orderId=0', 'orderId=1e3', 'beforeOrderId=9223372036854775808', 'limit=101', 'limit=1&limit=2']) {
       assert.equal((await api(`${ledgerPath}?${invalidQuery}`, adminToken)).status, 400);
+    }
+  });
+
+  await t.test('keeps unobserved dispatches visible and enables explicit reconciliation only for eligible attempts', async () => {
+    loseAcknowledgment = true;
+    const checkout = await prepare('reserved');
+    loseAcknowledgment = false;
+    const orderPath = `${ledgerPath}?orderId=${checkout.orderId}`;
+    const actionPath = `/checkout-intents/${checkout.id}/reconcile`;
+    const providerCalls = requests.length;
+    const view = async (enabled: boolean, path = orderPath) => {
+      const response = await api(path, adminToken, { enabled });
+      assert.equal(response.status, 200);
+      return (await response.json()).data;
+    };
+    const disabled = await view(false);
+    assert.equal(disabled.canReconcile, false);
+    assert.equal(disabled.rows[0].state, 'awaiting_observation');
+    assert.equal(disabled.rows[0].intentId, null);
+    assert.equal((await api(actionPath, adminToken, { body: {} })).status, 501);
+    assert.equal(requests.length, providerCalls);
+
+    const enabled = await view(true);
+    assert.equal(enabled.canReconcile, true);
+    assert.equal(enabled.rows[0].state, 'awaiting_observation');
+    assert.equal(enabled.rows[0].intentId, checkout.id);
+    const unresolved = await api(actionPath, adminToken, { enabled: true, body: {} });
+    assert.equal(unresolved.status, 409);
+    assert.equal((await unresolved.json()).error, 'CHECKOUT_PROVIDER_ORDER_UNRESOLVED');
+    remoteStatus(checkout.providerId, credited('0.40'));
+    const resolved = await api(actionPath, adminToken, { enabled: true, body: { providerOrderId: checkout.providerId } });
+    assert.equal(resolved.status, 200);
+    assert.equal((await resolved.json()).data.state, 'settled');
+    const settled = await view(true);
+    assert.equal(settled.rows[0].state, 'settled');
+    assert.equal(settled.rows[0].providerOrderId, checkout.providerId);
+    assert.equal((await orders.get(companyId, checkout.orderId))?.status, 'confirmed');
+    assert.equal(requests.slice(providerCalls).filter((request) => request.startsWith('POST')).length, 0);
+
+    const claimed = await prepare();
+    const claimedPath = `${ledgerPath}?orderId=${claimed.orderId}`;
+    await uow.run(companyId, (sql) => sql.query(`
+      UPDATE payment_checkout_dispatches
+      SET state='claimed', provider_order_id=NULL, provider_expires_at=NULL, outcome_code=NULL,
+          planned_at=clock_timestamp(), valid_until=clock_timestamp()+interval '1 minute'
+      WHERE company_id=$1 AND intent_id=$2
+    `, [companyId, claimed.id]));
+    assert.equal((await view(true, claimedPath)).rows[0].intentId, null);
+    await uow.run(companyId, (sql) => sql.query(`
+      UPDATE payment_checkout_dispatches SET planned_at=clock_timestamp()-interval '31 seconds'
+      WHERE company_id=$1 AND intent_id=$2
+    `, [companyId, claimed.id]));
+    assert.equal((await view(true, claimedPath)).rows[0].intentId, claimed.id);
+
+    for (const state of ['not_sent', 'rejected']) {
+      await uow.run(companyId, (sql) => sql.query(`
+        UPDATE payment_checkout_dispatches SET state=$3, outcome_code='fixture' WHERE company_id=$1 AND intent_id=$2
+      `, [companyId, claimed.id, state]));
+      assert.deepEqual((await view(true, claimedPath)).rows, []);
     }
   });
 });

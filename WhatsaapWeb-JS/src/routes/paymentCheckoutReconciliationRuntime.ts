@@ -9,11 +9,15 @@ import createPaymentCheckoutReconciliationRoutes from './paymentCheckoutReconcil
 const ordersPath = '/v1/orders';
 const orderPrefix = ordersPath + '/';
 
+export function isMercadoPagoReconciliationEnabled(): boolean {
+  return process.env.MERCADOPAGO_RECONCILIATION_ENABLED === 'true';
+}
+
 export default function createPaymentCheckoutReconciliationRuntime(
   database: Pool = pool,
   request: typeof fetch = fetch,
 ) {
-  if (process.env.MERCADOPAGO_RECONCILIATION_ENABLED !== 'true') {
+  if (!isMercadoPagoReconciliationEnabled()) {
     return createPaymentCheckoutReconciliationRoutes();
   }
   const gateways = new PaymentGatewayRepositoryPg(database);

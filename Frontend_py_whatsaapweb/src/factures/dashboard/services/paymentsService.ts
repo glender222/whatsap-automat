@@ -1,4 +1,4 @@
-import { api } from '../../../shared/axios/http';
+import { api, type AuthRequestConfig } from '../../../shared/axios/http';
 
 export type PaymentMethod = 'yape' | 'plin' | 'bank_transfer' | 'cash' | 'other';
 export type PaymentVoucherStatus = 'pending' | 'validated' | 'rejected';
@@ -45,6 +45,7 @@ export type PaymentVoucherPage = {
 
 export type MercadoPagoReconciliation = {
   orderId: string;
+  intentId: string | null;
   providerOrderId: string | null;
   expectedAmount: string;
   amountPaid: string | null;
@@ -58,7 +59,11 @@ export type MercadoPagoReconciliation = {
 export type MercadoPagoReconciliationPage = {
   rows: MercadoPagoReconciliation[];
   nextBeforeOrderId: string | null;
+  canReconcile: boolean;
 };
+
+export type MercadoPagoObservation = Pick<MercadoPagoReconciliation,
+  'state' | 'amountPaid' | 'observedAt' | 'settledAt' | 'reviewCode'>;
 
 export type PaymentListFilters = {
   status?: PaymentVoucherStatus;
@@ -118,6 +123,13 @@ export const paymentsService = {
       signal,
     });
     return unwrap<MercadoPagoReconciliationPage>(response);
+  },
+
+  async reconcileMercadoPago(intentId: string, providerOrderId: string | undefined, signal: AbortSignal): Promise<MercadoPagoObservation> {
+    const options: AuthRequestConfig = { signal, replayOnAuthRenewal: false };
+    const response = await api.post(`/payments/checkout-intents/${encodeURIComponent(intentId)}/reconcile`,
+      providerOrderId ? { providerOrderId } : {}, options);
+    return unwrap<MercadoPagoObservation>(response);
   },
 
   async countPending(): Promise<number> {
