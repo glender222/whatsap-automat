@@ -81,14 +81,44 @@ export class MetaInboundWorkRepository {
   }
 
   async recoverExpired(companyId: number): Promise<number> {
+    await this.uow.run(companyId, async (db) => {
+      // Plaintext never belongs in outbox/ledger. Expired encrypted checkpoints are
+      // erased even when no operator opens the conversation again.
+      await db.query(`WITH expired AS (
+        SELECT id FROM strict_whatsapp_runs WHERE tenant_id = $1 AND state IN ('prepared', 'ready')
+          AND output_expires_at <= clock_timestamp() ORDER BY output_expires_at, id LIMIT 100 FOR UPDATE SKIP LOCKED
+      ) UPDATE strict_whatsapp_runs run SET state = 'uncertain', output_encrypted = NULL, updated_at = clock_timestamp()
+        FROM expired WHERE run.tenant_id = $1 AND run.id = expired.id`, [companyId]);
+    });
+    // Release run cleanup locks before touching work: delivery authorization locks
+    // work first and reads the run in that same transaction.
     return this.uow.run(companyId, async (db) => {
+      // Preparation has not entered runtime. Release its expired lease before
+      // considering recovered older work, including the per-conversation index.
+      await db.query(`UPDATE processing_outbox SET status = 'pending', lease_token = NULL,
+        next_retry_at = NULL, updated_at = clock_timestamp()
+        WHERE tenant_id = $1 AND event_type = $2 AND status = 'processing'
+          AND next_retry_at <= clock_timestamp()`, [companyId, META_INBOUND_EVENT_TYPE]);
       const result = await db.query(`
         UPDATE processing_outbox SET status = 'delivery_unknown', lease_token = NULL,
           next_retry_at = NULL, last_error = 'META_INBOUND_RUNTIME_INTERRUPTED', updated_at = clock_timestamp()
         WHERE tenant_id = $1 AND event_type = $2 AND status = 'dispatched'
           AND next_retry_at <= clock_timestamp()
       `, [companyId, META_INBOUND_EVENT_TYPE]);
-      return result.rowCount ?? 0;
+      // Only a confirmed, same-source checkpoint may resume. The runtime reuses
+      // its pinned attempt and canonical outbound claim; it never repeats a model
+      // request whose outcome is unknown. A late settlement is eligible next tick.
+      const resumed = await db.query(`
+        UPDATE processing_outbox work SET status = 'pending', lease_token = NULL,
+          next_retry_at = NULL, last_error = NULL, updated_at = clock_timestamp()
+        FROM strict_whatsapp_runs run
+        WHERE work.tenant_id = $1 AND work.event_type = $2 AND work.status = 'delivery_unknown'
+          AND run.tenant_id = work.tenant_id AND run.job_id = work.id
+          AND run.inbound_message_id::text = work.payload->>'messageId'
+          AND run.conversation_id::text = work.payload->>'conversationId'
+          AND (run.state = 'completed' OR (run.state = 'ready' AND run.output_expires_at > clock_timestamp()))
+      `, [companyId, META_INBOUND_EVENT_TYPE]);
+      return (result.rowCount ?? 0) + (resumed.rowCount ?? 0);
     });
   }
 
@@ -99,6 +129,12 @@ export class MetaInboundWorkRepository {
           SELECT work.id FROM processing_outbox work
           WHERE work.tenant_id = $1 AND work.event_type = $2 AND work.status IN ('pending', 'processing')
             AND (work.next_retry_at IS NULL OR work.next_retry_at <= clock_timestamp())
+            AND NOT EXISTS (
+              SELECT 1 FROM processing_outbox active
+              WHERE active.tenant_id = work.tenant_id AND active.event_type = work.event_type AND active.id <> work.id
+                AND active.payload->>'conversationId' = work.payload->>'conversationId'
+                AND active.status IN ('processing', 'dispatched') AND active.next_retry_at > clock_timestamp()
+            )
             AND NOT EXISTS (
               SELECT 1 FROM processing_outbox previous
               WHERE previous.tenant_id = work.tenant_id AND previous.event_type = work.event_type

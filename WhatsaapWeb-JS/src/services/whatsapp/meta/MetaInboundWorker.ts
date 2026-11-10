@@ -13,6 +13,7 @@ export interface MetaInboundAuthority {
 export interface MetaInboundWorkerOptions {
   repository?: MetaInboundWorkRepository;
   execute(work: MetaInboundExecution, authority: MetaInboundAuthority): Promise<MetaInboundOutcome>;
+  afterCompleted?(work: MetaInboundExecution, outcome: MetaInboundOutcome): Promise<void>;
   pollIntervalMs?: number;
   leaseMs?: number;
   runtimeTimeoutMs?: number;
@@ -149,6 +150,7 @@ export class MetaInboundWorker {
         throw new Error('Invalid inbound runtime outcome');
       }
       if (!await this.repository.finish(claim, outcome)) await this.repository.recoverExpired(claim.companyId);
+      else if (outcome.status === 'completed') await this.options.afterCompleted?.(work, outcome);
     } catch {
       await this.repository.finish(claim, { status: 'uncertain' });
     } finally {

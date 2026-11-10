@@ -27,6 +27,7 @@ import createConversationV1Routes from './routes/conversationV1Routes';
 import createWorkspaceRoutes from './routes/workspaceRoutes';
 import createWorkflowRoutes from './routes/workflowRoutes';
 import createAiRoutes from './routes/ai.routes';
+import createStrictWhatsappBindingRoutes, { createStrictWhatsappSuggestionRoutes } from './routes/strictWhatsappBindingRoutes';
 import createAgentStudioRoutes, { createAgentSimulationRoutes } from './routes/agentStudioRoutes';
 import { createStudioProviderAccess, type StudioVerification } from './services/ai/studio/StudioVerification';
 import { createTenantBoundedModelExecution } from './services/ai/gateway/TenantBoundedModelExecution';
@@ -243,6 +244,8 @@ export class App {
     this.app.use('/api/media', requireJwt, createMediaRoutes(this.whatsappService));
     this.app.use('/api/v1/workflows', createWorkflowRoutes());
     this.app.use('/api/v1/ai', createAiRoutes());
+    this.app.use('/api/v1/ai/whatsapp-binding', createStrictWhatsappBindingRoutes());
+    this.app.use('/api/v1/ai/whatsapp-suggestions', createStrictWhatsappSuggestionRoutes());
     this.app.use('/api/v1/agent-graphs', createAgentStudioRoutes(undefined, this.studioVerification,
       createStudioProviderAccess(tenantScopedUoW, createTenantBoundedModelExecution())));
     this.app.use('/api/v1/agent-runs', createAgentSimulationRoutes());

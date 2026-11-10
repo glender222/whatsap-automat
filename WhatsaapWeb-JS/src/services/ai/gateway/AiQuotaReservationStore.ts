@@ -31,6 +31,10 @@ export interface AiQuotaSettlement {
   latencyMs: number;
 }
 
+export type AiQuotaSettlementHook = (
+  client: Queryable, result: { ledgerId: number; overrun: boolean },
+) => Promise<void>;
+
 interface LockedQuota {
   period_start: Date;
   reset_at: Date;
@@ -131,7 +135,7 @@ export class AiQuotaReservationStore {
     });
   }
 
-  async settle(tenantId: number, settlement: AiQuotaSettlement): Promise<{ ledgerId: number; overrun: boolean }> {
+  async settle(tenantId: number, settlement: AiQuotaSettlement, onSettled?: AiQuotaSettlementHook): Promise<{ ledgerId: number; overrun: boolean }> {
     const { id, claimToken, promptTokens, completionTokens, costMicroUsd, status, isByok, latencyMs } = settlement;
     const totalTokens = promptTokens + completionTokens;
     if (!uuid.test(id) || !uuid.test(claimToken) || !isAmount(promptTokens, MAX_PG_INTEGER) ||
@@ -154,7 +158,9 @@ export class AiQuotaReservationStore {
       const overrun = BigInt(costMicroUsd) > BigInt(reservation.max_cost_micro_usd) || totalTokens > reservation.max_tokens;
       if (reservation.status === 'settled') {
         if (reservation.settlement_hash !== hash) throw new AiQuotaReservationConflictError();
-        return { ledgerId: Number(reservation.ledger_id), overrun };
+        const result = { ledgerId: Number(reservation.ledger_id), overrun };
+        await onSettled?.(client, result);
+        return result;
       }
 
       const ledgerId = await this.ledger.record({
@@ -174,6 +180,7 @@ export class AiQuotaReservationStore {
         `UPDATE ai_quota_reservations SET status = 'settled', ledger_id = $3, settlement_hash = $4
          WHERE tenant_id = $1 AND id = $2`, [tenantId, id, ledgerId, hash]
       );
+      await onSettled?.(client, { ledgerId, overrun });
       return { ledgerId, overrun };
     });
   }

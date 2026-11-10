@@ -10,6 +10,8 @@ import { MetaInboundWorker, type MetaInboundAuthority, type MetaInboundExecution
 import type { MetaInboundWorkRepository } from './whatsapp/meta/MetaInboundWorkRepository';
 import { ConversationSendError, conversationSendService, type AgentSendAnchor, type AgentSendResult } from './conversations/ConversationSendService';
 import { AiDispatchUnavailableError } from './ai/gateway/TenantAiDispatchPolicy';
+import { strictWhatsappRuntime } from './ai/runtime/StrictWhatsappRuntime';
+import type { OrchestratorInput } from '../modules/ai/application/AiRuntimeOrchestrator';
 import { withCompatibleVideo } from './whatsapp/VideoTranscode';
 import { removeTemporaryUpload } from '../shared/temporaryUpload';
 import AgentService from './ai/AgentService';
@@ -695,6 +697,7 @@ export class WhatsAppService {
     const worker = new MetaInboundWorker({
       repository,
       execute: (work, authority) => this.processMetaInbound(work, authority),
+      afterCompleted: (work, outcome) => this.publishMetaInboundOutcome(work, outcome),
       onError: (error) => console.error('No se pudo procesar el trabajo de mensajes entrantes', {
         code: error instanceof Error ? error.name : 'META_INBOUND_WORKER_ERROR',
       }),
@@ -703,10 +706,24 @@ export class WhatsAppService {
     return () => worker.stop();
   }
 
+  async publishMetaInboundOutcome(work: MetaInboundExecution, outcome: MetaInboundOutcome): Promise<void> {
+    if (outcome.code !== 'AI_STRICT_SUGGESTION_READY') return;
+    const suggestion = await strictWhatsappRuntime.suggestionFor(work.companyId, work.conversationId);
+    if (!suggestion || suggestion.inboundMessageId !== work.messageId) return;
+    const notification = { companyId: work.companyId, chatId: String(work.message.from), agentId: null,
+      conversationId: suggestion.conversationId, inboundMessageId: suggestion.inboundMessageId,
+      action: 'suggest', reason: 'strict_published_agent',
+      expiresAt: suggestion.expiresAt,
+      origin: { kind: 'published_graph', graphId: suggestion.graphId, version: suggestion.version,
+        specHash: suggestion.specHash, runId: suggestion.runId } };
+    emitConversation(work.companyId, notification.chatId, 'agent:suggestion', notification);
+  }
+
   async processMetaInbound(work: MetaInboundExecution, authority: MetaInboundAuthority): Promise<MetaInboundOutcome> {
     const { companyId, message, inboundProviderMessageId } = work;
     const chatId = typeof message.from === 'string' ? message.from : '';
     let agentId: number | null = null;
+    let strictRunId: string | undefined;
 
     try {
       const text: unknown = message?.text?.body || message?.button?.text || message?.interactive?.button_reply?.title;
@@ -757,7 +774,7 @@ export class WhatsAppService {
       authority.signal.throwIfAborted();
       if (!await authority.isCurrent()) return { status: 'uncertain', code: 'AGENT_WORK_EXPIRED' };
       const orchestrator = this.getRuntimeOrchestrator();
-      const result = await orchestrator.processInbound({
+      const runtimeInput: OrchestratorInput = {
         companyId,
         chatId,
         conversationId: Number(work.conversationId),
@@ -765,9 +782,14 @@ export class WhatsAppService {
         history: history.map((h) => ({ fromMe: h.fromMe, body: h.body })),
         inboundProviderMessageId,
         signal: authority.signal,
+        strictSource: { jobId: work.jobId, messageId: work.messageId, messageType: message.type,
+          isCurrent: (db) => authority.isCurrent(db) },
         sender: { sendProductCard: (payload) => this.sendProductCard(work, authority, payload) },
-      });
+      };
+      const result = await orchestrator.processInbound(runtimeInput);
+      strictRunId = result.strictRunId;
       authority.signal.throwIfAborted();
+      if (result.strictOutcome === 'uncertain') return { status: 'uncertain', code: 'AI_STRICT_MODEL_UNCONFIRMED' };
 
       agentId = result.agentId;
       const toolTrace = sanitizeToolTrace(result.toolResults);
@@ -795,7 +817,14 @@ export class WhatsAppService {
       });
 
       if ((result.action === 'auto_reply' || result.action === 'handoff') && result.reply) {
-        return await this.sendAgentReply(work, authority, chatId, agentId, result);
+        const deliveryAuthority = strictRunId ? { signal: authority.signal,
+          isCurrent: async (db?: import('../shared/UnitOfWorkPort').Queryable) =>
+            authority.isCurrent(db).then((current) => current && strictWhatsappRuntime.canDeliver(runtimeInput, strictRunId!, db)),
+        } : authority;
+        const outcome = await this.sendAgentReply(work, deliveryAuthority, chatId, agentId, result);
+        if (strictRunId) await strictWhatsappRuntime.finish(companyId, strictRunId,
+          outcome.status === 'uncertain' ? 'uncertain' : 'completed');
+        return outcome;
       }
       if (result.action === 'suggest') {
         await this.logAgentRuntime({
@@ -809,6 +838,8 @@ export class WhatsAppService {
           payload: { intent: result.route, action: result.action },
         });
       }
+      if (strictRunId && result.action === 'suggest') return { status: 'completed', code: 'AI_STRICT_SUGGESTION_READY' };
+      if (strictRunId) await strictWhatsappRuntime.finish(companyId, strictRunId, 'completed');
       return { status: 'completed' };
     } catch (error: any) {
       const safeErrorCode = error instanceof AiDispatchUnavailableError ? error.code
@@ -816,6 +847,7 @@ export class WhatsAppService {
       const skipped = error instanceof AiDispatchUnavailableError || (error instanceof ConversationSendError &&
         (error.code === 'POLICY_DENIED' ||
           ['SERVICE_WINDOW_CLOSED', 'CONVERSATION_CLOSED', 'DELIVERY_UNRESOLVED', 'SENDING_ACCOUNT_UNAVAILABLE'].includes(safeErrorCode)));
+      if (skipped && strictRunId) await strictWhatsappRuntime.finish(companyId, strictRunId, 'completed');
       await this.logAgentRuntime({
         companyId,
         agentId,

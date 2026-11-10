@@ -15,6 +15,7 @@ import type { AgentToolContext } from '../domain/tool.types';
 import type { AiAgent, AiDomainKey, AutomatorMode } from '../domain/agent.types';
 import { AiSessionRepositoryPg } from '../infra/db/AiSessionRepositoryPg';
 import { tenantAiDispatchPolicy, type TenantAiDispatchPolicy } from '../../../services/ai/gateway/TenantAiDispatchPolicy';
+import { strictWhatsappRuntime, type StrictWhatsappRuntime } from '../../../services/ai/runtime/StrictWhatsappRuntime';
 
 export type OrchestratorInput = {
   companyId: number;
@@ -25,6 +26,7 @@ export type OrchestratorInput = {
   sender: ProductCardSender;
   conversationId?: number;
   signal?: AbortSignal;
+  strictSource?: { jobId: string; messageId: string; messageType: string; isCurrent(db?: Queryable): Promise<boolean> };
 };
 
 export type OrchestratorResult = {
@@ -38,6 +40,8 @@ export type OrchestratorResult = {
   handoffTicketId: number | null;
   toolResults: Array<{ toolName: string; status: string }>;
   rounds: number;
+  strictRunId?: string;
+  strictOutcome?: 'uncertain';
   delivery?: {
     productCards?: Array<{ commercialItemId: number; caption?: string }>;
   } | null;
@@ -51,10 +55,14 @@ export class AiRuntimeOrchestrator {
     private readonly registry: AgentToolRegistry,
     private readonly logger: AgentToolLogger,
     private readonly sessionService: AiChatSessionService,
-    private readonly dispatchPolicy?: Pick<TenantAiDispatchPolicy, 'withLegacyDispatch'>,
+    private readonly dispatchPolicy?: Pick<TenantAiDispatchPolicy, 'withLegacyDispatch'> & Partial<Pick<TenantAiDispatchPolicy, 'mode'>>,
+    private readonly strictRuntime?: Pick<StrictWhatsappRuntime, 'processInbound'>,
   ) {}
 
-  processInbound(input: OrchestratorInput): Promise<OrchestratorResult> {
+  async processInbound(input: OrchestratorInput): Promise<OrchestratorResult> {
+    if (this.strictRuntime && await this.dispatchPolicy?.mode?.(input.companyId) === 'strict') {
+      return this.strictRuntime.processInbound(input);
+    }
     return this.dispatchPolicy
       ? this.dispatchPolicy.withLegacyDispatch(input.companyId, () => this.runInbound(input))
       : this.runInbound(input);
@@ -367,7 +375,8 @@ export function getAiRuntimeOrchestrator(pool: Queryable): AiRuntimeOrchestrator
     const routerService = new AgentRouterService(pool, agentRepo, logRepo);
     const registry = getDefaultToolRegistry();
     const logger = new AgentToolLogger(logRepo, sessionEventService);
-    instance = new AiRuntimeOrchestrator(pool, agentRepo, routerService, registry, logger, sessionService, tenantAiDispatchPolicy);
+    instance = new AiRuntimeOrchestrator(pool, agentRepo, routerService, registry, logger, sessionService,
+      tenantAiDispatchPolicy, strictWhatsappRuntime);
   }
   return instance;
 }
