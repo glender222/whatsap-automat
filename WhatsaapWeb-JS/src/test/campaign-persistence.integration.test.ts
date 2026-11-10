@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createHmac, randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
+import { join } from 'node:path';
 import test from 'node:test';
 import express from 'express';
 import jwt from 'jsonwebtoken';
@@ -9,7 +11,7 @@ import { Pool } from 'pg';
 
 test('campaign API persists scoped drafts, real counts, suppression and acknowledged delivery', {
   skip: process.env.CAMPAIGN_SMOKE !== '1' && 'Use a dedicated migrated *_smoke database and set CAMPAIGN_SMOKE=1',
-  timeout: 90000,
+  timeout: 120000,
 }, async (context) => {
   const { default: config } = await import('../config');
   const { default: pool } = await import('../config/database');
@@ -217,6 +219,15 @@ test('campaign API persists scoped drafts, real counts, suppression and acknowle
   const firstProviderRequest = new Promise<void>((resolve) => { enterMeta = resolve; });
   let confirmMeta = true;
   let rejectMeta = false;
+  let providerGate: { enter: () => void; release: Promise<void> } | undefined;
+  function holdNextProvider() {
+    let enter!: () => void;
+    let release!: () => void;
+    const entered = new Promise<void>((resolve) => { enter = resolve; });
+    providerGate = { enter, release: new Promise<void>((resolve) => { release = resolve; }) };
+    context.after(release);
+    return { entered, release };
+  }
   const realFetch = globalThis.fetch;
   const graphServer = createServer(async (req, res) => {
     const chunks: Buffer[] = [];
@@ -228,6 +239,13 @@ test('campaign API persists scoped drafts, real counts, suppression and acknowle
     assert.equal(req.method, 'POST');
     const number = metaRequests.length;
     if (number === 1) { enterMeta(); await holdFirstProviderResponse; }
+    const gate = providerGate;
+    if (gate) {
+      providerGate = undefined;
+      gate.enter();
+      await gate.release;
+    }
+    if (res.destroyed) return;
     res.setHeader('content-type', 'application/json');
     if (rejectMeta) res.writeHead(400).end(JSON.stringify({ error: { code: 100, message: 'Fixture rejection' } }));
     else if (!confirmMeta) res.destroy();
@@ -236,13 +254,14 @@ test('campaign API persists scoped drafts, real counts, suppression and acknowle
   await once(graphServer, 'listening');
   const graphAddress = graphServer.address();
   assert.ok(graphAddress && typeof graphAddress !== 'string');
+  const graphBase = `http://127.0.0.1:${graphAddress.port}`;
   context.after(() => { graphServer.close(); });
   const fetchFixture: typeof fetch = async (input, init) => {
     const url = new URL(String(input));
     if (url.origin === base) return realFetch(input, init);
     assert.equal(url.origin, 'https://graph.facebook.com');
     assert.equal(init?.redirect, 'error');
-    return realFetch(`http://127.0.0.1:${graphAddress.port}${url.pathname}${url.search}`, init);
+    return realFetch(`${graphBase}${url.pathname}${url.search}`, init);
   };
   globalThis.fetch = fetchFixture;
   context.after(() => {
@@ -421,6 +440,115 @@ test('campaign API persists scoped drafts, real counts, suppression and acknowle
   const settled = await dispatcher.getDeliveries(missingAck.id, tenant);
   assert.ok(settled.every(({ status }) => status === 'delivered'));
   assert.equal(settled.find(({ destination }) => destination === uncertain.to)?.providerMessageId, confirmation.id);
+
+  const campaignPath = (id: string) => `/production/campaigns/${id}`;
+  const newTemplate = (name: string) => request('/production/campaigns', tenant, 201, {
+    ...whatsappInput, name, connectionId: sentWhatsApp.connectionId, templateId: 'aviso',
+  });
+  const inspectLease = (id: string) => tenantScopedUoW.run(tenant, async (db) => (await db.query(`
+    SELECT status, stats_total, dispatch_run_id, dispatch_lease_expires_at > clock_timestamp() AS lease_active
+    FROM campaigns WHERE tenant_id = $1 AND id = $2
+  `, [tenant, id])).rows[0]);
+  // Advance just this fixture's persisted lease instead of waiting two minutes in CI.
+  const expireLease = (id: string) => tenantScopedUoW.run(tenant, (db) => db.query(`
+    UPDATE campaigns SET dispatch_lease_expires_at = clock_timestamp() - interval '1 second'
+    WHERE tenant_id = $1 AND id = $2 AND status = 'dispatching'
+  `, [tenant, id]));
+
+  await context.test('recovers a killed dispatcher without resending its uncertain recipient', async (subtest) => {
+    const { data: crashed } = await newTemplate('Proceso interrumpido');
+    const path = campaignPath(crashed.id);
+    const beforeCrash = (await request(`${path}/dispatch-review`, tenant, 200)).data.reviewKey;
+    const held = holdNextProvider();
+    const graphStart = metaRequests.length;
+    const child = spawn(process.execPath, ['--import', 'tsx', join(__dirname, 'fixtures/dispatch-campaign-child.ts'),
+      String(tenant), crashed.id, graphBase, beforeCrash], { stdio: ['ignore', 'ignore', 'pipe'] });
+    let childError = '';
+    child.stderr.on('data', (chunk: Buffer) => { childError += chunk.toString(); });
+    const childExit = once(child, 'exit');
+    subtest.after(() => { child.kill('SIGKILL'); held.release(); });
+    await Promise.race([held.entered, childExit.then(() => { throw new Error(`Dispatch child exited early: ${childError}`); })]);
+    assert.equal((await request(path, tenant, 200)).data.status, 'dispatching');
+    assert.equal((await request(`${path}/dispatch`, tenant, 409, {})).error, 'CAMPAIGN_NOT_DISPATCHABLE');
+    const live = await inspectLease(crashed.id);
+    assert.equal(live.lease_active, true);
+    assert.equal(live.stats_total, 2);
+    const [pending] = await dispatcher.getDeliveries(crashed.id, tenant);
+    assert.equal(pending.status, 'pending');
+    assert.equal(metaRequests.length, graphStart + 1);
+    assert.equal(child.kill('SIGKILL'), true);
+    assert.deepEqual(await childExit, [null, 'SIGKILL']);
+    held.release();
+
+    assert.equal((await expireLease(crashed.id)).rowCount, 1);
+    await request(path, other, 404);
+    assert.equal((await inspectLease(crashed.id)).status, 'dispatching');
+    assert.equal((await request(`${path}/dispatch`, tenant, 409, { reviewKey: beforeCrash })).error,
+      'CAMPAIGN_DISPATCH_INTERRUPTED');
+    const recovered = await inspectLease(crashed.id);
+    assert.equal(recovered.status, 'paused');
+    assert.equal(recovered.lease_active, null);
+    assert.equal(recovered.dispatch_run_id, live.dispatch_run_id);
+    const blocked = (await request(`${path}/dispatch-review`, tenant, 200)).data;
+    assert.equal(blocked.blockedByUnconfirmedDelivery, true);
+    assert.equal((await request(`${path}/dispatch`, tenant, 409, { reviewKey: blocked.reviewKey })).error,
+      'CAMPAIGN_DELIVERY_UNCONFIRMED');
+    assert.equal(metaRequests.length, graphStart + 1);
+
+    const sent = metaRequests[graphStart].body;
+    const settledId = 'wamid.process-killed';
+    await receipt(metaPhoneId, { id: settledId, status: 'delivered', timestamp: now(), recipient_id: sent.to,
+      biz_opaque_callback_data: sent.biz_opaque_callback_data });
+    assert.equal((await request(`${path}/dispatch`, tenant, 409, {})).error, 'CAMPAIGN_REVIEW_REQUIRED');
+    assert.equal((await request(`${path}/dispatch`, tenant, 409, { reviewKey: beforeCrash })).error,
+      'CAMPAIGN_AUDIENCE_CHANGED');
+    const reviewed = (await request(`${path}/dispatch-review`, tenant, 200)).data;
+    assert.equal(reviewed.unattemptedCount, 1);
+    assert.equal(reviewed.blockedByUnconfirmedDelivery, false);
+    const finished = (await request(`${path}/dispatch`, tenant, 200, { reviewKey: reviewed.reviewKey })).data;
+    assert.equal(finished.status, 'completed');
+    assert.equal(finished.statsDispatched, 2);
+    assert.equal(finished.statsDelivered, 1);
+    assert.equal(metaRequests.length, graphStart + 2);
+    assert.notEqual(metaRequests.at(-1)?.body.to, sent.to);
+    assert.notEqual((await inspectLease(crashed.id)).dispatch_run_id, live.dispatch_run_id);
+    assert.equal((await dispatcher.getDeliveries(crashed.id, tenant)).find(({ id }) => id === pending.id)?.providerMessageId, settledId);
+  });
+
+  await context.test('a stale live worker cannot overwrite a recovered run', async () => {
+    const { data: stale } = await newTemplate('Ejecución con permiso vencido');
+    const path = campaignPath(stale.id);
+    const held = holdNextProvider();
+    const graphStart = metaRequests.length;
+    let oldRunFinished = false;
+    const oldRun = sendRequest(`${path}/dispatch`, tenant, {}).then((result) => {
+      oldRunFinished = true;
+      return result;
+    });
+    await Promise.race([held.entered, oldRun.then((result) => { throw new Error(`Dispatch finished early: ${result.status}`); })]);
+    assert.equal((await expireLease(stale.id)).rowCount, 1);
+    const list = (await request('/production/campaigns', tenant, 200)).data;
+    assert.equal(list.find(({ id }: { id: string }) => id === stale.id).status, 'paused');
+    const sent = metaRequests[graphStart].body;
+    await receipt(metaPhoneId, { id: 'wamid.stale-worker', status: 'sent', timestamp: now(), recipient_id: sent.to,
+      biz_opaque_callback_data: sent.biz_opaque_callback_data });
+    const review = (await request(`${path}/dispatch-review`, tenant, 200)).data;
+    assert.equal((await request(`${path}/dispatch`, tenant, 200, { reviewKey: review.reviewKey })).data.status, 'completed');
+    assert.equal(oldRunFinished, false);
+    held.release();
+    const lost = await oldRun;
+    assert.equal(lost.status, 409);
+    assert.equal((await lost.json()).error, 'CAMPAIGN_DISPATCH_LEASE_LOST');
+    assert.equal((await request(path, tenant, 200)).data.statsDispatched, 2);
+    assert.equal(metaRequests.length, graphStart + 2);
+    assert.notEqual(metaRequests.at(-1)?.body.to, sent.to);
+  });
+
+  const { data: historical } = await newTemplate('Despacho anterior a migración');
+  await tenantScopedUoW.run(tenant, (db) => db.query("UPDATE campaigns SET status = 'dispatching' WHERE id = $1", [historical.id]));
+  const historicalPath = campaignPath(historical.id);
+  assert.equal((await request(historicalPath, tenant, 200)).data.status, 'dispatching');
+  assert.equal((await request(`${historicalPath}/dispatch`, tenant, 409, {})).error, 'CAMPAIGN_DISPATCH_LEGACY_UNFENCED');
 
   await setContacts([contacts[0]]);
   rejectMeta = true;

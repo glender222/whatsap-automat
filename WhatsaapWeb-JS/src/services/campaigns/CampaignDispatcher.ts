@@ -9,15 +9,20 @@ import {
   ChannelAdapterV1,
 } from '@whatsap-automat/contracts';
 import { TenantScopedUoW, tenantScopedUoW } from '../../db/TenantScopedUoW';
+import type { Queryable } from '../../shared/UnitOfWorkPort';
 import config from '../../config';
 import { ConsentService, consentService } from './ConsentService';
 import { SegmentationService, segmentationService, RecipientRecord } from './SegmentationService';
 import { CampaignRequestError } from './CampaignRequestError';
 import { defaultWhatsAppCampaignLanguage, WhatsAppCampaignTransport } from './WhatsAppCampaignTransport';
 import { lockMetaReceipt } from '../whatsapp/meta/MetaCanonicalReceipt';
-import { lockCampaign, reconciledDeliveryMessage, refreshCampaignStats, unconfirmedDeliveryMessage } from './CampaignMetaReceipt';
+import { reconciledDeliveryMessage, refreshCampaignStats, unconfirmedDeliveryMessage } from './CampaignMetaReceipt';
 
 const audienceLimit = 1000;
+const dispatchLease = '2 minutes';
+const interruptedDispatch = 'El despacho se interrumpió. Revisa las entregas antes de reanudar.';
+
+type CampaignSnapshot = { campaign: CampaignDefinitionV1; runId: string | null; version: string | null };
 
 export interface DispatcherOptions {
   readonly skipPacingDelay?: boolean; // For deterministic unit tests
@@ -183,20 +188,25 @@ export class CampaignDispatcher {
   }
 
   async getCampaign(tenantId: number, campaignId: string): Promise<CampaignDefinitionV1 | null> {
+    return (await this.readCampaign(tenantId, campaignId, true))?.campaign ?? null;
+  }
+
+  private async readCampaign(tenantId: number, campaignId: string, recover: boolean): Promise<CampaignSnapshot | null> {
     if (!this.uow) {
       const cmp = this.memoryCampaigns.get(campaignId);
-      if (cmp && cmp.tenantId === tenantId) return cmp;
+      if (cmp && cmp.tenantId === tenantId) return { campaign: cmp, runId: null, version: null };
       return null;
     }
 
     return await this.uow.run(tenantId, async (client) => {
+      if (recover) await this.pauseExpiredDispatches(client, tenantId, campaignId);
       const res = await client.query(
-        `SELECT * FROM campaigns WHERE tenant_id = $1 AND id = $2 LIMIT 1;`,
+        `SELECT *, updated_at::text AS dispatch_version FROM campaigns WHERE tenant_id = $1 AND id = $2`,
         [tenantId, campaignId]
       );
       if (!res.rows[0]) return null;
       const row = res.rows[0];
-      return {
+      const campaign: CampaignDefinitionV1 = {
         id: row.id,
         tenantId: Number(row.tenant_id),
         workspaceId: row.workspace_id ? Number(row.workspace_id) : null,
@@ -226,6 +236,7 @@ export class CampaignDispatcher {
         createdAt: new Date(row.created_at).toISOString(),
         updatedAt: new Date(row.updated_at).toISOString(),
       };
+      return { campaign, runId: row.dispatch_run_id, version: row.dispatch_version };
     });
   }
 
@@ -239,6 +250,7 @@ export class CampaignDispatcher {
     }
 
     return await this.uow.run(tenantId, async (client) => {
+      await this.pauseExpiredDispatches(client, tenantId);
       const res = await client.query(
         `SELECT * FROM campaigns WHERE tenant_id = $1 ORDER BY created_at DESC;`,
         [tenantId]
@@ -290,9 +302,17 @@ export class CampaignDispatcher {
     recipientsOverride?: RecipientRecord[],
     expectedReviewKey?: string,
   ): Promise<CampaignDefinitionV1> {
-    const campaign = await this.getCampaign(tenantId, campaignId);
-    if (!campaign) throw new CampaignRequestError(404, 'CAMPAIGN_NOT_FOUND', 'Campaña no encontrada.');
+    const snapshot = await this.readCampaign(tenantId, campaignId, false);
+    if (!snapshot) throw new CampaignRequestError(404, 'CAMPAIGN_NOT_FOUND', 'Campaña no encontrada.');
+    const { campaign } = snapshot;
     if (campaign.status === 'completed') return campaign;
+    if (this.uow && campaign.status === 'dispatching') {
+      const paused = await this.uow.run(tenantId, (client) => this.pauseExpiredDispatches(client, tenantId, campaignId));
+      if (paused) throw new CampaignRequestError(409, 'CAMPAIGN_DISPATCH_INTERRUPTED', interruptedDispatch);
+      if (!snapshot.runId) {
+        throw new CampaignRequestError(409, 'CAMPAIGN_DISPATCH_LEGACY_UNFENCED', 'El despacho anterior requiere revisión operativa.');
+      }
+    }
     if (campaign.status === 'dispatching' || campaign.status === 'cancelled' ||
         (campaign.scheduledAt && Date.parse(campaign.scheduledAt) > Date.now())) {
       throw new CampaignRequestError(409, 'CAMPAIGN_NOT_DISPATCHABLE', 'La campaña no está disponible para despacho.');
@@ -323,18 +343,23 @@ export class CampaignDispatcher {
     if (recipients.length > audienceLimit) {
       throw new CampaignRequestError(409, 'CAMPAIGN_AUDIENCE_LIMIT', 'El segmento supera el límite de 1000 destinatarios.');
     }
-    if (expectedReviewKey !== undefined && this.reviewKey(campaign, recipients) !== expectedReviewKey) {
+    if (expectedReviewKey !== undefined && this.reviewKey(campaign, recipients, snapshot.version) !== expectedReviewKey) {
       throw new CampaignRequestError(409, 'CAMPAIGN_AUDIENCE_CHANGED', 'La audiencia cambió. Revisa el segmento de nuevo antes de confirmar.');
     }
 
     const existingDeliveries = await this.getDeliveries(campaign.id, tenantId);
-    if (whatsapp && existingDeliveries.some(({ status }) => status === 'pending')) {
+    if (this.uow && existingDeliveries.some(({ status }) => status === 'pending')) {
       throw new CampaignRequestError(409, 'CAMPAIGN_DELIVERY_UNCONFIRMED', unconfirmedDeliveryMessage);
+    }
+    if (campaign.status === 'paused' && campaign.pauseReason === interruptedDispatch && expectedReviewKey === undefined) {
+      throw new CampaignRequestError(409, 'CAMPAIGN_REVIEW_REQUIRED', interruptedDispatch);
     }
     if (recipients.length === 0 && existingDeliveries.length === 0) {
       throw new CampaignRequestError(409, 'CAMPAIGN_AUDIENCE_EMPTY', 'El segmento no tiene destinatarios aptos.');
     }
     const existingByDest = new Map(existingDeliveries.map((delivery) => [destinationKey(delivery.destination), delivery]));
+    const statsTotal = new Set([...existingByDest.keys(), ...recipients.map(({ destination }) => destinationKey(destination))]).size;
+    const runId = crypto.randomUUID();
     if (this.uow) {
       await this.uow.run(tenantId, async (client) => {
         if (whatsapp) {
@@ -371,9 +396,13 @@ export class CampaignDispatcher {
           }
         }
         const claim = await client.query(
-          `UPDATE campaigns SET status = 'dispatching', started_at = COALESCE(started_at, NOW()), connection_id = $4, updated_at = NOW()
-           WHERE tenant_id = $1 AND id = $2 AND status = $3 RETURNING id`,
-          [tenantId, campaignId, campaign.status, campaign.connectionId],
+          `UPDATE campaigns SET status = 'dispatching', started_at = COALESCE(started_at, clock_timestamp()),
+             completed_at = NULL, pause_reason = NULL, connection_id = $4, stats_total = $9,
+             dispatch_run_id = $5, dispatch_lease_expires_at = clock_timestamp() + $6::interval, updated_at = clock_timestamp()
+           WHERE tenant_id = $1 AND id = $2 AND status = $3 AND dispatch_run_id IS NOT DISTINCT FROM $7::uuid
+             AND updated_at = $8::timestamptz
+           RETURNING id`,
+          [tenantId, campaignId, campaign.status, campaign.connectionId, runId, dispatchLease, snapshot.runId, snapshot.version, statsTotal],
         );
         if (!claim.rows.length) throw new CampaignRequestError(409, 'CAMPAIGN_ALREADY_CLAIMED', 'La campaña cambió durante el despacho.');
       });
@@ -386,7 +415,7 @@ export class CampaignDispatcher {
     campaign.startedAt = campaign.startedAt || new Date().toISOString();
     campaign.completedAt = null;
     campaign.pauseReason = null;
-    campaign.statsTotal = new Set([...existingByDest.keys(), ...recipients.map(({ destination }) => destinationKey(destination))]).size;
+    campaign.statsTotal = statsTotal;
 
     // Recalculate baseline stats from existing deliveries
     let statsDispatched = 0;
@@ -477,7 +506,7 @@ export class CampaignDispatcher {
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
-        await this.saveDelivery(tenantId, delivery);
+        await this.saveDelivery(tenantId, delivery, runId);
         continue;
       }
 
@@ -509,7 +538,7 @@ export class CampaignDispatcher {
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
           };
-          await this.saveDelivery(tenantId, delivery);
+          await this.saveDelivery(tenantId, delivery, runId);
           if (evaluateCircuitBreaker()) {
             break;
           }
@@ -529,7 +558,7 @@ export class CampaignDispatcher {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
-      await this.saveDelivery(tenantId, delivery, whatsappAccountId && campaign.connectionId
+      await this.saveDelivery(tenantId, delivery, runId, whatsappAccountId && campaign.connectionId
         ? { phone: whatsappAccountId, connection: campaign.connectionId } : undefined);
       try {
         const result = await send({
@@ -569,13 +598,13 @@ export class CampaignDispatcher {
         }
       }
       if (whatsapp) {
-        const persistedStatus = await this.saveWhatsAppOutcome(tenantId, delivery);
+        const persistedStatus = await this.saveWhatsAppOutcome(tenantId, delivery, runId);
         if (persistedStatus === 'pending') {
           campaign.status = 'paused';
           campaign.pauseReason = unconfirmedDeliveryMessage;
         }
       } else {
-        await this.saveDelivery(tenantId, delivery);
+        await this.saveDelivery(tenantId, delivery, runId);
       }
       if (evaluateCircuitBreaker()) break;
 
@@ -604,8 +633,8 @@ export class CampaignDispatcher {
       this.memoryCampaigns.set(campaignId, campaign);
     } else {
       await this.uow.run(tenantId, async (client) => {
+        await this.renewDispatchLease(client, tenantId, campaignId, runId);
         if (whatsapp) {
-          await lockCampaign(client, tenantId, campaignId);
           const totals = await refreshCampaignStats(client, tenantId, campaignId);
           campaign.statsDispatched = totals.stats_dispatched;
           campaign.statsDelivered = totals.stats_delivered;
@@ -619,24 +648,28 @@ export class CampaignDispatcher {
             campaign.completedAt = campaign.status === 'completed' ? campaign.completedAt || new Date().toISOString() : null;
           }
         }
-        await client.query(
+        const finished = await client.query(
           `UPDATE campaigns SET status = $1, started_at = $2, completed_at = $3,
             stats_total = $4, stats_dispatched = $5, stats_failed = $6, stats_suppressed = $7,
-            pause_reason = $8, updated_at = NOW() WHERE tenant_id = $9 AND id = $10`,
+            pause_reason = $8, dispatch_lease_expires_at = NULL, updated_at = clock_timestamp()
+           WHERE tenant_id = $9 AND id = $10 AND status = 'dispatching' AND dispatch_run_id = $11
+           RETURNING updated_at`,
           [
             campaign.status, campaign.startedAt, campaign.completedAt, campaign.statsTotal,
             campaign.statsDispatched, campaign.statsFailed, campaign.statsSuppressed, campaign.pauseReason,
-            tenantId, campaignId,
+            tenantId, campaignId, runId,
           ],
         );
+        campaign.updatedAt = finished.rows[0].updated_at.toISOString();
       });
     }
     return campaign;
   }
 
   async getDispatchReview(tenantId: number, campaignId: string) {
-    const campaign = await this.getCampaign(tenantId, campaignId);
-    if (!campaign) throw new CampaignRequestError(404, 'CAMPAIGN_NOT_FOUND', 'Campaña no encontrada.');
+    const snapshot = await this.readCampaign(tenantId, campaignId, true);
+    if (!snapshot) throw new CampaignRequestError(404, 'CAMPAIGN_NOT_FOUND', 'Campaña no encontrada.');
+    const { campaign } = snapshot;
     const segment = campaign.segmentId ? await this.segments.getSegment(tenantId, campaign.segmentId) : null;
     const recipients = segment ? await this.resolveAudience(campaign) : [];
     const deliveries = campaign.startedAt ? await this.getDeliveries(campaignId, tenantId) : [];
@@ -647,10 +680,10 @@ export class CampaignDispatcher {
       segmentName: segment?.name ?? null,
       audienceCount: recipients.length,
       unattemptedCount: recipients.filter(({ destination }) => !attempted.has(this.destinationKey(campaign, destination))).length,
-      blockedByUnconfirmedDelivery: campaign.channel === 'whatsapp-cloud' && deliveries.some(({ status }) => status === 'pending'),
+      blockedByUnconfirmedDelivery: deliveries.some(({ status }) => status === 'pending'),
       audienceLimit,
       limitExceeded: recipients.length > audienceLimit,
-      reviewKey: this.reviewKey(campaign, recipients),
+      reviewKey: this.reviewKey(campaign, recipients, snapshot.version),
       contentBody: campaign.contentBody,
       templateName: campaign.templateId,
       templateLanguage: campaign.templateId
@@ -677,11 +710,38 @@ export class CampaignDispatcher {
     return [...unique.values()];
   }
 
-  private reviewKey(campaign: CampaignDefinitionV1, recipients: RecipientRecord[]): string {
+  private reviewKey(campaign: CampaignDefinitionV1, recipients: RecipientRecord[], version: string | null): string {
     const audience = recipients.map(({ destination }) => this.destinationKey(campaign, destination)).sort();
     return crypto.createHmac('sha256', config.jwt.secret)
-      .update(JSON.stringify([campaign.id, campaign.updatedAt, audience]))
+      .update(JSON.stringify([campaign.id, version ?? campaign.updatedAt, audience]))
       .digest('hex');
+  }
+
+  // Recovery only changes the campaign phase. A pending delivery might already be at Meta.
+  private async pauseExpiredDispatches(db: Queryable, tenantId: number, campaignId?: string): Promise<number> {
+    const expired = await db.query(`
+      WITH expired AS (
+        SELECT id FROM campaigns WHERE tenant_id = $1 AND status = 'dispatching'
+          AND dispatch_lease_expires_at <= statement_timestamp() AND ($2::varchar IS NULL OR id = $2)
+        ORDER BY id FOR UPDATE SKIP LOCKED
+      )
+      UPDATE campaigns c SET status = 'paused', pause_reason = $3,
+        dispatch_lease_expires_at = NULL, updated_at = clock_timestamp()
+      FROM expired WHERE c.tenant_id = $1 AND c.id = expired.id RETURNING c.id
+    `, [tenantId, campaignId ?? null, interruptedDispatch]);
+    for (const row of expired.rows) await refreshCampaignStats(db, tenantId, row.id);
+    return expired.rows.length;
+  }
+
+  // Hold the campaign row until the recipient mutation commits so a retired worker cannot write again.
+  private async renewDispatchLease(db: Queryable, tenantId: number, campaignId: string, runId: string): Promise<void> {
+    const renewed = await db.query(`
+      UPDATE campaigns SET dispatch_lease_expires_at = clock_timestamp() + $4::interval
+      WHERE tenant_id = $1 AND id = $2 AND status = 'dispatching' AND dispatch_run_id = $3
+        AND dispatch_lease_expires_at > clock_timestamp()
+      RETURNING id
+    `, [tenantId, campaignId, runId, dispatchLease]);
+    if (!renewed.rows.length) throw new CampaignRequestError(409, 'CAMPAIGN_DISPATCH_LEASE_LOST', interruptedDispatch);
   }
 
   private async hasOpenWhatsAppWindow(tenantId: number, destination: string, phoneNumberId?: string): Promise<boolean> {
@@ -704,13 +764,14 @@ export class CampaignDispatcher {
   }
 
   private async saveDelivery(
-    tenantId: number, delivery: CampaignDeliveryV1, meta?: { phone: string; connection: string },
+    tenantId: number, delivery: CampaignDeliveryV1, runId: string, meta?: { phone: string; connection: string },
   ): Promise<void> {
     if (!this.uow) {
       this.memoryDeliveries.set(delivery.id, delivery);
       return;
     }
     await this.uow.run(tenantId, async (client) => {
+      await this.renewDispatchLease(client, tenantId, delivery.campaignId, runId);
       await client.query(
         `INSERT INTO campaign_deliveries
           (id, campaign_id, tenant_id, contact_id, destination, idempotency_key, status, suppression_reason,
@@ -730,7 +791,7 @@ export class CampaignDispatcher {
     });
   }
 
-  private async saveWhatsAppOutcome(tenantId: number, delivery: CampaignDeliveryV1): Promise<string> {
+  private async saveWhatsAppOutcome(tenantId: number, delivery: CampaignDeliveryV1, runId: string): Promise<string> {
     if (!this.uow) throw new Error('WhatsApp campaign delivery requires a transaction.');
     return this.uow.run(tenantId, async (db) => {
       let providerId = delivery.providerMessageId ?? null;
@@ -738,7 +799,7 @@ export class CampaignDispatcher {
       let errorCode = delivery.errorCode ?? null;
       let errorMessage = delivery.errorMessage ?? null;
       if (providerId) await lockMetaReceipt(db, tenantId, providerId);
-      await lockCampaign(db, tenantId, delivery.campaignId);
+      await this.renewDispatchLease(db, tenantId, delivery.campaignId, runId);
       if (providerId) {
         const collision = await db.query(`
           SELECT 1 FROM campaign_deliveries d JOIN campaigns c ON c.id = d.campaign_id AND c.tenant_id = d.tenant_id
