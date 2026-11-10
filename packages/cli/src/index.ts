@@ -3,6 +3,7 @@ import { handleInit } from './commands/init';
 import { handleValidate } from './commands/validate';
 import { handlePack } from './commands/pack';
 import { handleDoctor } from './commands/doctor';
+import { handleVerify } from './commands/verify';
 import { logger } from './utils/logger';
 
 export const VERSION = '0.4.0';
@@ -21,6 +22,8 @@ Commands:
                     Options: --json, --strict
   pack [dir]        Bundle extension into .tgz archive with sha256 checksum
                     Options: --out=<path>, --dry-run
+  verify <archive>  Verify an archive against a signed proof and local release authorization
+                    Options: --proof=<file>, --trust=<file>, --json
   doctor            Inspect developer environment and system diagnostics
                     Options: --json, --verbose
 
@@ -31,6 +34,13 @@ Global Options:
 }
 
 export async function runCli(args: string[]): Promise<number> {
+  if (args[0]?.toLowerCase() === 'verify') {
+    if (args.length === 2 && ['--help', '-h'].includes(args[1]!)) {
+      printHelp();
+      return 0;
+    }
+    return handleVerify(args.slice(1));
+  }
   const options = {
     help: { type: 'boolean' as const, short: 'h' },
     version: { type: 'boolean' as const, short: 'v' },
