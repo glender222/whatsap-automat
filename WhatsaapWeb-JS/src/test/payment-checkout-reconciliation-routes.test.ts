@@ -1,6 +1,6 @@
 import './fixtures/testEnv';
 import assert from 'node:assert/strict';
-import { randomInt, randomUUID } from 'node:crypto';
+import { randomBytes, randomInt, randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { test, type TestContext } from 'node:test';
@@ -169,10 +169,11 @@ test('operator reconciliation uses persisted dispatch, scoped encrypted credenti
   await orders.updateStatus(companyId, order.id, 'confirmed', actorUserId);
   const intents = new PaymentCheckoutIntentService(uow);
   const intent = await intents.prepare({ ...actor, orderId: order.id, gatewayId: gateway.id, idempotencyKey: randomUUID() });
+  const remoteOrderId = 'ORDTST' + randomBytes(13).toString('hex').toUpperCase();
   const createdAt = new Date();
   const expiresAt = new Date(createdAt.getTime() + 120_000).toISOString();
   const dispatcher = new PaymentCheckoutDispatchService({
-    async create() { return { kind: 'created', orderId: providerOrderId, expiresAt, checkoutUrl: 'unused-internal-fixture' }; },
+    async create() { return { kind: 'created', orderId: remoteOrderId, expiresAt, checkoutUrl: 'unused-internal-fixture' }; },
   }, uow);
   const dispatch = await dispatcher.dispatch({ ...actor, intentId: intent.id, expectedVersion: intent.version });
   assert.equal(dispatch.state, 'created');
@@ -180,11 +181,11 @@ test('operator reconciliation uses persisted dispatch, scoped encrypted credenti
   let providerReads = 0;
   const provider = createServer((req, res) => {
     providerReads += 1;
-    const authorized = req.method === 'GET' && req.url === '/v1/orders/' + providerOrderId &&
+    const authorized = req.method === 'GET' && req.url === '/v1/orders/' + remoteOrderId &&
       req.headers.authorization === 'Bearer ' + accessToken;
     res.writeHead(authorized ? 200 : 403, { 'content-type': 'application/json' });
     res.end(JSON.stringify(authorized ? {
-      id: providerOrderId, external_reference: intent.externalReference, total_amount: '10.50', total_paid_amount: '10.50',
+      id: remoteOrderId, external_reference: intent.externalReference, total_amount: '10.50', total_paid_amount: '10.50',
       type: 'online', processing_mode: 'manual', country_code: 'PER', currency: 'PEN', user_id: sellerId,
       created_date: createdAt.toISOString(), expiration_time: 'PT120S', status: 'processed', status_detail: 'accredited',
       transactions: { payments: [{
