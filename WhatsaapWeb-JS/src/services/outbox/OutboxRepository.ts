@@ -260,6 +260,8 @@ export class OutboxRepository {
           FROM processing_outbox
           WHERE tenant_id = $1
             AND status IN ('pending', 'delivery_unknown')
+            -- Owned by MetaInboundWorker; an uncertain runtime must never be replayed by this relay.
+            AND event_type <> 'whatsapp.inbound.received'
             AND (next_retry_at IS NULL OR next_retry_at <= NOW())
           ORDER BY created_at ASC
           LIMIT $2

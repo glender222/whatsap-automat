@@ -6,6 +6,7 @@ import { Queryable } from '../../../shared/UnitOfWorkPort';
 import { applyCanonicalMetaStatuses, correlateCanonicalMetaStatus, isMetaDeliveryStatusAdvance, lockMetaReceipt } from './MetaCanonicalReceipt';
 import { applyCampaignMetaReceipt, campaignCallbackPrefix } from '../../campaigns/CampaignMetaReceipt';
 import { emitConversation } from '../../../sockets/socketEmitter';
+import { MetaInboundWorkRepository } from './MetaInboundWorkRepository';
 
 function toUnixSeconds(value: unknown): number | null {
   if (!value) return null;
@@ -495,6 +496,16 @@ export class MetaInboxStore {
       );
 
       if (!event.rows[0]) {
+        const { rows: [existing] } = await client.query(`
+          SELECT phone_number_id FROM whatsapp_webhook_events
+          WHERE company_id = $1 AND provider = 'meta-cloud' AND event_dedupe_key = $2
+        `, [this.companyId, `message:${providerMessageId}`]);
+        if (metadata?.phone_number_id && existing?.phone_number_id &&
+            String(metadata.phone_number_id) !== existing.phone_number_id) {
+          throw Object.assign(new Error('The inbound provider identity belongs to another phone line.'), {
+            code: 'META_INBOUND_PHONE_CONFLICT', statusCode: 409,
+          });
+        }
         return { duplicate: true };
       }
 
@@ -555,6 +566,18 @@ export class MetaInboxStore {
            ON CONFLICT DO NOTHING`,
           [messageRow.id, occurredAt, json({ event: 'message' }), providerMessageId, json(message)]
         );
+      }
+
+      // Live signed webhooks always identify their line. History imports without
+      // routing metadata remain history only and cannot authorize an auto-reply.
+      if (metadata?.phone_number_id) {
+        if (!messageRow) throw Object.assign(new Error('The inbound message identity already exists.'), {
+          code: 'META_INBOUND_MESSAGE_CONFLICT', statusCode: 409,
+        });
+        await new MetaInboundWorkRepository(this.pool, this.tenantWork).enqueue(this.companyId, {
+          messageId: String(messageRow.id), conversationId: String(conversation.id),
+          phoneNumberId: String(metadata.phone_number_id), inboundProviderMessageId: String(providerMessageId),
+        }, client);
       }
 
       await client.query(

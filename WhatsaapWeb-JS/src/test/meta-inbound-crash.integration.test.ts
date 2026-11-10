@@ -74,6 +74,7 @@ test('an inbound committed before process death retains recoverable response wor
   t.after(async () => {
     try {
       await uow.run(tenantId, async (db) => {
+        await db.query('DELETE FROM whatsapp_webhook_events WHERE company_id = $1', [tenantId]);
         await db.query('DELETE FROM companies WHERE id = $1', [tenantId]);
         await db.query('DELETE FROM tenants WHERE id = $1', [tenantId]);
       });
@@ -223,8 +224,8 @@ test('an inbound committed before process death retains recoverable response wor
     runtimeForInterruptedInbound: afterReplay.runtimeStarted, outboundForInterruptedInbound: afterReplay.outbound,
     healthyControlGraphPosts: graphRequests.length,
   }));
-  // This is intentionally RED at ba9ed81. The worker is not started: the first
-  // recovery invariant is that durable pending work survives before any dispatch.
+  // This failed at ba9ed81. The worker is not started here: the first recovery
+  // invariant is that durable pending work survives before any dispatch.
   assert.equal(beforeKill.outbox.length, 1,
     'Committed inbound lost its response work before the process could schedule it');
   const [pending] = beforeKill.outbox;

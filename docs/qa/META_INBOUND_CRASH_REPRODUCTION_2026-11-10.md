@@ -1,6 +1,6 @@
 # Caída entre recepción Meta y ejecución de la respuesta
 
-Reproducción sobre `ba9ed81` en la rama `test/meta-inbound-recovery`. No modifica código de producción ni inicia workers. La prueba queda **roja intencionalmente**: el inbound confirmado no deja trabajo durable que permita recuperar su respuesta.
+La reproducción original sobre `ba9ed81`, conservada en `ec1be8b`, confirmó que un inbound persistido podía perder el trabajo de respuesta. Con la programación atómica posterior la misma prueba pasa: queda exactamente un job pendiente tras el commit, SIGKILL y redelivery. Este archivo conserva la evidencia previa; el contrato actual se describe en [Recuperación durable de inbound Meta](META_INBOUND_DURABLE_RECOVERY.md).
 
 ## Componentes y aislamiento
 
@@ -24,7 +24,7 @@ El hijo construye `WhatsAppService` y usa la ruta firmada real, `MetaAccountStor
 
 El punto de corte representa muerte del proceso, no una excepción capturada ni un cierre ordenado. No se basa en esperar un tiempo arbitrario para suponer que ocurrió el commit.
 
-## Resultado observado
+## Resultado observado antes de la corrección
 
 | Evidencia | Resultado |
 | --- | --- |
@@ -37,7 +37,7 @@ El punto de corte representa muerte del proceso, no una excepción capturada ni 
 | Ejecuciones IA/respuestas para el inbound cortado | 0 / 0 |
 | POST Graph del mensaje nuevo de control | 1, con outbound persistido |
 
-La prueba termina con exit code 1 en `Committed inbound lost its response work before the process could schedule it`. El control sano pasa. No es una validación verde del producto ni evidencia de entrega real al celular.
+En `ec1be8b`, la prueba termina con exit code 1 en `Committed inbound lost its response work before the process could schedule it`. El control sano pasa. No es evidencia de entrega real al celular.
 
 Validaciones complementarias: `npm run typecheck` y `npm run build` pasan; los tres archivos nuevos de pruebas también pasan un chequeo TypeScript estricto directo, porque el `tsconfig` habitual excluye `src/test`. La suite existente `meta-webhook-p0.test.ts` pasa sus 11 pruebas. La reproducción se repitió después de reforzar la identidad del outbox y falló en la misma condición esperada, sin fallos de cleanup.
 
@@ -64,8 +64,8 @@ La ejecución elimina las filas de su propia empresa de fixture y termina los pr
 
 ## Uso con la corrección
 
-La primera condición que deberá volverse verde es **persistencia del inbound y programación atómica**: una fila `whatsapp.inbound.received`, `pending`, con identidad/idempotency key y una referencia recuperable al inbound en `payload.messageId` o `payload.inboundProviderMessageId`. Tras repetir el webhook debe conservarse la misma fila y sus referencias; el test compara también el UUID y la clave, no solo la cantidad.
+La primera condición ya verificada es **persistencia del inbound y programación atómica**: una fila `whatsapp.inbound.received`, `pending`, con identidad/idempotency key y una referencia recuperable al inbound. Tras repetir el webhook se conserva la misma fila y sus referencias; el test compara también el UUID y la clave, no solo la cantidad.
 
-Este test aún no prueba la ejecución de un worker. Cuando se aprueben el diseño de envío durable y su autorización, conservar el mismo corte/IPC/SIGKILL y ampliar el escenario para arrancar el consumidor después del reinicio, esperar su resultado y exigir un único POST/outbound. El control sano deberá esperar ese consumidor cuando el endpoint deje de ejecutar IA de forma síncrona.
+Este test verifica la programación sin iniciar el worker. `meta-inbound-worker-crash.integration.test.ts` cubre ahora por separado el consumidor con procesos reales y un efecto HTTP local. La integración final con el sender autorizado debe conservar el mismo corte/IPC/SIGKILL y exigir un único POST/outbound. El control sano deberá esperar ese consumidor cuando el endpoint deje de ejecutar IA de forma síncrona.
 
 Añadir por separado cortes después de reservar el envío y después de aceptación de Graph. Una respuesta externa incierta debe conciliarse sin repetir el POST; un trabajo pendiente no basta para demostrar esa propiedad. Tampoco se validan aquí herramientas con efectos laterales, el modelo IA, Socket.IO ni experiencia visual.
