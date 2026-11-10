@@ -4,7 +4,6 @@ import {
   ApprovalRequestV1,
   ApprovalDecisionResultV1,
 } from '@whatsap-automat/contracts';
-import { emitToTenant } from '../../../sockets/socketEmitter';
 import { toPositiveInt } from '../../../middleware/jwtAuth';
 
 export class ApprovalNotFoundError extends Error {
@@ -72,7 +71,7 @@ export class HitlApprovalService {
 
     const redacted = this.redactSensitiveData(params.inputPayload);
 
-    const approval = await this.uow.run(params.tenantId, async (client) => {
+    return this.uow.run(params.tenantId, async (client) => {
       const res = await client.query(
         `INSERT INTO approval_requests (
           id, tenant_id, run_id, agent_graph_id, node_id, tool_name,
@@ -101,13 +100,6 @@ export class HitlApprovalService {
 
       return this.mapRowToContract(res.rows[0]);
     });
-    emitToTenant(params.tenantId, 'approval.created', {
-      approvalId: approval.id,
-      toolName: params.toolName,
-      risk: approval.risk,
-      expiresAt: approval.expiresAt,
-    });
-    return approval;
   }
 
   async listPendingApprovals(
@@ -178,7 +170,7 @@ export class HitlApprovalService {
     const requestHash = key ? createHash('sha256').update(JSON.stringify([
       params.approvalId, params.actorId, params.decision, params.expectedVersion, params.reason ?? null,
     ])).digest('hex') : null;
-    const { result, replayed } = await this.uow.run(params.tenantId, async (client) => {
+    return this.uow.run(params.tenantId, async (client) => {
       if (key) {
         const claim = await client.query(
           `INSERT INTO idempotency_ledger (tenant_id, idempotency_key, source, request_hash)
@@ -192,7 +184,7 @@ export class HitlApprovalService {
             [params.tenantId, key]
           );
           if (cached?.request_hash !== requestHash || !cached.response_body) throw new ApprovalIdempotencyConflictError();
-          return { result: cached.response_body as ApprovalDecisionResultV1, replayed: true };
+          return cached.response_body as ApprovalDecisionResultV1;
         }
       }
 
@@ -283,16 +275,8 @@ export class HitlApprovalService {
           [params.tenantId, key, JSON.stringify(result)]
         );
       }
-      return { result, replayed: false };
+      return result;
     });
-    if (!replayed) emitToTenant(params.tenantId, 'approval.decided', {
-      approvalId: result.approvalId,
-      decision: result.status,
-      decidedBy: result.decidedBy,
-      decidedAt: result.decidedAt,
-      newVersion: params.expectedVersion + 1,
-    });
-    return result;
   }
 
   private redactSensitiveData(input: Record<string, unknown>): Record<string, unknown> {

@@ -4,6 +4,7 @@ import { mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { test } from 'node:test';
+import { Server as SocketIOServer } from 'socket.io';
 import { io, Socket } from 'socket.io-client';
 import jwt from 'jsonwebtoken';
 import { conversationMessageV1Schema, conversationV1Schema } from '@whatsap-automat/contracts';
@@ -14,6 +15,7 @@ import { auditLogger } from '../services/audit/AuditLogger';
 import { hitlApprovalService } from '../services/ai/broker';
 import { withTenantTransaction } from '../db/TenantScopedUoW';
 import { MetaAccountStore } from '../services/whatsapp/meta/MetaAccountStore';
+import { setSocketIo } from '../sockets/socketEmitter';
 
 const base = process.env.PRODUCT_SMOKE_URL;
 
@@ -263,6 +265,12 @@ test('real API isolates two companies through auth, signed ingress, inbox, socke
   assert.equal(stationSession.user.companyId, owner.user.companyId);
   const employeeToken = stationSession.accessToken;
   const employeeId = employee.id;
+  const employeeSocket = await connect(employeeToken);
+  t.after(() => { employeeSocket.disconnect(); });
+  const employeeApprovalEvents: string[] = [];
+  employeeSocket.onAny((event) => {
+    if (event === 'approval.created' || event === 'approval.decided') employeeApprovalEvents.push(event);
+  });
   const workspacePath = '/api/v1/workspaces/current';
   await api(workspacePath, 401);
   const ownerWorkspace = await api(workspacePath, 200, owner.accessToken);
@@ -310,7 +318,12 @@ test('real API isolates two companies through auth, signed ingress, inbox, socke
     effectKey: randomUUID(), proposedActionHash: 'synthetic-action-hash', expiresInSeconds,
     inputPayload: { lineItems: [{ description: 'QA only', api_key: 'fixture-secret' }] },
   });
+  // The fixture creates requests in this process. Decisions use the running API and its live socket.
+  const fixtureSocket = new SocketIOServer();
+  const fixtureBroadcast = t.mock.method(fixtureSocket, 'to');
+  setSocketIo(fixtureSocket);
   const [approval, expired] = await Promise.all([createApproval(60), createApproval(-1)]);
+  assert.equal(fixtureBroadcast.mock.callCount(), 0, 'Creating approvals must not broadcast to socket rooms');
   const decision = { decision: 'approved', expectedVersion: 1, decidedBy: other.user.id };
   await api(approvals, 403, employeeToken);
   assert.deepEqual(await api(approvals, 200, other.accessToken), []);
@@ -339,11 +352,32 @@ test('real API isolates two companies through auth, signed ingress, inbox, socke
   assert.deepEqual(await client.approvals.list({ risk: 'financial' }), [retryApproval]);
   assert.deepEqual(await client.approvals.get(retryApproval.id), retryApproval);
   assert.equal((await client.approvals.get(expired.id)).status, 'expired');
+  await api(canonicalApprovals, 403, employeeToken);
   await api(`${canonicalApprovals}/${retryApproval.id}`, 404, other.accessToken);
   await api(`${canonicalApprovals}/${retryApproval.id}`, 403, employeeToken);
   await api(`${canonicalApprovals}/${retryApproval.id}/decision`, 422, owner.accessToken, decision);
   const retryKey = randomUUID();
   const approve = { decision: 'approved' as const, expectedVersion: 1 };
+  const canonicalDecision = (token: string) => fetch(`${base}${canonicalApprovals}/${retryApproval.id}/decision`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'Idempotency-Key': retryKey },
+    body: JSON.stringify(approve),
+  });
+  assert.equal((await canonicalDecision(employeeToken)).status, 403);
+  assert.equal((await canonicalDecision(other.accessToken)).status, 404);
+
+  const updateOwnerMembership = (role: string) => withTenantTransaction(owner.user.companyId, (db) => db.query(
+    'UPDATE memberships SET role = $1 WHERE tenant_id = $2 AND user_id = $3',
+    [role, owner.user.companyId, owner.user.id]
+  ));
+  assert.equal((await updateOwnerMembership('member')).rowCount, 1);
+  try {
+    await api(canonicalApprovals, 403, owner.accessToken);
+    await api(`${canonicalApprovals}/${retryApproval.id}`, 403, owner.accessToken);
+    assert.equal((await canonicalDecision(owner.accessToken)).status, 403);
+  } finally {
+    await updateOwnerMembership('owner');
+  }
   const [firstDecision, replay] = await Promise.all([
     client.approvals.decide(retryApproval.id, approve, retryKey),
     client.approvals.decide(retryApproval.id, approve, retryKey),
@@ -356,6 +390,8 @@ test('real API isolates two companies through auth, signed ingress, inbox, socke
     [retryApproval.id]
   ));
   assert.equal(replayAudit.rowCount, 1);
+  assert.equal((await employeeSocket.timeout(2000).emitWithAck('join_conversation', chatId)).success, true);
+  assert.deepEqual(employeeApprovalEvents, []);
 
   const payments = '/api/payments';
   await api(payments, 403, employeeToken);

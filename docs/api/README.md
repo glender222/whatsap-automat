@@ -96,6 +96,8 @@ Consulte los archivos de especificación formal:
 | `POST` | `/api/v1/approvals/{id}/decision` | Decisión de aprobación (CAS) | `Authorization`, `Idempotency-Key` |
 | `GET` | `/api/v1/operations/executions` | Historial de ejecuciones y estado de despacho | `Authorization`, rol `ADMIN` |
 
+La cola de aprobaciones en web y móvil se actualiza por REST. La API comprueba `approvals.review` en cada solicitud. El Blueprint y el paquete de contratos conservan los tipos de eventos de aprobación para futuras integraciones.
+
 El contrato incluye operaciones previstas. En la API v1 de conversaciones se pueden consultar la lista, el detalle y el historial, además de tomar el control, pausar o reanudar la IA. Los cambios CAS identifican al operador con su sesión. La lista y el historial devuelven primero los registros de mayor identificador. En conversaciones migradas del esquema anterior, `connectionId` usa una referencia de compatibilidad `legacy:<tenant>:<canal>`.
 
 Agent Studio conserva cada borrador como una revisión numerada e inmutable. Para leer o validar una revisión anterior, indica `?version=N`. La validación comprueba la estructura sin ejecutar el grafo y devuelve `publicationEvidence: false`. El simulador de regresión de `/api/v1/ai/eval/simulate` devuelve resultados sintéticos. La publicación requiere ejecutar una evaluación de servidor con un conjunto de pruebas autorizado, asociar su evidencia al tenant, la revisión y su hash, y usar esa revisión exacta en el runtime.
