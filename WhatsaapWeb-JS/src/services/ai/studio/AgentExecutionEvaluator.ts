@@ -1,12 +1,12 @@
-import { createHash, randomUUID } from 'node:crypto';
 import {
-  evalSuiteV1Schema, type AgentGraphVersionV1, type EvalScenarioV1,
+  type AgentGraphVersionV1, type EvalScenarioV1,
 } from '@whatsap-automat/contracts';
 import { TenantScopedUoW } from '../../../db/TenantScopedUoW';
 import { compileEvalTextPattern, SimulationInputError } from '../eval/AgentEvalService';
 import { AiQuotaCapacityError } from '../gateway/AiQuotaReservationStore';
 import { type BoundedAgentDispatch, preflightBoundedAgentDispatch } from './BoundedAgentDispatch';
 import { loadDraft } from './AgentStudioDrafts';
+import { executionAttemptId, executionRunIdPattern, loadExecutionSuite, type ExecutionMode } from './AgentExecutionEvidence';
 
 interface EvaluationCommand {
   tenantId: number;
@@ -21,6 +21,7 @@ interface ExecutionResult {
   scenarioId: string;
   outcome: 'passed' | 'assertion_failed' | 'uncertain' | 'blocked';
   ledgerId?: number;
+  timeoutMs?: number;
   tokens?: number;
   costMicroUsd?: number;
   latencyMs?: number;
@@ -35,6 +36,7 @@ interface EvaluationRow {
   execution_spec_hash: string | null;
   execution_suite_hash: string | null;
   execution_deadline_at: Date | null;
+  execution_mode: ExecutionMode;
   status: 'running' | 'completed' | 'failed' | 'cancelled';
   passed: boolean;
   scorecard: { timeoutMs?: number; scenarios?: ExecutionResult[] };
@@ -89,7 +91,7 @@ function summarize(row: EvaluationRow) {
   return {
     runId: row.id, suiteId: row.suite_id, graphId: row.agent_graph_id, version: row.graph_version,
     specHash: row.execution_spec_hash, suiteHash: row.execution_suite_hash,
-    status: row.status, passed: row.passed, scenarios: row.scorecard.scenarios ?? [],
+    mode: row.execution_mode, status: row.status, passed: row.passed, scenarios: row.scorecard.scenarios ?? [],
   };
 }
 
@@ -97,38 +99,23 @@ export class AgentExecutionEvaluator {
   constructor(
     private readonly uow: TenantScopedUoW,
     private readonly dispatcher: Pick<BoundedAgentDispatch, 'dispatch'>,
+    private readonly mode: ExecutionMode = 'verification',
   ) {}
 
   async evaluate(command: EvaluationCommand) {
     const { tenantId, graphId, version, suiteId, runId, timeoutMs } = command;
     if (!Number.isSafeInteger(version) || version < 1 || version > 2_147_483_647 ||
         !/^[a-zA-Z0-9_-]{1,128}$/.test(graphId) || !/^[a-zA-Z0-9_-]{1,128}$/.test(suiteId) ||
-        !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(runId) ||
+        !executionRunIdPattern.test(runId) ||
         !Number.isSafeInteger(timeoutMs) || timeoutMs < 1) {
       throw new SimulationInputError('An explicit revision, stored suite, run UUID and bounded timeout are required');
     }
 
     const claim = await this.uow.run(tenantId, async (db) => {
       const graph = await loadDraft(db, tenantId, graphId, version);
-      const { rows: [source] } = await db.query(`
-        SELECT name, scenarios, pass_threshold_percent FROM agent_eval_suites
-        WHERE tenant_id = $1 AND agent_graph_id = $2 AND id = $3
-      `, [tenantId, graphId, suiteId]);
-      if (!graph || !source) throw new SimulationInputError('Execution suite or revision was not found in this tenant');
-      if (!Array.isArray(source.scenarios) || source.scenarios.length > 20) {
-        throw new SimulationInputError('The stored suite contains invalid scenarios');
-      }
-      const parsed = evalSuiteV1Schema.safeParse({
-        id: suiteId, tenantId, agentGraphId: graphId, name: source.name, scenarios: source.scenarios,
-        passThresholdPercent: Number(source.pass_threshold_percent),
-      });
-      if (!parsed.success ||
-          new Set(parsed.data.scenarios.map(({ id }) => id)).size !== parsed.data.scenarios.length ||
-          parsed.data.scenarios.some(({ id }) => id.length > 128)) {
-        throw new SimulationInputError('The stored suite contains invalid scenarios');
-      }
-      const suite = parsed.data;
-      const suiteHash = createHash('sha256').update(JSON.stringify(suite)).digest('hex');
+      const executionSuite = await loadExecutionSuite(db, tenantId, graphId, suiteId);
+      if (!graph || !executionSuite) throw new SimulationInputError('Execution suite or revision was not found in this tenant');
+      const { suite, suiteHash } = executionSuite;
       const deadlineMs = Math.min(graph.limits.maxDurationSeconds * 1000, 60_000);
       let maxTokens = 0;
       let maxCost = 0;
@@ -147,12 +134,12 @@ export class AgentExecutionEvaluator {
       const { rows: [created] } = await db.query(`
         INSERT INTO agent_eval_runs (
           id, tenant_id, suite_id, agent_graph_id, graph_version, status, scorecard,
-          execution_spec_hash, execution_suite_hash, execution_deadline_at
+          execution_spec_hash, execution_suite_hash, execution_deadline_at, execution_mode
         )
         VALUES ($1, $2, $3, $4, $5, 'running', jsonb_build_object('timeoutMs', $6::integer),
-          $7, $8, clock_timestamp() + $9::integer * interval '1 millisecond')
+          $7, $8, clock_timestamp() + $9::integer * interval '1 millisecond', $10)
         ON CONFLICT (id) DO NOTHING RETURNING *
-      `, [runId, tenantId, suiteId, graphId, version, timeoutMs, graph.specHash, suiteHash, deadlineMs]);
+      `, [runId, tenantId, suiteId, graphId, version, timeoutMs, graph.specHash, suiteHash, deadlineMs, this.mode]);
       if (created) return { kind: 'claimed' as const, created: created as EvaluationRow, graph, scenarios, threshold: Math.max(95, suite.passThresholdPercent) };
 
       const { rows: [existing] } = await db.query(
@@ -160,7 +147,8 @@ export class AgentExecutionEvaluator {
       );
       if (!existing || existing.suite_id !== suiteId || existing.agent_graph_id !== graphId ||
           existing.graph_version !== version || existing.execution_spec_hash !== graph.specHash ||
-          existing.execution_suite_hash !== suiteHash || existing.scorecard.timeoutMs !== timeoutMs) {
+          existing.execution_suite_hash !== suiteHash || existing.execution_mode !== this.mode ||
+          existing.scorecard.timeoutMs !== timeoutMs) {
         throw new SimulationInputError('Evaluation run UUID is already bound to a different execution');
       }
       const { rows: [expired] } = await db.query(`
@@ -177,7 +165,7 @@ export class AgentExecutionEvaluator {
     for (const { scenario, assertions } of claim.scenarios) {
       const remaining = Math.min(timeoutMs, deadline - Date.now());
       if (remaining <= 0) break;
-      const result = await this.execute(tenantId, claim.graph, scenario, assertions, remaining);
+      const result = await this.execute(tenantId, claim.graph, scenario, assertions, remaining, executionAttemptId(runId, scenario.id));
       results.push(result);
       if (result.outcome === 'uncertain' || result.outcome === 'blocked') break;
     }
@@ -208,13 +196,13 @@ export class AgentExecutionEvaluator {
   }
 
   private async execute(
-    tenantId: number, graph: AgentGraphVersionV1, scenario: EvalScenarioV1, assertions: Assertion[], timeoutMs: number,
+    tenantId: number, graph: AgentGraphVersionV1, scenario: EvalScenarioV1, assertions: Assertion[], timeoutMs: number, attemptId: string,
   ): Promise<ExecutionResult> {
     const scenarioId = scenario.id;
     const started = performance.now();
     try {
       const result = await this.dispatcher.dispatch({
-        tenantId, graph, input: scenario.mockInput, attemptId: randomUUID(), timeoutMs,
+        tenantId, graph, input: scenario.mockInput, attemptId, timeoutMs,
       });
       if (result.status !== 'completed') {
         return { scenarioId, outcome: result.status === 'uncertain' ? 'uncertain' : 'blocked',
@@ -231,7 +219,7 @@ export class AgentExecutionEvaluator {
       })).map(({ id }) => id);
       return {
         scenarioId, outcome: failedAssertions.length ? 'assertion_failed' : 'passed', ledgerId: result.ledgerId,
-        tokens, costMicroUsd: result.costMicroUsd,
+        tokens, costMicroUsd: result.costMicroUsd, timeoutMs,
         latencyMs, failedAssertions,
       };
     } catch (error) {

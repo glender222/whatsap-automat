@@ -15,6 +15,7 @@ interface DispatchCommand {
   readonly graph: AgentGraphVersionV1;
   readonly input: string;
   readonly timeoutMs: number;
+  readonly operation?: 'eval' | 'completion';
 }
 
 type PreflightError = 'REVISION_SCOPE' | 'REVISION_PROFILE' | 'MODEL_CAPABILITY' | 'TEXT_INPUT' | 'DISPATCH_BUDGET';
@@ -70,7 +71,7 @@ export class BoundedAgentDispatch {
 
     const { tenantId, attemptId } = command;
     const result = await dispatchBoundedText(this.quota, this.adapter, {
-      tenantId, attemptId, operation: 'eval', plan, isByok: this.isByok, started,
+      tenantId, attemptId, operation: command.operation ?? 'eval', plan, isByok: this.isByok, started,
     });
     if (result.status === 'capability_unavailable') {
       return { ...noEvidence, status: 'preflight_rejected', code: 'MODEL_CAPABILITY' };

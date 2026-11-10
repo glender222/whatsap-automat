@@ -20,6 +20,7 @@ import { ByokService } from '../services/ai/gateway/byok/ByokService';
 import type { ModelGatewayRequest } from '../services/ai/gateway/types';
 import { BoundedAgentDispatch, preflightBoundedAgentDispatch } from '../services/ai/studio/BoundedAgentDispatch';
 import { AgentExecutionEvaluator } from '../services/ai/studio/AgentExecutionEvaluator';
+import { AgentStudioPublications, dispatchPublishedAgent } from '../services/ai/studio/AgentStudioPublications';
 import { saveDraft } from '../services/ai/studio/AgentStudioDrafts';
 
 const databaseUrl = process.env.AI_QUOTA_RESERVATIONS_TEST_DATABASE_URL;
@@ -186,6 +187,9 @@ test('Studio execution evaluates stored revisions and suites with durable per-co
     },
   });
   const command = { tenantId: tenantA, graphId: graphA.graphId, version: 1, suiteId: suiteA, runId: randomUUID(), timeoutMs: 1000 };
+  const verification = new AgentStudioPublications('verification');
+  const provider = new AgentStudioPublications('provider');
+  const publicationCommand = { tenantId: tenantA, graphId: graphA.graphId, version: 1, actorId: 1, evaluationId: command.runId };
 
   const running = evaluator.evaluate(command);
   try {
@@ -230,6 +234,8 @@ test('Studio execution evaluates stored revisions and suites with durable per-co
   assert.equal(requests.length, 2);
   await uow.run(tenantA, (db) => db.query('UPDATE agent_eval_suites SET name = $1 WHERE id = $2', ['Changed suite', suiteA]));
   await assert.rejects(evaluator.evaluate(command), /already bound/);
+  await assert.rejects(uow.run(tenantA, (db) => verification.publish(db, publicationCommand)), /matching, completed/);
+  await uow.run(tenantA, (db) => db.query('UPDATE agent_eval_suites SET name = $1 WHERE id = $2', ['Stored regression suite', suiteA]));
   assert.equal(requests.length, 2);
 
   const rejected = await evaluator.evaluate({ ...command, tenantId: tenantB, suiteId: suiteB, runId: randomUUID() });
@@ -252,6 +258,60 @@ test('Studio execution evaluates stored revisions and suites with durable per-co
   assert.deepEqual(uncertain.scenarios.map((scenario) => scenario.outcome), ['uncertain']);
   assert.deepEqual(await evaluator.evaluate(uncertainCommand), uncertain);
   assert.equal(requests.length, 4);
+
+  await assert.rejects(uow.run(tenantB, (db) => verification.publish(db, {
+    ...publicationCommand, tenantId: tenantB, graphId: graphB.graphId,
+  })), /matching, completed/);
+  await assert.rejects(uow.run(tenantA, (db) => verification.publish(db, {
+    ...publicationCommand, evaluationId: uncertainCommand.runId,
+  })), /matching, completed/);
+  await assert.rejects(uow.run(tenantA, (db) => provider.publish(db, publicationCommand)), /matching, completed/);
+
+  const copiedId = randomUUID();
+  await uow.run(tenantA, (db) => db.query(`
+    INSERT INTO agent_eval_runs (
+      id, tenant_id, suite_id, agent_graph_id, graph_version, status, scorecard,
+      execution_spec_hash, execution_suite_hash, execution_deadline_at, completed_at, passed, pass_rate_percent
+    )
+    SELECT $1, tenant_id, suite_id, agent_graph_id, graph_version, status, scorecard,
+      execution_spec_hash, execution_suite_hash, execution_deadline_at, completed_at, passed, pass_rate_percent
+    FROM agent_eval_runs WHERE tenant_id = $2 AND id = $3
+  `, [copiedId, tenantA, command.runId]));
+  await assert.rejects(uow.run(tenantA, (db) => verification.publish(db, {
+    ...publicationCommand, evaluationId: copiedId,
+  })), /matching, completed/);
+
+  const publish = () => uow.run(tenantA, (db) => verification.publish(db, publicationCommand));
+  const [published, replay] = await Promise.all([publish(), publish()]);
+  assert.equal(published?.evaluationId, command.runId);
+  assert.deepEqual(published, replay);
+  assert.equal(await uow.run(tenantA, (db) => provider.loadActive(db, tenantA, graphA.graphId)), null);
+
+  const { entryNodeId, nodes, edges, policyRef, limits } = graphA;
+  const draft = await uow.run(tenantA, (db) => saveDraft(db, tenantA, 1, graphA.graphId, {
+    entryNodeId, nodes, edges, policyRef, limits: { ...limits, maxCostMicroUsd: limits.maxCostMicroUsd - 1 },
+  }, false));
+  assert.equal(draft?.version, 2);
+  assert.notEqual(draft?.specHash, graphA.specHash);
+  await assert.rejects(uow.run(tenantA, (db) => verification.publish(db, {
+    ...publicationCommand, version: 2,
+  })), /matching, completed/);
+
+  const executionCommand = { tenantId: tenantA, graphId: graphA.graphId, input: 'Live fixture', timeoutMs: 1000, attemptId: randomUUID() };
+  assert.equal(await dispatchPublishedAgent(uow, verification, dispatcher, {
+    ...executionCommand, tenantId: tenantB,
+  }), null);
+  assert.equal(requests.length, 4);
+  const activeExecution = await dispatchPublishedAgent(uow, verification, dispatcher, executionCommand);
+  assert.equal(activeExecution?.publication.version, 1);
+  assert.equal(activeExecution?.publication.specHash, graphA.specHash);
+  assert.equal(activeExecution?.execution.status, 'completed');
+  assert.equal(requests.length, 5);
+  const { rows: [reservation] } = await uow.run(tenantA, (db) => db.query(
+    'SELECT operation, status FROM ai_quota_reservations WHERE tenant_id = $1 AND id = $2',
+    [tenantA, executionCommand.attemptId],
+  ));
+  assert.deepEqual(reservation, { operation: 'completion', status: 'settled' });
 });
 
 test('bounded dispatch via a loopback provider fixture and real quota store', {
