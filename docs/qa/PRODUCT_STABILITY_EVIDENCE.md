@@ -193,6 +193,12 @@ Con las mismas variables exportadas en el frontend, ejecutar `npm run test:e2e -
 - **Navegador.** Dos administradores en pantallas de 390 px vieron la acción de configurar credenciales. Alfa guardó su clave en Studio y el formulario borró el valor. Evaluó con teclado, recuperó el resultado al recargar, publicó y ejecutó. Bravo siguió sin credencial y con el botón deshabilitado, incluso al enviar desde un formulario obsoleto de Alfa después de cambiar de sesión. La sesión de proveedor ignoró un UUID guardado bajo el modo de verificación.
 - **Alcance.** El navegador usa la composición predeterminada de la aplicación y un proveedor HTTP local. Quedan el piloto con una credencial real y los perfiles del runtime con herramientas. [Reproducción](AI_PROVIDER_ADMISSION.md).
 
+## IA-07. Derivación del agente en modos de solo lectura y prueba
+
+- **Antes.** Una solicitud de la herramienta de pagos desactivada creó un ticket en modo Asistido. La derivación por una respuesta inválida del modelo también podía invocar el servicio de tickets directamente.
+- **Después.** Ambas rutas pasan por el ejecutor que aplica los permisos del módulo y la herramienta, el modo de la empresa y del agente, y la simulación sin efectos. El modo Automático autorizado conserva la derivación para cobros y registra el resultado de la herramienta.
+- **Reproducción.** `node --import tsx --test src/test/tools-reales-ia.test.ts src/test/multiagent-routing-p0.test.ts` desde el backend. La prueba comprueba las llamadas al servicio que escribe los tickets y verifica que el fallback del runtime pasa por el mismo ejecutor.
+
 ## WF-01. Ingreso mientras se revierte una revisión publicada
 
 - **Antes.** CI devolvió `WORKFLOW_NOT_PUBLISHED` durante una reversión válida. La regresión local mantuvo la reversión abierta hasta observar en PostgreSQL que un webhook esperaba su bloqueo. El ingreso falló al intentar fijar la revisión mediante una consulta que también bloqueaba la definición.

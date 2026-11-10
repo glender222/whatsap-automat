@@ -146,7 +146,7 @@ export class AiRuntimeOrchestrator {
     });
 
     const executor = new AgentToolExecutor(this.pool, this.registry, this.logger, sender);
-    const loop = new AgentToolRuntimeLoop(this.pool, this.registry, this.logger, executor);
+    const loop = new AgentToolRuntimeLoop(this.registry, this.logger, executor);
     const loopResult = await loop.run({ ctx, agent, message, history, companyMode, signal });
     signal?.throwIfAborted();
 

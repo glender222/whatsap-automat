@@ -421,7 +421,7 @@ test('un turno vencido descarta una llamada de herramienta recibida tarde del pr
     },
   }));
   const loop = new AgentToolRuntimeLoop(
-    {} as never, new AgentToolRegistry(), {} as never,
+    new AgentToolRegistry(), {} as never,
     { execute: async () => {
       toolCalls++;
       return { status: 'ok', toolName: 'tag.applySystem', output: {}, relatedHandoffId: null };

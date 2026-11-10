@@ -477,7 +477,7 @@ export class AgentService {
     const registry = getDefaultToolRegistry();
     const logger = new AgentToolLogger(this.logRepo, this.aiSessionEventService);
     const executor = new AgentToolExecutor(pool, registry, logger);
-    const loop = new AgentToolRuntimeLoop(pool, registry, logger, executor);
+    const loop = new AgentToolRuntimeLoop(registry, logger, executor);
 
     if (input.chatId) emitConversation(companyId, input.chatId, 'agent:typing', { chatId: input.chatId, agentId });
 

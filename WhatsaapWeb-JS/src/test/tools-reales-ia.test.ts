@@ -189,21 +189,19 @@ describe('SPEC-HU15 Tools Reales IA - 13 casos §14', () => {
     assert.ok(forbiddenLog, 'debe loguear forbidden');
   });
 
-  test('8. Payment future tool: no ejecuta; log disabled_future_tool; handoff si cliente quiere pagar', async () => {
+  test('8. Payment future tool only creates a handoff when an actual write is authorized', async (t) => {
     const { AgentToolExecutor } = await import('../modules/ai/application/AgentToolExecutor');
     const { AgentToolRegistry } = await import('../modules/ai/application/AgentToolRegistry');
     const { AgentToolLogger } = await import('../modules/ai/application/AgentToolLogger');
     const logRepo = { log: mock.fn(async () => {}) };
     const logger = new AgentToolLogger(logRepo as any);
     const registry = new AgentToolRegistry();
-    const pool = makePoolMock([
-      { match: /INSERT INTO handoff_tickets/, rows: [{ id: 88, company_id: 1, conversation_id: 10, agent_id: 5, order_id: null, reason: 'payment_closure', priority: 'high', status: 'open', taken_by: null, taken_at: null, closed_at: null, closed_by: null, outcome: null, notes: null, metadata_json: {}, created_at: new Date(), updated_at: new Date() }] },
-      { match: /SELECT id FROM conversations/, rows: [{ id: 10 }] },
-      { match: /INSERT INTO operational_actions/, rows: [] },
-      { match: /UPDATE conversations/, rows: [] },
-      { match: /INSERT INTO ia_pause_overrides/, rows: [{ id: 1, company_id: 1, conversation_id: 10, paused_by: null, reason: 'handoff:payment_closure', expires_at: new Date(), created_at: new Date() }] },
-      { match: /UPDATE conversations SET ia_paused/, rows: [] },
-    ]);
+    const pool = makePoolMock([]);
+    const { HandoffToolService } = require('../modules/ai/application/tools/HandoffToolService') as
+      typeof import('../modules/ai/application/tools/HandoffToolService');
+    const writes = t.mock.method(HandoffToolService.prototype, 'create', async () => ({
+      status: 'ok' as const, output: { ticketId: 88 }, relatedHandoffId: 88,
+    }));
     const ctx = {
       companyId: 1, conversationId: 10, chatId: '54911', agentId: 5, agentPurpose: 'sales_assistant',
       companyMode: 'automator', agentMode: 'auto',
@@ -212,10 +210,23 @@ describe('SPEC-HU15 Tools Reales IA - 13 casos §14', () => {
       catalogScope: { catalogIds: [1], sectionIds: [] }, inboundProviderMessageId: null, actorUserId: null,
     };
     const executor = new AgentToolExecutor(pool as any, registry, logger);
-    const result = await executor.execute(ctx, { id: 'call_1', name: 'payment.createLink', input: { amount: 100 } });
+    const call = { id: 'call_1', name: 'payment.createLink', input: { amount: 100 } } as const;
+    const result = await executor.execute(ctx, call);
     assert.equal(result.status, 'disabled_future_tool');
     const disabledLog = (logRepo.log as any).mock.calls.find((c: any) => c.arguments[0]?.toolResultStatus === 'disabled_future_tool');
     assert.ok(disabledLog, 'debe loguear disabled_future_tool');
+    assert.equal(writes.mock.calls.length, 1);
+    for (const [index, scope] of [
+      { companyMode: 'mixed', agentMode: 'suggest' },
+      { companyMode: 'normal', agentMode: 'auto' },
+      { companyMode: 'automator', agentMode: 'suggest' },
+      { companyMode: 'automator', agentMode: 'auto', isTest: true },
+      { companyMode: 'automator', agentMode: 'auto', toolAccess: { handoffCreate: false } },
+    ].entries()) {
+      const blocked = await executor.execute({ ...ctx, ...scope, conversationId: 100 + index }, call);
+      assert.equal(blocked.status, 'disabled_future_tool');
+      assert.equal(writes.mock.calls.length, 1, `Unexpected handoff write for ${JSON.stringify(scope)}`);
+    }
   });
 
   test('9. Modo Asistido: permite read tools; bloquea write tools', async () => {
@@ -379,7 +390,6 @@ describe('Runtime IA - revision semantica de handoff humano', () => {
         relatedHandoffId: 99,
       }));
       const loop = new AgentToolRuntimeLoop(
-        makePoolMock([]) as any,
         new AgentToolRegistry(),
         { logStage: mock.fn(async () => {}) } as any,
         { execute: executeSpy } as any
@@ -430,6 +440,16 @@ describe('Runtime IA - revision semantica de handoff humano', () => {
       assert.equal(executeSpy.mock.calls[0].arguments[1].input.reason, 'customer_asks_human');
       assert.equal(result.handoffTicketId, 99);
       assert.equal(result.final?.action, 'handoff');
+
+      responses.push('respuesta inválida', 'sigue inválida');
+      const denied = mock.fn(async () => ({ status: 'forbidden', relatedHandoffId: null }));
+      const fallback = new AgentToolRuntimeLoop(new AgentToolRegistry(),
+        { logStage: mock.fn(async () => {}) } as any, { execute: denied } as any);
+      const assisted = { ...ctx, companyMode: 'mixed', agentMode: 'suggest' };
+      const guarded = await fallback.run({ ctx: assisted, agent: agent as any, message: 'Consulta', history: [], companyMode: 'mixed' });
+      assert.equal(denied.mock.calls.length, 1);
+      assert.equal(guarded.handoffTicketId, null);
+      assert.match(guarded.fallbackReason ?? '', /JSON/);
     } finally {
       factory.create = originalCreate;
     }

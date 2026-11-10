@@ -1,8 +1,6 @@
-import { Queryable } from '../../../shared/UnitOfWorkPort';
 import { AgentToolExecutor } from './AgentToolExecutor';
 import { AgentToolLogger } from './AgentToolLogger';
 import { AgentToolRegistry } from './AgentToolRegistry';
-import { getHandoffToolService } from './tools';
 import { getAiProviderFactory } from '../infra/provider/AiProviderFactory';
 import { emitDashboard, emitConversation } from '../../../sockets/socketEmitter';
 import type { AiAgent, AutomatorMode } from '../domain/agent.types';
@@ -66,7 +64,6 @@ function tryParseJson(raw: string): { ok: true; value: any } | { ok: false } {
 
 export class AgentToolRuntimeLoop {
   constructor(
-    private readonly pool: Queryable,
     private readonly registry: AgentToolRegistry,
     private readonly logger: AgentToolLogger,
     private readonly executor: AgentToolExecutor
@@ -113,7 +110,7 @@ export class AgentToolRuntimeLoop {
         }
         await this.logger.logStage(ctx, 'loop_invalid_json', { status: 'failed', summary: 'JSON invalido tras reparacion. Fallback handoff.' });
         signal?.throwIfAborted();
-        return await this.fallbackHandoff(ctx, 'low_confidence', 'Respuesta IA no es JSON valido tras reparacion.');
+        return await this.fallbackHandoff(ctx, 'Respuesta IA no es JSON valido tras reparacion.', signal);
       }
 
       const value = parsed.value;
@@ -173,7 +170,7 @@ export class AgentToolRuntimeLoop {
 
     await this.logger.logStage(ctx, 'loop_limit_reached', { status: 'skipped', summary: `Loop termino por limite (rounds=${rounds}, calls=${totalCalls}).` });
     signal?.throwIfAborted();
-    return await this.fallbackHandoff(ctx, 'low_confidence', 'Loop alcanzo limite sin respuesta final.');
+    return await this.fallbackHandoff(ctx, 'Loop alcanzo limite sin respuesta final.', signal);
   }
 
   private buildAgentPrompt(agent: AiAgent, ctx: AgentToolContext, companyMode: AutomatorMode): string {
@@ -305,18 +302,15 @@ export class AgentToolRuntimeLoop {
     return final.confidence < 0.9 || !final.reply.trim();
   }
 
-  private async fallbackHandoff(ctx: AgentToolContext, reason: string, summary: string): Promise<RuntimeLoopResult> {
+  private async fallbackHandoff(ctx: AgentToolContext, summary: string, signal?: AbortSignal): Promise<RuntimeLoopResult> {
     let ticketId: number | null = null;
-    try {
-      if (ctx.moduleAccess?.handoff !== false && ctx.toolAccess?.handoffCreate !== false && ctx.chatId) {
-        const handoffService = getHandoffToolService(this.pool);
-        const result = await handoffService.create(ctx, { reason, priority: 'medium', messageToCustomer: 'Un asesor continuara contigo.' });
-        if (result.status === 'ok' && result.output && typeof result.output === 'object') {
-          ticketId = (result.output as { ticketId?: number }).ticketId ?? null;
-        }
-      }
-    } catch {
-      // best-effort
+    if (ctx.chatId) {
+      const result = await this.executor.execute(ctx, {
+        id: 'runtime-fallback-handoff',
+        name: 'handoff.create',
+        input: { reason: 'low_confidence', priority: 'medium', messageToCustomer: 'Un asesor continuara contigo.' },
+      }, signal);
+      ticketId = result.relatedHandoffId ?? null;
     }
     const fallback: ToolFinalResponse = {
       type: 'final',

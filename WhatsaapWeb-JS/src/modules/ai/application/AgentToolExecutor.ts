@@ -80,9 +80,12 @@ export class AgentToolExecutor {
     if (definition.disabled || definition.kind === 'payment_future') {
       const outcome: ToolExecutorOutcome = { status: 'disabled_future_tool', output: { reason: 'future_tool_disabled' } };
       const result = await this.finalize(ctx, call, outcome, startedAt);
-      if (this.isPaymentClosureIntent(call)) {
-        signal?.throwIfAborted();
-        await this.routePaymentClosureToHandoff(ctx, call);
+      if (definition.kind === 'payment_future' && call.name !== 'handoff.create' && ctx.chatId && this.isPaymentClosureIntent(call)) {
+        await this.execute(ctx, {
+          id: `${call.id}:handoff`,
+          name: 'handoff.create',
+          input: { reason: 'payment_closure', priority: 'high', messageToCustomer: 'Un asesor continuara contigo para cerrar el pago.' },
+        }, signal);
       }
       return result;
     }
@@ -180,17 +183,6 @@ export class AgentToolExecutor {
 
   private isPaymentClosureIntent(call: ToolCallRequest): boolean {
     return call.name === PAYMENT_INTENT_TOOL || /pay|pago|payment|compr|confirm/i.test(JSON.stringify(call.input || {}));
-  }
-
-  private async routePaymentClosureToHandoff(ctx: AgentToolContext, call: ToolCallRequest): Promise<void> {
-    try {
-      if (!hasModule(ctx.moduleAccess, 'handoff') || !hasTool(ctx.toolAccess, 'handoffCreate')) return;
-      if (!ctx.chatId) return;
-      const handoffService = getHandoffToolService(this.pool);
-      await handoffService.create(ctx, { reason: 'payment_closure', priority: 'high', messageToCustomer: 'Un asesor continuara contigo para cerrar el pago.' });
-    } catch {
-      // best-effort
-    }
   }
 
   private async finalize(
