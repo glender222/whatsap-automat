@@ -33,11 +33,17 @@ npm run test:e2e -- e2e/inbox.integration.spec.ts
 
 Las pruebas de Studio y despacho acotado pasaron 18 casos con PostgreSQL y un proveedor local de prueba. Confirman el aislamiento de revisiones y las cuotas, además de que la ruta de publicación actual devuelve `501`.
 
+## MSG-02. Recibo de entrega antes del acuse de envío
+
+- **Antes.** Graph local registró un recibo de entrega antes de responder al envío de una plantilla. El backend conservó el evento, pero el mensaje terminó como `sent` y sin una entrega en el historial.
+- **Cambio.** El webhook y la persistencia del envío comparten el bloqueo por empresa e identificador de Meta. Cuando se guarda el envío se aplican los recibos previos que coinciden con su línea y destinatario. Los recibos de campañas y envíos canónicos conservan su reconciliación específica.
+- **Después.** PostgreSQL registró la plantilla como `delivered` y una sola entrada de entrega tras duplicar el evento. Los recibos de lectura de otra línea o destinatario no modificaron la plantilla, incluso al llegar después del acuse. Pasaron los 20 casos de las suites `legacy-meta-send-postgres`, `conversation-send-postgres` y `meta-webhook-p0` con Graph local y FFmpeg.
+
 ## Recorridos por cerrar
 
 | Recorrido | Evidencia pendiente |
 | --- | --- |
 | Bandeja en tiempo real | Filtro por etiqueta y cambios de entrega con un historial abierto. Extender la evidencia de navegador de MSG-01. |
-| Envío y recepción | Reorden, duplicados, timeout, reintento, historial paginado, adjuntos, ventana de atención y toma de control. Contar las llamadas al proveedor de prueba y comprobar persistencia e identidad. |
+| Envío y recepción | Extender los casos de reorden y duplicados ya probados a la bandeja. Verificar timeout, reintento, historial paginado, adjuntos, ventana de atención y toma de control. Contar las llamadas al proveedor de prueba y comprobar persistencia e identidad. |
 | Harness IA | Borrador, validación, evaluación de ejecución, publicación y ejecución de una revisión inmutable. Comprobar permisos, límites, cancelación, recuperación y efectos concurrentes. |
 | Flujo operativo y navegación | Atención, pedido, pago, aprobación y conexión. Recorrer como administrador y operador, con teclado y diferentes tamaños de pantalla. |

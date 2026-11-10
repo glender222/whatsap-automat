@@ -548,7 +548,6 @@ export class MetaInboxStore {
   async persistStatus({ status, metadata, value }: any): Promise<Record<string, unknown>> {
     return this.tenantWork.run(this.companyId, async (client) => {
       const providerMessageId = status.id;
-      const occurredAt = new Date(Number(status.timestamp || Math.floor(Date.now() / 1000)) * 1000);
       if (typeof providerMessageId === 'string') {
         await lockMetaReceipt(client, this.companyId, providerMessageId);
       }
@@ -602,44 +601,63 @@ export class MetaInboxStore {
       }
       const canonical = !campaignCallback && typeof providerMessageId === 'string' &&
         await applyCanonicalMetaStatuses(client, this.companyId, providerMessageId, eventId);
-      if (!canonical && !campaignCallback) {
-        const messageResult = await client.query(
-          `SELECT id, status FROM messages WHERE company_id = $1 AND channel = 'whatsapp' AND provider_message_id = $2 LIMIT 1`,
-          [this.companyId, providerMessageId]
-        );
-        const messageRow = messageResult.rows[0];
-        if (messageRow) {
-          const nextStatus = status.status || 'unknown';
-          const advances = isMetaDeliveryStatusAdvance(messageRow.status, nextStatus);
-          await client.query(
-            `INSERT INTO message_statuses (message_id, status, source, occurred_at, metadata_json, provider, provider_message_id, raw_payload_json)
-             VALUES ($1, $2, 'meta-cloud', $3, $4, 'meta-cloud', $5, $6)
-             ON CONFLICT DO NOTHING`,
-            [messageRow.id, nextStatus, occurredAt, json(status), providerMessageId, json(status)]
-          );
-          await client.query(
-            `UPDATE messages
-             SET status = CASE WHEN $6::boolean THEN $1::varchar ELSE status END,
-                 delivered_at = CASE WHEN $1::varchar = 'delivered' THEN COALESCE(delivered_at, $2) ELSE delivered_at END,
-                 read_at = CASE WHEN $1::varchar = 'read' THEN COALESCE(read_at, $2) ELSE read_at END,
-                 failed_at = CASE WHEN $1::varchar = 'failed' THEN COALESCE(failed_at, $2) ELSE failed_at END,
-                 error_code = CASE WHEN $6::boolean THEN $3 ELSE error_code END,
-                 error_message = CASE WHEN $6::boolean THEN $4 ELSE error_message END
-             WHERE id = $5`,
-            [
-              nextStatus,
-              occurredAt,
-              status.errors?.[0]?.code ? String(status.errors[0].code) : null,
-              status.errors?.[0]?.title || status.errors?.[0]?.message || null,
-              messageRow.id,
-              advances,
-            ]
-          );
-        }
+      if (!canonical && !campaignCallback && !canonicalCallback && typeof providerMessageId === 'string') {
+        await this.applyLegacyReceipts(client, providerMessageId, eventId);
       }
       await client.query(`UPDATE whatsapp_webhook_events SET processed_at = NOW(), processing_status = 'processed' WHERE id = $1`, [event.rows[0].id]);
       return { duplicate: false };
     });
+  }
+
+  // Both the send and webhook hold the provider ID lock. Replay only receipts
+  // that match the outbound message, keeping campaign and canonical receipts separate.
+  private async applyLegacyReceipts(client: Queryable, providerId: string, eventId: string | null = null) {
+    const { rows: [message] } = await client.query(`
+      SELECT id, status, external_contact_id, metadata_json #>> '{metadata,phone_number_id}' AS phone_number_id
+      FROM messages
+      WHERE company_id = $1 AND channel = 'whatsapp' AND provider = 'meta-cloud'
+        AND direction = 'outbound' AND provider_message_id = $2
+    `, [this.companyId, providerId]);
+    if (!message || (!eventId && !message.phone_number_id)) return;
+
+    const { rows: receipts } = await client.query(`
+      SELECT payload_json->'status' AS status, received_at
+      FROM whatsapp_webhook_events
+      WHERE company_id = $1 AND provider = 'meta-cloud' AND provider_message_id = $2
+        AND event_type IN ('status.sent', 'status.failed', 'status.delivered', 'status.read')
+        AND CASE WHEN $3::bigint IS NULL THEN processing_status = 'processed' ELSE id = $3 END
+        AND ($4::varchar IS NULL OR phone_number_id = $4)
+        AND payload_json #>> '{status,recipient_id}' = $5
+        AND COALESCE(payload_json #>> '{status,biz_opaque_callback_data}', '') NOT LIKE 'automat:%'
+        AND LEFT(COALESCE(payload_json #>> '{status,biz_opaque_callback_data}', ''), LENGTH($6::text)) <> $6
+      ORDER BY received_at, id
+    `, [this.companyId, providerId, eventId, message.phone_number_id, message.external_contact_id, campaignCallbackPrefix]);
+
+    for (const { status, received_at: receivedAt } of receipts) {
+      const occurredAt = /^\d{1,11}$/.test(String(status.timestamp))
+        ? new Date(Number(status.timestamp) * 1000)
+        : receivedAt;
+      const advances = isMetaDeliveryStatusAdvance(message.status, status.status);
+      await client.query(`
+        INSERT INTO message_statuses (message_id, status, source, occurred_at, metadata_json, provider, provider_message_id, raw_payload_json)
+        VALUES ($1, $2, 'meta-cloud', $3, $4, 'meta-cloud', $5, $4)
+        ON CONFLICT DO NOTHING
+      `, [message.id, status.status, occurredAt, json(status), providerId]);
+      await client.query(`
+        UPDATE messages
+        SET status = CASE WHEN $4::boolean THEN $2::varchar ELSE status END,
+            delivered_at = CASE WHEN $2::varchar = 'delivered' THEN LEAST(delivered_at, $3) ELSE delivered_at END,
+            read_at = CASE WHEN $2::varchar = 'read' THEN LEAST(read_at, $3) ELSE read_at END,
+            failed_at = CASE WHEN $2::varchar = 'failed' THEN LEAST(failed_at, $3) ELSE failed_at END,
+            error_code = CASE WHEN $4::boolean THEN $5 ELSE error_code END,
+            error_message = CASE WHEN $4::boolean THEN $6 ELSE error_message END
+        WHERE id = $1 AND company_id = $7
+      `, [message.id, status.status, occurredAt, advances,
+        status.errors?.[0]?.code ? String(status.errors[0].code) : null,
+        status.errors?.[0]?.title || status.errors?.[0]?.message || null, this.companyId]);
+      if (advances) message.status = status.status;
+    }
+    return message.status;
   }
 
   async persistOutbound(input: {
@@ -647,7 +665,7 @@ export class MetaInboxStore {
     body: string | null;
     messageType: string;
     providerMessageId: string | null;
-    phoneNumberId?: string;
+    phoneNumberId: string;
     raw: unknown;
     template?: { name: string; language: string } | null;
     media?: {
@@ -660,6 +678,7 @@ export class MetaInboxStore {
     } | null;
   }): Promise<Record<string, unknown>> {
     const { row, payload } = await this.tenantWork.run(this.companyId, async (client) => {
+      if (input.providerMessageId) await lockMetaReceipt(client, this.companyId, input.providerMessageId);
       const externalContactId = this.normalizePhone(input.chatId);
       const contact = await this.upsertContact(client, { externalContactId, phone: externalContactId, name: null, rawProfile: null });
       const conversation = await this.upsertConversation(client, {
@@ -691,7 +710,7 @@ export class MetaInboxStore {
           json(input.raw),
           input.template?.name || null,
           input.template?.language || null,
-          json({ raw: input.raw, metadata: input.phoneNumberId ? { phone_number_id: input.phoneNumberId } : undefined }),
+          json({ raw: input.raw, metadata: { phone_number_id: input.phoneNumberId } }),
         ]
       );
       if (input.media) {
@@ -727,10 +746,14 @@ export class MetaInboxStore {
         [conversation.id, input.body || (input.template ? `[Template: ${input.template.name}]` : '[Mensaje]')]
       );
       const row = result.rows[0];
+      if (input.providerMessageId) {
+        row.status = await this.applyLegacyReceipts(client, input.providerMessageId) ?? row.status;
+      }
       const payload = {
         id: input.providerMessageId || String(row.id),
         body: input.body || '',
         fromMe: true,
+        status: row.status,
         timestamp: toUnixSeconds(row.occurred_at) || Math.floor(Date.now() / 1000),
         sender: externalContactId,
         type: input.messageType || 'text',

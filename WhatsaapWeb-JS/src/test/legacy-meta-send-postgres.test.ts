@@ -104,6 +104,7 @@ test('legacy HTTP routes never send or persist free-form Meta text and preserve 
   }[] = [];
   let failUpload = false;
   let failVideoSend = false;
+  let beforeTemplateAck: ((id: string) => Promise<void>) | undefined;
   const graphCredentials = new Map([[graphPhoneId, fixtureToken]]);
   const graphProofs: string[] = [];
   const graph = await listen(t, createServer(async (req, res) => {
@@ -144,8 +145,9 @@ test('legacy HTTP routes never send or persist free-form Meta text and preserve 
       res.writeHead(400).end(JSON.stringify({ error: { message: 'fixture rejection' } }));
       return;
     }
-    res.end(JSON.stringify(upload ? { id: 'media-fixture-' + attempts.length }
-      : { messages: [{ id: 'wamid.fixture-' + attempts.length }] }));
+    const id = 'wamid.fixture-' + attempts.length;
+    if (data?.type === 'template') await beforeTemplateAck?.(id);
+    res.end(JSON.stringify(upload ? { id: 'media-fixture-' + attempts.length } : { messages: [{ id }] }));
   }).listen(0, '127.0.0.1'));
   const nativeFetch = globalThis.fetch;
   t.mock.method(globalThis, 'fetch', async (input: string | URL | Request, init?: RequestInit) => {
@@ -307,10 +309,42 @@ test('legacy HTTP routes never send or persist free-form Meta text and preserve 
   const afterApproved = await counts();
   assert.equal(afterApproved.messages - before.messages, 8);
 
+  await t.test('a template reconciles a receipt recorded before Graph acknowledges the send', async () => {
+    const store = whatsapp.getMetaStore(tenantA)!;
+    const timestamp = String(Math.floor(Date.now() / 1000));
+    beforeTemplateAck = async (id) => {
+      const receipt = (status: string, recipient_id: string, phone_number_id: string) => store.persistStatus({
+        status: { id, status, timestamp, recipient_id },
+        metadata: { phone_number_id },
+      });
+      await receipt('read', phone, graphPhoneId + '1');
+      await receipt('read', '12025550199', graphPhoneId);
+      await receipt('delivered', phone, graphPhoneId);
+      await receipt('delivered', phone, graphPhoneId);
+    };
+    try {
+      const result = await send(whatsappAlias, { chatId: phone, template: 'approved_fixture', language: 'es' });
+      assert.equal(result.status, 200);
+      const id = result.body.data.messageId;
+      await store.persistStatus({
+        status: { id, status: 'read', timestamp: String(Number(timestamp) + 1), recipient_id: phone },
+        metadata: { phone_number_id: graphPhoneId + '1' },
+      });
+      const { rows: [message] } = await uow.run(tenantA, (client) => client.query(`
+        SELECT m.status, m.delivered_at IS NOT NULL AS delivered, m.read_at IS NOT NULL AS read,
+          (SELECT count(*)::integer FROM message_statuses s WHERE s.message_id = m.id AND s.status = 'delivered') AS deliveries
+        FROM messages m WHERE m.company_id = $1 AND m.provider_message_id = $2
+      `, [tenantA, id]));
+      assert.deepEqual(message, { status: 'delivered', delivered: true, read: false, deliveries: 1 });
+    } finally {
+      beforeTemplateAck = undefined;
+    }
+  });
+
   failUpload = true;
   assert.ok((await send(whatsappAlias, multipart({ chatId: phone }))).status >= 400);
   await assertCleanUploadDir();
-  assert.deepEqual(await counts(), afterApproved);
+  assert.deepEqual(await counts(), { ...afterApproved, messages: afterApproved.messages + 1 });
   assert.equal(attempts.filter((attempt) => attempt.type === 'text').length, 0);
 
   assert.equal((await send('/webjs/whatsapp/send-message', { chatId: phone, message: 'development text' })).status, 200);

@@ -413,6 +413,7 @@ export class WhatsAppService {
           body: message || null,
           messageType: 'template',
           providerMessageId: result.providerMessageId,
+          phoneNumberId: metaClient.phoneNumberId,
           raw: result.raw,
           template: { name: templateName, language: templateLanguage },
         });
@@ -438,6 +439,7 @@ export class WhatsAppService {
           body: message || '',
           messageType: 'text',
           providerMessageId: result.providerMessageId,
+          phoneNumberId: metaClient.phoneNumberId,
           raw: result.raw,
         });
       }
