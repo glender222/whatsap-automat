@@ -17,7 +17,7 @@ import { OutboxRelayDaemon } from '../services/outbox/OutboxRelayDaemon';
 import { OutboxRepository } from '../services/outbox/OutboxRepository';
 import { TemporalClientFactory } from '../services/temporal/TemporalClientFactory';
 import { temporalTlsFromEnvironment } from '../services/temporal/temporalTls';
-import { WorkflowDispatchService } from '../services/workflows/WorkflowDispatchService';
+import { AUTOMATION_TASK_QUEUE, WorkflowDispatchService } from '../services/workflows/WorkflowDispatchService';
 import { WorkflowRevisionService } from '../services/workflows/WorkflowRevisionService';
 import { WorkflowTriggerService } from '../services/workflows/WorkflowTriggerService';
 import { validateWorkflowRevision } from '../services/workflows/validateWorkflowRevision';
@@ -52,14 +52,14 @@ function token(tenantId: number, role: string = 'ADMIN'): string {
   return jwt.sign({ userId: 81, companyId: tenantId, rol: role }, process.env.JWT_SECRET!, { expiresIn: '5m' });
 }
 
-async function until<T>(work: () => Promise<T | undefined>, message: string): Promise<T> {
-  const deadline = Date.now() + 25_000;
+async function until<T>(work: () => Promise<T | undefined>, message: string | (() => string), timeoutMs = 25_000): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
   do {
     const value = await work();
     if (value !== undefined) return value;
     await delay(150);
   } while (Date.now() < deadline);
-  throw new Error(message);
+  throw new Error(typeof message === 'function' ? message() : message);
 }
 
 test('workflow graph validation rejects dead branches, malformed conditions and cycles', () => {
@@ -105,7 +105,7 @@ describe('Durable workflow HTTP, PostgreSQL and Temporal integration', {
     if (pool) await pool.end();
   });
 
-  test('validates identity and revision pinning, resumes dispatch, and persists the real DAG result', { timeout: 90_000 }, async (t) => {
+  test('validates identity and revision pinning, resumes dispatch, and persists the real DAG result', { timeout: 120_000 }, async (t) => {
     const outbox = new OutboxRepository(tenantWork);
     const app = express();
     app.use(express.json());
@@ -266,15 +266,30 @@ describe('Durable workflow HTTP, PostgreSQL and Temporal integration', {
       try { await exited; } finally { clearTimeout(forceStop); }
     });
 
+    const connection = await Connection.connect({ address: temporalAddress, tls: temporalTlsFromEnvironment() });
+    t.after(() => connection.close());
+    function assertWorkerRunning() {
+      if (worker.exitCode !== null || worker.signalCode !== null) {
+        throw new Error(`Compiled Temporal worker stopped unexpectedly:\n${workerLog}`);
+      }
+    }
+    await until(async () => {
+      assertWorkerRunning();
+      const { pollers } = await connection.workflowService.describeTaskQueue({
+        namespace, taskQueue: { name: AUTOMATION_TASK_QUEUE }, taskQueueType: 1, // TASK_QUEUE_TYPE_WORKFLOW
+      });
+      return pollers?.length ? true : undefined;
+    }, () => `Compiled Temporal worker did not start polling:\n${workerLog}`, 45_000);
+
     async function completed(id: string) {
       return until(async () => {
-        if (worker.exitCode !== null) throw new Error(`Compiled Temporal worker exited before completion:\n${workerLog}`);
+        assertWorkerRunning();
         const response = await fetch(`${baseUrl}/runs/${id}`, { headers: { authorization: `Bearer ${adminA}` } });
         assert.equal(response.status, 200);
         const { data } = await response.json();
         if (data.status === 'failed') throw new Error(`Workflow failed: ${JSON.stringify(data.errorDetails)}\n${workerLog}`);
         return data.status === 'completed' ? data : undefined;
-      }, `Workflow ${id} did not complete:\n${workerLog}`);
+      }, () => `Workflow ${id} did not complete:\n${workerLog}`);
     }
 
     const completedFirst = await completed(runId);
@@ -306,19 +321,14 @@ describe('Durable workflow HTTP, PostgreSQL and Temporal integration', {
       const recovered = await outbox.findById(tenantA, outboxId);
       return recovered?.status === 'dispatched' ? recovered : undefined;
     }, 'Relay did not reconcile the already completed Temporal execution.');
-    const connection = await Connection.connect({ address: temporalAddress, tls: temporalTlsFromEnvironment() });
-    try {
-      const temporal = new Client({ connection, namespace });
-      const latest = await temporal.workflow.getHandle(completedFirst.temporalWorkflowId).describe();
-      assert.equal(latest.runId, completedFirst.temporalRunId);
-      const result = await temporal.workflow.getHandle(completedFirst.temporalWorkflowId, completedFirst.temporalRunId).result();
-      assert.equal(result.status, 'completed');
-      assert.ok(result.historyTrace.some((event: { nodeId: string; status: string }) =>
-        event.nodeId === 'wait' && event.status === 'node_started_delay'
-      ));
-    } finally {
-      await connection.close();
-    }
+    const temporal = new Client({ connection, namespace });
+    const latest = await temporal.workflow.getHandle(completedFirst.temporalWorkflowId).describe();
+    assert.equal(latest.runId, completedFirst.temporalRunId);
+    const result = await temporal.workflow.getHandle(completedFirst.temporalWorkflowId, completedFirst.temporalRunId).result();
+    assert.equal(result.status, 'completed');
+    assert.ok(result.historyTrace.some((event: { nodeId: string; status: string }) =>
+      event.nodeId === 'wait' && event.status === 'node_started_delay'
+    ));
   });
 
   test('concurrent ingress pins a real published revision while another transaction rolls back', async () => {
