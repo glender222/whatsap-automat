@@ -2,6 +2,8 @@
 
 Este registro separa los recorridos verificados y los pendientes. Para cerrar un defecto se registra la reproducción, el cambio y el resultado de la regresión. Cuando el recorrido cruza empresas, la evidencia identifica los roles y la separación comprobada.
 
+El job `product-smoke` ejecuta la prueba de sesión Socket.IO y la suite de Chromium con una base independiente, migraciones desde cero y proveedores locales para Graph y Studio. El paso del navegador falla si se omite un recorrido y conserva el informe y las trazas cuando hay fallos. La ejecución local del paso con Chromium de Playwright pasó los 13 recorridos sin omisiones. La suite de sesión pasó 9 pruebas. [Workflow de CI](../../.github/workflows/ci.yml).
+
 ## UX-01. El tema cambia al navegar
 
 - **Antes.** Chromium abrió la bandeja con el sistema en Claro y la preferencia Oscuro guardada. La barra de navegación ya era visible y el documento seguía sin la clase `dark`. La prueba falló en esa aserción sobre la base `6f064ea`.
