@@ -21,6 +21,8 @@ async function main() {
   assert.match(process.env.DB_NAME ?? '', /_smoke$/);
   assert.equal(process.env.WHATSAPP_PROVIDER, 'meta-cloud');
   assert.equal(process.env.META_WA_ACCESS_TOKEN, 'synthetic-local-token');
+  const providerMode = process.env.STUDIO_PROVIDER_FIXTURE === '1';
+  const fixtureAuthorization = 'Bearer fixture-studio-provider';
 
   const checkpoints = new Map<string, () => void>();
   const server = createServer(async (req, res) => {
@@ -33,7 +35,8 @@ async function main() {
       resume?.();
       return res.writeHead(resume ? 200 : 404).end('{}');
     }
-    if (req.method !== 'POST' || req.url !== '/v1/chat/completions' || req.headers.authorization) return res.writeHead(400).end('{}');
+    if (req.method !== 'POST' || req.url !== '/v1/chat/completions' ||
+        req.headers.authorization !== (providerMode ? fixtureAuthorization : undefined)) return res.writeHead(400).end('{}');
     try {
       const chunks = [];
       for await (const chunk of req) chunks.push(chunk);
@@ -48,12 +51,24 @@ async function main() {
   await once(server, 'listening');
   server.unref();
 
+  const { App } = await import('../../app');
+  if (providerMode) {
+    const fetchNetwork = globalThis.fetch;
+    globalThis.fetch = (url, options) => {
+      if (url !== 'https://api.openai.com/v1/chat/completions') return fetchNetwork(url, options);
+      assert.equal(new Headers(options?.headers).get('authorization'), fixtureAuthorization);
+      assert.equal(options?.redirect, 'error');
+      return fetchNetwork(provider.origin + '/v1/chat/completions', options);
+    };
+    await new App().start();
+    return;
+  }
+
   const adapter = new OpenAiBoundedTextAdapter((url, options) => {
     assert.equal(url, 'https://api.openai.com/v1/chat/completions');
     assert.equal(new Headers(options?.headers).has('authorization'), false);
     return fetch(provider.origin + '/v1/chat/completions', options);
   });
-  const { App } = await import('../../app');
   const { tenantScopedUoW } = await import('../../db/TenantScopedUoW');
   const { createStudioVerification } = await import('../../services/ai/studio/StudioVerification');
   const verification = createStudioVerification(tenantScopedUoW, adapter);

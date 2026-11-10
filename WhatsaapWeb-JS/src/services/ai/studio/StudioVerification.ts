@@ -27,6 +27,19 @@ export function createStudioProviderExecution(
     new AgentStudioPublications('provider', (db, tenantId) => execution.policy.assertStrict(db, tenantId)));
 }
 
+export function createStudioProviderAccess(
+  uow: TenantScopedUoW, execution: ReturnType<typeof createTenantBoundedModelExecution>,
+) {
+  const studio = createStudioProviderExecution(uow, execution);
+  return async (tenantId: number): Promise<StudioAccess | null> => {
+    const policy = await execution.policy.mode(tenantId);
+    if (policy === 'paused') return { studio, availability: 'paused' };
+    if (policy !== 'strict') return null;
+    const transport = await execution.resolveTransport({ tenantId }).catch(() => null);
+    return { studio, availability: transport ? 'ready' : 'credential_required' };
+  };
+}
+
 function createStudioExecution<Mode extends ExecutionMode>(
   uow: TenantScopedUoW, mode: Mode, dispatcher: Pick<BoundedAgentDispatch, 'dispatch'>, publications: AgentStudioPublications,
 ) {
@@ -40,3 +53,8 @@ function createStudioExecution<Mode extends ExecutionMode>(
 }
 
 export type StudioVerification = ReturnType<typeof createStudioVerification>;
+export type StudioAccess = {
+  studio: StudioVerification | ReturnType<typeof createStudioProviderExecution>;
+  availability: 'ready' | 'paused' | 'credential_required';
+};
+export type StudioProviderAccess = ReturnType<typeof createStudioProviderAccess>;

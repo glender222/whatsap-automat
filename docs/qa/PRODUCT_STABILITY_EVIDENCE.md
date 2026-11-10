@@ -172,7 +172,14 @@ Con las mismas variables exportadas en el frontend, ejecutar `npm run test:e2e -
 - **Política.** La migración 060 registra la admisión por empresa. El modo por defecto conserva el proveedor anterior. El paso a `draining` bloquea operaciones nuevas del proveedor anterior. El paso a `strict` exige que terminen las operaciones en curso. Una caída con un permiso abierto conserva el registro para revisión.
 - **Prueba integrada.** La API autenticada de Alfa ocupó el presupuesto con una solicitud retenida por el proveedor HTTP local. Una evaluación de Studio de Alfa quedó bloqueada sin despachar. Bravo pudo ejecutar con su propio presupuesto y credencial. Al completar la primera solicitud, una evaluación nueva de Alfa pasó y el libro de consumo registró ambos usos. La publicación en modo proveedor no apareció en modo de verificación.
 - **Control.** PostgreSQL rechazó cambiar de modo mientras seguía activo el permiso anterior, incluso después de un `SIGKILL`. La API de credenciales rechazó guardar y probar una clave con rol de operador. La pausa impidió nuevas solicitudes de Alfa.
-- **Alcance.** El gateway de texto admite empresas configuradas con la política y una credencial BYOK de OpenAI. Studio usa esta composición en la prueba de integración. Quedan la exposición del modo proveedor en la interfaz y los perfiles del runtime con herramientas. [Política y prueba local](AI_PROVIDER_ADMISSION.md).
+- **Alcance.** El gateway de texto admite empresas configuradas con la política y una credencial BYOK de OpenAI. IA-06 conecta el mismo presupuesto a Studio desde la API y el navegador. [Política y prueba local](AI_PROVIDER_ADMISSION.md).
+
+## IA-06. Modo proveedor de Studio desde la aplicación
+
+- **Antes.** El servidor principal solo mostraba la ejecución en la composición de verificación. El evaluador de proveedor quedaba accesible únicamente desde la prueba interna.
+- **API y PostgreSQL.** El administrador de Alfa registró una credencial, evaluó, publicó y ejecutó la revisión de texto. Al repetir el UUID se conservó el resultado de evaluación y el envío de ejecución no se repitió. Bravo no pudo consultar ni usar la publicación de Alfa. En pausa, Alfa pudo consultar la evaluación y el servidor rechazó nuevas ejecuciones. Studio y la API operativa comparten la cuota de IA-05.
+- **Navegador.** Dos administradores en pantallas de 390 px vieron la acción de configurar credenciales. Alfa guardó su clave en Studio y el formulario borró el valor. Evaluó con teclado, recuperó el resultado al recargar, publicó y ejecutó. Bravo siguió sin credencial y con el botón deshabilitado, incluso al enviar desde un formulario obsoleto de Alfa después de cambiar de sesión. La sesión de proveedor ignoró un UUID guardado bajo el modo de verificación.
+- **Alcance.** El navegador usa la composición predeterminada de la aplicación y un proveedor HTTP local. Quedan el piloto con una credencial real y los perfiles del runtime con herramientas. [Reproducción](AI_PROVIDER_ADMISSION.md).
 
 ## WF-01. Ingreso mientras se revierte una revisión publicada
 
@@ -185,5 +192,5 @@ Con las mismas variables exportadas en el frontend, ejecutar `npm run test:e2e -
 | --- | --- |
 | Bandeja en tiempo real | Filtro por etiqueta, reconexión, reorden de webhooks e historial paginado cubiertos en MSG-04 y MSG-05. |
 | Envío y recepción | MSG-06 y MSG-07 cubren envíos humanos y automáticos, adjuntos, entrega incierta y recuperación tras reinicio con Graph local. Falta el recorrido en navegador con dos líneas Meta reales. |
-| Harness IA | IA-03 e IA-04 cubren Studio en verificación. IA-05 comprueba la cuota común en el gateway y el evaluador de proveedor. Completar el modo proveedor en Studio y los perfiles de runtime con herramientas. |
+| Harness IA | IA-03 e IA-04 cubren Studio en verificación. IA-05 e IA-06 comprueban la cuota común y el modo proveedor desde Studio con transporte local. Faltan el piloto con proveedor real y los perfiles de runtime con herramientas. |
 | Flujo operativo y navegación | UX-07 cubre conversación, pedido, pago y regreso. Quedan las pruebas integradas de aprobación y conexión. |

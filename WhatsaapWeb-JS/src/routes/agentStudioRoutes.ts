@@ -16,7 +16,9 @@ import { agentEvalService, SimulationInputError } from '../services/ai/eval/Agen
 import { compileAgentExecutionProfile, executionProfile } from '../services/ai/studio/AgentExecutionProfile';
 import { executionRunIdPattern, listExecutionSuites, saveExecutionSuite } from '../services/ai/studio/AgentExecutionEvidence';
 import { AgentPublicationConflict } from '../services/ai/studio/AgentStudioPublications';
-import type { StudioVerification } from '../services/ai/studio/StudioVerification';
+import type { StudioAccess, StudioProviderAccess, StudioVerification } from '../services/ai/studio/StudioVerification';
+import { AiDispatchUnavailableError } from '../services/ai/gateway/TenantAiDispatchPolicy';
+import { AiQuotaCapacityError, AiQuotaReservationConflictError } from '../services/ai/gateway/AiQuotaReservationStore';
 import { boundedTextCapability, isBoundedText } from '../services/ai/gateway/BoundedTextCompletion';
 import { preflightBoundedAgentDispatch } from '../services/ai/studio/BoundedAgentDispatch';
 import {
@@ -88,6 +90,18 @@ function guarded(handler: StudioHandler) {
     }
     res.setHeader('Cache-Control', 'no-store');
     handler(req, res, { ...actor, userId: actor.userId }).catch((error: unknown) => {
+      if (error instanceof AiDispatchUnavailableError) {
+        providerUnavailable(res, 'paused');
+        return;
+      }
+      if (error instanceof AiQuotaCapacityError) {
+        res.status(429).json({ code: 'AI_QUOTA_EXHAUSTED', detail: 'The company has no available AI quota for this execution.' });
+        return;
+      }
+      if (error instanceof AiQuotaReservationConflictError) {
+        problem(res, 'CONFLICT', 'This execution ID is already bound to another request.');
+        return;
+      }
       if (error instanceof SimulationInputError || error instanceof AgentPublicationConflict) {
         problem(res, error instanceof AgentPublicationConflict ? 'CONFLICT' : 'VALIDATION_ERROR', error.message);
         return;
@@ -97,6 +111,14 @@ function guarded(handler: StudioHandler) {
       next(new Error('The Agent Studio request could not be completed.'));
     });
   };
+}
+
+function providerUnavailable(res: Response, availability: Exclude<StudioAccess['availability'], 'ready'>) {
+  res.status(503).json({
+    code: availability === 'paused' ? 'STUDIO_PROVIDER_PAUSED' : 'STUDIO_PROVIDER_CREDENTIAL_REQUIRED',
+    detail: availability === 'paused' ? 'Provider execution is paused for this company.' :
+      'An active OpenAI credential for the company is required.',
+  });
 }
 
 function notFound(res: Response) {
@@ -201,9 +223,34 @@ export function createAgentSimulationRoutes(uow?: TenantScopedUoW): Router {
   return router;
 }
 
-export default function createAgentStudioRoutes(uow?: TenantScopedUoW, verification?: StudioVerification): Router {
+export default function createAgentStudioRoutes(
+  uow?: TenantScopedUoW, verification?: StudioVerification, providerAccess?: StudioProviderAccess,
+): Router {
   const router = Router();
   router.use(requireJwt, tenantContext({ allowSandbox: false, uow }));
+
+  async function resolveAccess(tenantId: number): Promise<StudioAccess | null> {
+    if (verification) return { studio: verification, availability: 'ready' };
+    return providerAccess ? providerAccess(tenantId) : null;
+  }
+
+  function withExecutionDraft(
+    handler: (res: Response, draft: AgentGraphVersionV1, req: Request, actor: StudioActor,
+      studio: StudioAccess['studio']) => void | Promise<void>,
+    options: { requiresProvider?: boolean; legacyPublish?: boolean } = {},
+  ) {
+    return withDraft(async (res, draft, req, actor) => {
+      const access = await resolveAccess(actor.tenantId);
+      if (!access) return unavailable(res, draft);
+      if (options.legacyPublish && req.query.version === undefined) {
+        return problem(res, 'VALIDATION_ERROR', 'An explicit valid revision version is required.');
+      }
+      if (options.requiresProvider && access.availability !== 'ready') {
+        return providerUnavailable(res, access.availability);
+      }
+      await handler(res, draft, req, actor, access.studio);
+    }, !options.legacyPublish);
+  }
 
   router.get('/', guarded(async (req, res, actor) => {
     const rawAfter = req.query.after;
@@ -274,22 +321,23 @@ export default function createAgentStudioRoutes(uow?: TenantScopedUoW, verificat
   }
 
   router.get('/:id/execution', withDraft(async (res, draft, _req, actor) => {
-    if (!verification) {
+    const access = await resolveAccess(actor.tenantId);
+    if (!access) {
       res.json({ mode: null, suites: [], active: null });
       return;
     }
     const preflight = preflightBoundedAgentDispatch({ tenantId: actor.tenantId, graph: draft, input: 'Verification preflight', timeoutMs: 1000 });
     const status = await actor.runInScope(async (db) => ({
-      mode: verification.mode,
+      mode: access.studio.mode,
+      availability: access.availability,
       profile: { compatible: preflight.ok, issue: preflight.ok ? null : preflight.code, model: boundedTextCapability.model },
       suites: await listExecutionSuites(db, actor.tenantId, draft.graphId),
-      active: (await verification.publications.loadActive(db, actor.tenantId, draft.graphId))?.publication ?? null,
+      active: (await access.studio.publications.loadActive(db, actor.tenantId, draft.graphId))?.publication ?? null,
     }));
     res.json(status);
   }, true));
 
-  router.post('/:id/evaluation-suites', withDraft(async (res, draft, req, actor) => {
-    if (!verification) return unavailable(res, draft);
+  router.post('/:id/evaluation-suites', withExecutionDraft(async (res, draft, req, actor) => {
     const input = suiteInput.safeParse(req.body);
     if (!input.success) return problem(res, 'VALIDATION_ERROR', 'Invalid bounded text evaluation suite.');
     const suite = await actor.runInScope((db) => saveExecutionSuite(db, {
@@ -298,59 +346,54 @@ export default function createAgentStudioRoutes(uow?: TenantScopedUoW, verificat
     }));
     if (!suite) return problem(res, 'CONFLICT', 'The suite ID is already bound to another suite.');
     res.json(suite);
-  }, true));
+  }));
 
-  router.post('/:id/evaluations', withDraft(async (res, draft, req, actor) => {
-    if (!verification) return unavailable(res, draft);
+  router.post('/:id/evaluations', withExecutionDraft(async (res, draft, req, actor, studio) => {
     const input = evaluateInput.safeParse(req.body);
     if (!input.success) return problem(res, 'VALIDATION_ERROR', 'Invalid execution evaluation request.');
-    const evaluation = await verification.evaluator.evaluate({
+    const evaluation = await studio.evaluator.evaluate({
       ...input.data, tenantId: actor.tenantId, graphId: draft.graphId, version: draft.version,
     });
     res.status(evaluation.status === 'running' ? 202 : 200).json(evaluation);
-  }, true));
+  }, { requiresProvider: true }));
 
-  router.get('/:id/evaluations/:runId', withDraft(async (res, draft, req, actor) => {
-    if (!verification) return unavailable(res, draft);
+  router.get('/:id/evaluations/:runId', withExecutionDraft(async (res, draft, req, actor, studio) => {
     const id = runId.safeParse(req.params.runId);
     if (!id.success) return problem(res, 'VALIDATION_ERROR', 'Invalid evaluation ID.');
-    const evaluation = await verification.evaluator.read(actor.tenantId, draft.graphId, draft.version, id.data);
+    const evaluation = await studio.evaluator.read(actor.tenantId, draft.graphId, draft.version, id.data);
     if (!evaluation) return problem(res, 'NOT_FOUND', 'Evaluation was not found.');
     res.json(evaluation);
-  }, true));
+  }));
 
-  router.post('/:id/evaluations/:runId/cancel', withDraft(async (res, draft, req, actor) => {
-    if (!verification) return unavailable(res, draft);
+  router.post('/:id/evaluations/:runId/cancel', withExecutionDraft(async (res, draft, req, actor, studio) => {
     const id = runId.safeParse(req.params.runId);
     if (!id.success || !cancelInput.safeParse(req.body ?? {}).success) {
       return problem(res, 'VALIDATION_ERROR', 'Invalid evaluation cancellation request.');
     }
-    const evaluation = await verification.evaluator.cancel(actor.tenantId, draft.graphId, draft.version, id.data);
+    const evaluation = await studio.evaluator.cancel(actor.tenantId, draft.graphId, draft.version, id.data);
     if (!evaluation) return problem(res, 'NOT_FOUND', 'Evaluation was not found.');
     res.json(evaluation);
-  }, true));
+  }));
 
-  router.post('/:id/publish', withDraft(async (res, draft, req, actor) => {
-    if (!verification) return unavailable(res, draft);
+  router.post('/:id/publish', withExecutionDraft(async (res, draft, req, actor, studio) => {
     const input = publishInput.safeParse(req.body);
     if (!input.success) return problem(res, 'VALIDATION_ERROR', 'Invalid execution evaluation ID.');
-    const publication = await actor.runInScope((db) => verification.publications.publish(db, {
+    const publication = await actor.runInScope((db) => studio.publications.publish(db, {
       ...input.data, tenantId: actor.tenantId, actorId: actor.userId, graphId: draft.graphId, version: draft.version,
     }));
     if (!publication) return notFound(res);
     res.json(publication);
-  }, Boolean(verification)));
+  }, { requiresProvider: true, legacyPublish: !verification }));
 
-  router.post('/:id/execute', withDraft(async (res, draft, req, actor) => {
-    if (!verification) return unavailable(res, draft);
+  router.post('/:id/execute', withExecutionDraft(async (res, draft, req, actor, studio) => {
     const input = executeInput.safeParse(req.body);
-    if (!input.success) return problem(res, 'VALIDATION_ERROR', 'Invalid verification execution request.');
-    const result = await verification.execute({
+    if (!input.success) return problem(res, 'VALIDATION_ERROR', 'Invalid bounded execution request.');
+    const result = await studio.execute({
       ...input.data, tenantId: actor.tenantId, graphId: draft.graphId, version: draft.version,
     });
-    if (!result) return problem(res, 'CONFLICT', 'There is no active verification publication.');
+    if (!result) return problem(res, 'CONFLICT', 'There is no active publication for this revision.');
     res.json(result);
-  }, true));
+  }, { requiresProvider: true }));
 
   return router;
 }

@@ -1,5 +1,5 @@
 import { isAxiosError } from 'axios';
-import { api } from '../../../shared/axios/http';
+import { api, type AuthRequestConfig } from '../../../shared/axios/http';
 
 export const studioPath = '/dashboard/ia/estudio';
 export const legacyAgentsPath = '/dashboard/ia/agentes';
@@ -137,6 +137,15 @@ export function graphProblem(cause: unknown, fallback: string): GraphProblem {
   if (status === 400 || status === 422) return { message: 'Los datos de esta solicitud no son válidos.', fields };
   if (status === 403) return { message: 'Agent Studio requiere una cuenta administradora de esta empresa.', fields };
   if (status === 404) return { message: 'No encontramos este grafo o revisión en tu empresa.', fields };
+  if (data?.code === 'STUDIO_PROVIDER_PAUSED') return { message: 'La ejecución con proveedor está pausada para esta empresa.', fields };
+  if (data?.code === 'STUDIO_PROVIDER_CREDENTIAL_REQUIRED') return { message: 'Configura una credencial de OpenAI para esta empresa y vuelve a intentarlo.', fields };
+  if (data?.code === 'AI_QUOTA_EXHAUSTED') return { message: 'La empresa no tiene cuota disponible para esta ejecución.', fields };
+  if (status === 409 && cause.config?.url?.endsWith('/publish')) {
+    return { message: 'Actualiza la revisión y comprueba que su evaluación aprobada sigue vigente.', fields };
+  }
+  if (status === 409 && cause.config?.url?.endsWith('/execute')) {
+    return { message: 'La ejecución entró en conflicto con un intento anterior o con un cambio de revisión activa. Actualiza el estado de Studio.', fields };
+  }
   if (status === 409) return { message: 'Ya existe un grafo con este identificador. Abre el existente o elige otro.', fields };
   return { message: fallback, fields };
 }
@@ -209,70 +218,81 @@ export function graphFixtureProblem(cause: unknown): GraphProblem {
 }
 
 export interface ExecutionSuite { id: string; name: string; scenarioCount: number }
-export interface VerificationPublication {
-  graphId: string; version: number; specHash: string; evaluationId: string; mode: 'verification';
+export type StudioExecutionMode = 'verification' | 'provider';
+export interface StudioPublication {
+  graphId: string; version: number; specHash: string; evaluationId: string; mode: StudioExecutionMode;
 }
 export interface ExecutionEvaluation {
   runId: string; suiteId: string; graphId: string; version: number; specHash: string;
-  mode: 'verification'; status: 'running' | 'completed' | 'failed' | 'cancelled'; passed: boolean;
+  mode: StudioExecutionMode; status: 'running' | 'completed' | 'failed' | 'cancelled'; passed: boolean;
   admittedScenarioId: string | null;
   scenarios: { scenarioId: string; outcome: 'passed' | 'assertion_failed' | 'uncertain' | 'blocked' }[];
 }
 
-function verificationConfig(draft: GraphDraft, signal: AbortSignal) {
+function executionConfig(draft: GraphDraft, signal: AbortSignal) {
   return { params: { version: draft.version }, signal };
 }
 
-function verifiedPublication(publication: VerificationPublication | undefined, draft: GraphDraft) {
-  return publication?.graphId === draft.graphId && publication.mode === 'verification' &&
+function verifiedPublication(publication: StudioPublication | undefined, draft: GraphDraft, mode: StudioExecutionMode | null) {
+  return publication?.graphId === draft.graphId && publication.mode === mode &&
     Number.isSafeInteger(publication.version) && publication.version > 0 && /^[a-f0-9]{64}$/.test(publication.specHash) &&
     (publication.version !== draft.version || publication.specHash === draft.specHash);
 }
 
 export async function readStudioExecution(draft: GraphDraft, signal: AbortSignal) {
   const { data } = await api.get<{
-    mode: 'verification' | null; suites: ExecutionSuite[]; active: VerificationPublication | null;
+    mode: StudioExecutionMode | null; suites: ExecutionSuite[]; active: StudioPublication | null;
+    availability?: 'ready' | 'paused' | 'credential_required';
     profile?: { compatible: boolean; issue: string | null; model: string };
   }>(
-    graphEndpoint(draft.graphId) + '/execution', verificationConfig(draft, signal),
+    graphEndpoint(draft.graphId) + '/execution', executionConfig(draft, signal),
   );
-  if ((data?.mode !== 'verification' && data?.mode !== null) || !Array.isArray(data.suites) ||
+  if ((data?.mode !== 'verification' && data?.mode !== 'provider' && data?.mode !== null) || !Array.isArray(data.suites) ||
       !data.suites.every((suite) => typeof suite.id === 'string' && typeof suite.name === 'string' && Number.isSafeInteger(suite.scenarioCount)) ||
-      (data.active !== null && !verifiedPublication(data.active, draft)) ||
-      (data.mode === 'verification' && (typeof data.profile?.compatible !== 'boolean' || typeof data.profile.model !== 'string'))) {
-    throw new Error('El servidor no confirmó la capacidad de verificación.');
+      (data.active !== null && !verifiedPublication(data.active, draft, data.mode)) ||
+      (data.mode !== null && (typeof data.profile?.compatible !== 'boolean' || typeof data.profile.model !== 'string')) ||
+      (data.mode === 'provider' && !['ready', 'paused', 'credential_required'].some((state) => state === data.availability))) {
+    throw new Error('El servidor no confirmó la disponibilidad de ejecución.');
   }
   return data;
+}
+
+export async function saveStudioOpenAiCredential(apiKey: string, sessionGeneration: number, signal: AbortSignal) {
+  const config: AuthRequestConfig = { signal, sessionGeneration };
+  const { data } = await api.post<{ success: boolean }>('/v1/ai/providers', { provider: 'openai', apiKey }, config);
+  if (data?.success !== true) throw new Error('El servidor no confirmó el guardado de la credencial.');
 }
 
 export async function saveStudioSuite(draft: GraphDraft, suite: {
   id: string; name: string; scenarios: { id: string; name: string; mockInput: string; expectedTextPatterns: string[] }[];
 }, signal: AbortSignal) {
-  const { data } = await api.post<ExecutionSuite>(graphEndpoint(draft.graphId) + '/evaluation-suites', suite, verificationConfig(draft, signal));
+  const { data } = await api.post<ExecutionSuite>(graphEndpoint(draft.graphId) + '/evaluation-suites', suite, executionConfig(draft, signal));
   if (data?.id !== suite.id || data.name !== suite.name || data.scenarioCount !== suite.scenarios.length) {
     throw new Error('El servidor no confirmó la suite guardada.');
   }
   return data;
 }
 
-export async function studioEvaluation(draft: GraphDraft, attempt: { runId: string; suiteId: string }, signal: AbortSignal, read = false) {
+export async function studioEvaluation(draft: GraphDraft, attempt: { runId: string; suiteId: string },
+  mode: StudioExecutionMode, signal: AbortSignal, timeoutMs?: number) {
   const endpoint = graphEndpoint(draft.graphId) + '/evaluations';
-  const config = verificationConfig(draft, signal);
-  const { data } = read
+  const config = executionConfig(draft, signal);
+  const { data } = timeoutMs === undefined
     ? await api.get<ExecutionEvaluation>(endpoint + '/' + encodeURIComponent(attempt.runId), config)
-    : await api.post<ExecutionEvaluation>(endpoint, { ...attempt, timeoutMs: 1000 }, { ...config, timeout: 65000 });
-  return confirmEvaluation(data, draft, attempt);
+    : await api.post<ExecutionEvaluation>(endpoint, { ...attempt, timeoutMs }, { ...config, timeout: 65000 });
+  return confirmEvaluation(data, draft, attempt, mode);
 }
 
-export async function cancelStudioEvaluation(draft: GraphDraft, attempt: { runId: string; suiteId: string }, signal: AbortSignal) {
+export async function cancelStudioEvaluation(draft: GraphDraft, attempt: { runId: string; suiteId: string },
+  mode: StudioExecutionMode, signal: AbortSignal) {
   const endpoint = graphEndpoint(draft.graphId) + '/evaluations/' + encodeURIComponent(attempt.runId) + '/cancel';
-  const { data } = await api.post<ExecutionEvaluation>(endpoint, {}, verificationConfig(draft, signal));
-  return confirmEvaluation(data, draft, attempt);
+  const { data } = await api.post<ExecutionEvaluation>(endpoint, {}, executionConfig(draft, signal));
+  return confirmEvaluation(data, draft, attempt, mode);
 }
 
-function confirmEvaluation(data: ExecutionEvaluation, draft: GraphDraft, attempt: { runId: string; suiteId: string }) {
+function confirmEvaluation(data: ExecutionEvaluation, draft: GraphDraft, attempt: { runId: string; suiteId: string }, mode: StudioExecutionMode) {
   if (data?.runId !== attempt.runId || data.suiteId !== attempt.suiteId || data.graphId !== draft.graphId ||
-      data.version !== draft.version || data.specHash !== draft.specHash || data.mode !== 'verification' ||
+      data.version !== draft.version || data.specHash !== draft.specHash || data.mode !== mode ||
       (data.admittedScenarioId != null && typeof data.admittedScenarioId !== 'string') ||
       typeof data.passed !== 'boolean' || !['running', 'completed', 'failed', 'cancelled'].includes(data.status) || !Array.isArray(data.scenarios)) {
     throw new Error('El servidor no confirmó una evaluación para esta revisión.');
@@ -280,25 +300,32 @@ function confirmEvaluation(data: ExecutionEvaluation, draft: GraphDraft, attempt
   return data;
 }
 
-export async function publishStudioVerification(draft: GraphDraft, evaluationId: string, signal: AbortSignal) {
-  const { data } = await api.post<VerificationPublication>(
-    graphEndpoint(draft.graphId) + '/publish', { evaluationId }, verificationConfig(draft, signal),
+export async function publishStudioRevision(draft: GraphDraft, evaluationId: string, mode: StudioExecutionMode, signal: AbortSignal) {
+  const { data } = await api.post<StudioPublication>(
+    graphEndpoint(draft.graphId) + '/publish', { evaluationId }, executionConfig(draft, signal),
   );
-  if (!verifiedPublication(data, draft) || data.version !== draft.version || data.evaluationId !== evaluationId) {
+  if (!verifiedPublication(data, draft, mode) || data.version !== draft.version || data.evaluationId !== evaluationId) {
     throw new Error('El servidor no confirmó la publicación de esta revisión.');
   }
   return data;
 }
 
-export async function executeStudioVerification(draft: GraphDraft, attempt: { attemptId: string; input: string }, signal: AbortSignal) {
-  const { data } = await api.post<{ publication: VerificationPublication; execution: { status: string; output?: { text: string } } }>(
-    graphEndpoint(draft.graphId) + '/execute', { ...attempt, timeoutMs: 1000 }, verificationConfig(draft, signal),
+export async function executeStudioRevision(draft: GraphDraft, attempt: { attemptId: string; input: string; timeoutMs: number },
+  mode: StudioExecutionMode, signal: AbortSignal) {
+  const { data } = await api.post<{ publication: StudioPublication; execution: { status: string; output?: { text: string } } }>(
+    graphEndpoint(draft.graphId) + '/execute', attempt, { ...executionConfig(draft, signal), timeout: attempt.timeoutMs + 5000 },
   );
-  if (!verifiedPublication(data?.publication, draft) || data.publication.version !== draft.version || typeof data.execution?.status !== 'string') {
+  if (!verifiedPublication(data?.publication, draft, mode) || data.publication.version !== draft.version || typeof data.execution?.status !== 'string') {
     throw new Error('El servidor no confirmó la ejecución de esta revisión.');
   }
   if (data.execution.status !== 'completed' || typeof data.execution.output?.text !== 'string') {
-    throw new Error('La prueba de ejecución terminó con estado ' + data.execution.status + '.');
+    const messages: Record<string, string> = {
+      not_dispatched: 'El intento ya estaba registrado o venció antes del envío. Esta solicitud no generó otro envío.',
+      uncertain: 'El resultado quedó sin confirmar. Conservamos el intento para evitar un segundo envío.',
+      budget_exhausted: 'La ejecución agotó el presupuesto de la revisión.',
+      provider_unavailable: 'La credencial o la política de esta empresa impidieron la ejecución.',
+    };
+    throw new Error(messages[data.execution.status] ?? 'La ejecución no devolvió texto utilizable.');
   }
   return data.execution.output.text;
 }

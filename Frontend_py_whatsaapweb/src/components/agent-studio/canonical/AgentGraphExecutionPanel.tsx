@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { readSession } from '../../../shared/auth/session';
 import GraphProblemNotice from './GraphProblemNotice';
 import {
-  cancelStudioEvaluation, executeStudioVerification, graphProblem, publishStudioVerification, readStudioExecution, saveStudioSuite, studioEvaluation,
-  type ExecutionEvaluation, type GraphDraft, type GraphProblem,
+  cancelStudioEvaluation, executeStudioRevision, graphProblem, publishStudioRevision, readStudioExecution,
+  saveStudioOpenAiCredential, saveStudioSuite, studioEvaluation,
+  type ExecutionEvaluation, type GraphDraft, type GraphProblem, type StudioExecutionMode,
 } from './agentGraphApi';
 
 const control = 'w-full rounded-md border border-subtle bg-canvas px-3 py-2 text-sm';
@@ -20,20 +22,29 @@ function readAttempt(key: string): Attempt | null {
   } catch { return null; }
 }
 
+function attemptKey(draft: GraphDraft, mode: StudioExecutionMode) {
+  return `studio-${mode}/${draft.tenantId}/${draft.graphId}/${draft.version}/${draft.specHash}`;
+}
+
+function providerTimeout(draft: GraphDraft, count = 1) {
+  return Math.min(10000, Math.floor(Math.min(60000, draft.limits.maxDurationSeconds * 1000) / count));
+}
+
 export default function AgentGraphExecutionPanel({ draft }: { draft: GraphDraft }) {
-  const storageKey = `studio-verification/${draft.tenantId}/${draft.graphId}/${draft.version}/${draft.specHash}`;
+  const [sessionGeneration] = useState(() => readSession().generation);
   const [status, setStatus] = useState<Awaited<ReturnType<typeof readStudioExecution>>>();
   const [statusAttempt, setStatusAttempt] = useState(0);
   const [problem, setProblem] = useState<GraphProblem>();
   const [busy, setBusy] = useState('');
   const [cancelling, setCancelling] = useState(false);
   const [selected, setSelected] = useState('');
-  const [attempt, setAttempt] = useState<Attempt | null>(() => readAttempt(storageKey));
+  const [attempt, setAttempt] = useState<Attempt | null>(null);
   const [result, setResult] = useState<ExecutionEvaluation>();
   const [suiteName, setSuiteName] = useState('');
   const [cases, setCases] = useState([firstCase]);
   const [executionInput, setExecutionInput] = useState('');
   const [output, setOutput] = useState<string>();
+  const [credentialSaved, setCredentialSaved] = useState(false);
   const action = useRef<AbortController>(null);
   const cancellation = useRef<AbortController>(null);
   const suiteSave = useRef<{ id: string; signature: string } | null>(null);
@@ -42,9 +53,12 @@ export default function AgentGraphExecutionPanel({ draft }: { draft: GraphDraft 
   useEffect(() => {
     const request = new AbortController();
     readStudioExecution(draft, request.signal).then((value) => {
-      if (!request.signal.aborted) setStatus(value);
+      if (request.signal.aborted) return;
+      setStatus(value);
+      setAttempt(value.mode ? readAttempt(attemptKey(draft, value.mode)) : null);
+      setResult((current) => current?.mode === value.mode ? current : undefined);
     }).catch((cause: unknown) => {
-      if (!request.signal.aborted) setProblem(graphProblem(cause, 'No pudimos consultar el estado de verificación.'));
+      if (!request.signal.aborted) setProblem(graphProblem(cause, 'No pudimos consultar la disponibilidad de ejecución.'));
     });
     return () => { request.abort(); action.current?.abort(); cancellation.current?.abort(); };
   }, [draft, statusAttempt]);
@@ -84,19 +98,39 @@ export default function AgentGraphExecutionPanel({ draft }: { draft: GraphDraft 
     });
   }
 
+  function saveCredential(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const key = String(new FormData(form).get('apiKey') ?? '').trim();
+    if (!key) return;
+    setCredentialSaved(false);
+    void perform('Guardando credencial…', async (signal) => {
+      await saveStudioOpenAiCredential(key, sessionGeneration, signal);
+      if (signal.aborted) return;
+      form.reset();
+      setCredentialSaved(true);
+      const value = await readStudioExecution(draft, signal);
+      if (!signal.aborted) setStatus(value);
+    });
+  }
+
   const suiteId = selected || attempt?.suiteId || status?.suites[0]?.id || '';
   const active = status?.active;
+  const mode = status?.mode;
+  const verification = mode === 'verification';
+  const canDispatch = verification || status?.availability === 'ready';
+  const suite = status?.suites.find(({ id }) => id === suiteId);
   const controlsBusy = Boolean(busy) || cancelling;
   const canCancel = attempt && (result ? result.status === 'running' : busy === evaluating);
   function evaluate() {
-    if (action.current || cancellation.current) return;
+    if (!mode || !suite || !canDispatch || action.current || cancellation.current) return;
     const reusable = attempt?.suiteId === suiteId && (!result || result.status === 'running');
     const next = reusable ? attempt : { runId: crypto.randomUUID(), suiteId };
     setAttempt(next);
     setResult(undefined);
-    try { sessionStorage.setItem(storageKey, JSON.stringify(next)); } catch { /* Browser storage is optional. */ }
+    try { sessionStorage.setItem(attemptKey(draft, mode), JSON.stringify(next)); } catch { /* Browser storage is optional. */ }
     void perform(evaluating, async (signal) => {
-      const evaluation = await studioEvaluation(draft, next, signal);
+      const evaluation = await studioEvaluation(draft, next, mode, signal, verification ? 1000 : providerTimeout(draft, suite.scenarioCount));
       if (!signal.aborted) {
         setResult((current) => current?.status === 'cancelled' && evaluation.status === 'running' ? current : evaluation);
       }
@@ -104,13 +138,13 @@ export default function AgentGraphExecutionPanel({ draft }: { draft: GraphDraft 
   }
 
   async function cancelEvaluation() {
-    if (!attempt || cancellation.current) return;
+    if (!mode || !attempt || cancellation.current) return;
     const request = new AbortController();
     cancellation.current = request;
     setCancelling(true);
     setProblem(undefined);
     try {
-      const evaluation = await cancelStudioEvaluation(draft, attempt, request.signal);
+      const evaluation = await cancelStudioEvaluation(draft, attempt, mode, request.signal);
       if (!request.signal.aborted) {
         setResult((current) => current?.runId === evaluation.runId && current.scenarios.length > evaluation.scenarios.length
           ? current : evaluation);
@@ -124,21 +158,24 @@ export default function AgentGraphExecutionPanel({ draft }: { draft: GraphDraft 
   }
 
   function publish() {
-    if (!result) return;
-    void perform('Publicando en verificación…', async (signal) => {
-      const publication = await publishStudioVerification(draft, result.runId, signal);
+    if (!mode || !canDispatch || !result || result.mode !== mode) return;
+    void perform('Publicando revisión…', async (signal) => {
+      const publication = await publishStudioRevision(draft, result.runId, mode, signal);
       if (!signal.aborted) setStatus((value) => value && { ...value, active: publication });
     });
   }
 
   function execute(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!mode || !canDispatch) return;
     const next = executionAttempt.current?.input === executionInput ? executionAttempt.current
       : { attemptId: crypto.randomUUID(), input: executionInput };
     executionAttempt.current = next;
     setOutput(undefined);
     void perform('Ejecutando prueba…', async (signal) => {
-      const text = await executeStudioVerification(draft, next, signal);
+      const text = await executeStudioRevision(draft, {
+        ...next, timeoutMs: verification ? 1000 : providerTimeout(draft),
+      }, mode, signal);
       if (signal.aborted) return;
       setOutput(text);
       executionAttempt.current = null;
@@ -154,8 +191,27 @@ export default function AgentGraphExecutionPanel({ draft }: { draft: GraphDraft 
         setStatusAttempt((value) => value + 1);
       } : undefined} />}
       {status?.mode === null && <p className="text-sm text-secondary">Publicación no disponible en este entorno.</p>}
-      {status?.mode === 'verification' && <>
-        <p className="text-sm text-secondary">Entorno de verificación · Revisión {draft.version}. La publicación aquí solo habilita pruebas dentro de este entorno.</p>
+      {status && mode && <>
+        <p className="text-sm text-secondary">{verification
+          ? `Entorno de verificación · Revisión ${draft.version}. La publicación aquí solo habilita pruebas dentro de este entorno.`
+          : `Proveedor OpenAI · Revisión ${draft.version}. El texto de prueba se envía al proveedor y consume cuota de la empresa.`}</p>
+        {!canDispatch && <p role="status" className="text-sm text-secondary">{status.availability === 'paused'
+          ? 'La ejecución con proveedor está pausada para esta empresa.'
+          : 'Configura una credencial de OpenAI para esta empresa antes de evaluar o ejecutar.'}</p>}
+        {!canDispatch && <button type="button" className={button} disabled={controlsBusy} onClick={() => {
+          setProblem(undefined);
+          setStatusAttempt((value) => value + 1);
+        }}>Actualizar disponibilidad</button>}
+        {mode === 'provider' && <details>
+          <summary className="cursor-pointer text-sm font-semibold">Credencial de OpenAI</summary>
+          <form className="mt-3 space-y-2" onSubmit={saveCredential}>
+            <label className="block text-sm">Clave de API
+              <input className={control} name="apiKey" type="password" autoComplete="new-password" required disabled={controlsBusy} />
+            </label>
+            <button className={button} disabled={controlsBusy}>Guardar credencial</button>
+            {credentialSaved && <p role="status" className="text-sm text-secondary">Credencial guardada.</p>}
+          </form>
+        </details>}
         {!status.profile?.compatible && <p role="status" className="text-sm text-secondary">
           Esta revisión requiere un grafo de texto compatible con el modelo {status.profile?.model} y un presupuesto suficiente. <code>{status.profile?.issue}</code>
         </p>}
@@ -186,9 +242,9 @@ export default function AgentGraphExecutionPanel({ draft }: { draft: GraphDraft 
           {status.suites.map((suite) => <option key={suite.id} value={suite.id}>{suite.name} · {suite.scenarioCount} casos</option>)}
         </select></label>
         <div className="flex flex-wrap gap-2">
-          <button className={button} type="button" disabled={controlsBusy || !status.profile?.compatible || !status.suites.some((suite) => suite.id === suiteId)} onClick={evaluate}>Evaluar revisión</button>
+          <button className={button} type="button" disabled={controlsBusy || !canDispatch || !status.profile?.compatible || !suite} onClick={evaluate}>Evaluar revisión</button>
           {attempt && <button className={button} type="button" disabled={controlsBusy} onClick={() => void perform('Consultando evaluación…', async (signal) => {
-            const evaluation = await studioEvaluation(draft, attempt, signal, true);
+            const evaluation = await studioEvaluation(draft, attempt, mode, signal);
             if (!signal.aborted) {
               setSelected(evaluation.suiteId);
               setResult(evaluation);
@@ -209,13 +265,15 @@ export default function AgentGraphExecutionPanel({ draft }: { draft: GraphDraft 
             <p className="text-secondary">El último caso iniciado aún no tiene un resultado confirmado.</p>
           )}
           <ul className="list-disc break-words pl-5">{result.scenarios.map((scenario, index) => <li key={scenario.scenarioId}>Caso {index + 1} · {outcomes[scenario.outcome]}</li>)}</ul>
-          <button className={button} type="button" disabled={controlsBusy || result.status !== 'completed' || !result.passed || (active?.version ?? 0) >= draft.version} onClick={publish}>Publicar en verificación</button>
+          <button className={button} type="button" disabled={controlsBusy || !canDispatch || result.status !== 'completed' || !result.passed || (active?.version ?? 0) >= draft.version} onClick={publish}>
+            {verification ? 'Publicar en verificación' : 'Publicar para proveedor'}
+          </button>
         </div>}
-        {active && <p role="status" className="text-sm font-medium">Revisión activa en verificación · {active.version}</p>}
+        {active && <p role="status" className="text-sm font-medium">{verification ? 'Revisión activa en verificación' : 'Revisión activa para proveedor'} · {active.version}</p>}
         {active?.version === draft.version && <form className="space-y-2" onSubmit={execute}>
           <label className="block text-sm">Entrada para la revisión publicada<textarea className={control} required maxLength={4096}
             value={executionInput} onChange={(event) => setExecutionInput(event.target.value)} /></label>
-          <button className={button} disabled={controlsBusy}>Ejecutar revisión publicada</button>
+          <button className={button} disabled={controlsBusy || !canDispatch}>Ejecutar revisión publicada</button>
           {output !== undefined && <p role="status" className="whitespace-pre-wrap break-words text-sm">{output}</p>}
         </form>}
         {busy && !(busy === evaluating && result?.status === 'cancelled') && <p role="status" className="text-sm text-secondary">{busy}</p>}

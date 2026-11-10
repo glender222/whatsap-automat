@@ -4,6 +4,7 @@ import {
 import { TenantScopedUoW } from '../../../db/TenantScopedUoW';
 import { compileEvalTextPattern, SimulationInputError } from '../eval/AgentEvalService';
 import { AiQuotaCapacityError } from '../gateway/AiQuotaReservationStore';
+import { AiDispatchUnavailableError } from '../gateway/TenantAiDispatchPolicy';
 import { type BoundedAgentDispatch, preflightBoundedAgentDispatch } from './BoundedAgentDispatch';
 import { loadDraft } from './AgentStudioDrafts';
 import { executionAttemptId, executionRunIdPattern, loadExecutionSuite, type ExecutionMode } from './AgentExecutionEvidence';
@@ -269,7 +270,8 @@ export class AgentExecutionEvaluator {
         latencyMs, failedAssertions,
       };
     } catch (error) {
-      return { scenarioId, outcome: error instanceof AiQuotaCapacityError ? 'blocked' : 'uncertain' };
+      const blocked = error instanceof AiQuotaCapacityError || error instanceof AiDispatchUnavailableError;
+      return { scenarioId, outcome: blocked ? 'blocked' : 'uncertain' };
     }
   }
 }

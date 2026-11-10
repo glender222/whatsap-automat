@@ -30,6 +30,7 @@ async function main() {
     const outboundId = process.argv.includes('--outbound') ? 'wamid.' + randomUUID() : undefined;
     const send = process.argv.includes('--send');
     const studio = process.argv.includes('--studio');
+    const studioProvider = studio && process.env.STUDIO_PROVIDER_FIXTURE === '1';
     if (send || studio) {
       const provider = new URL((send ? process.env.PRODUCT_GRAPH_FIXTURE_URL : process.env.STUDIO_FIXTURE_URL) ?? '');
       assert.equal(provider.protocol, 'http:');
@@ -52,6 +53,11 @@ async function main() {
           ON CONFLICT (tenant_id) DO UPDATE SET monthly_token_limit = EXCLUDED.monthly_token_limit,
             monthly_cost_limit_micro_usd = EXCLUDED.monthly_cost_limit_micro_usd
         `, [data.user.companyId]));
+      }
+      if (studioProvider) {
+        const { tenantAiDispatchPolicy } = await import('../../services/ai/gateway/TenantAiDispatchPolicy');
+        await tenantAiDispatchPolicy.transition(data.user.companyId, 'draining');
+        await tenantAiDispatchPolicy.transition(data.user.companyId, 'strict');
       }
       if (outboundId) {
         await new MetaInboxStore({ companyId: data.user.companyId }).persistOutbound({

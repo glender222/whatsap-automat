@@ -27,7 +27,7 @@ import { AgentExecutionEvaluator } from '../services/ai/studio/AgentExecutionEva
 import { executionAttemptId } from '../services/ai/studio/AgentExecutionEvidence';
 import { AgentStudioPublications, dispatchPublishedAgent } from '../services/ai/studio/AgentStudioPublications';
 import { saveDraft } from '../services/ai/studio/AgentStudioDrafts';
-import { createStudioProviderExecution, createStudioVerification } from '../services/ai/studio/StudioVerification';
+import { createStudioProviderAccess, createStudioVerification } from '../services/ai/studio/StudioVerification';
 import createAiRoutes from '../routes/ai.routes';
 import createAgentStudioRoutes from '../routes/agentStudioRoutes';
 
@@ -779,7 +779,7 @@ test('tenant provider admission fences legacy work and shares the authenticated 
     return fetch(endpoint, init);
   });
   const gateway = new ModelGateway(undefined, undefined, undefined, undefined, undefined, execution.admission);
-  const studio = createStudioProviderExecution(uow, execution);
+  const providerAccess = createStudioProviderAccess(uow, execution);
   const byok = new ByokService(undefined, uow);
 
   const enteredLegacy = Promise.withResolvers<void>();
@@ -802,7 +802,9 @@ test('tenant provider admission fences legacy work and shares the authenticated 
   try {
     await Promise.race([enteredLegacy.promise, legacy.then(() => assert.fail('Legacy dispatch ended before the cutover'))]);
     assert.equal(await otherPolicy.mode(bravo), 'legacy');
+    assert.equal(await providerAccess(bravo), null);
     await otherPolicy.transition(alpha, 'draining');
+    assert.equal(await providerAccess(alpha), null);
     await assert.rejects(execution.policy.withLegacyDispatch(alpha, async () => assert.fail('Draining admitted new legacy work')),
       { code: 'AI_ADMISSION_UNAVAILABLE' });
     await assert.rejects(otherPolicy.transition(alpha, 'strict'), { code: 'AI_LEGACY_DISPATCH_IN_FLIGHT' });
@@ -817,7 +819,9 @@ test('tenant provider admission fences legacy work and shares the authenticated 
 
   const graph = revision(alpha, { limits: { maxDurationSeconds: 10 } });
   const { graphId, entryNodeId, nodes, edges, policyRef, limits } = graph;
-  await uow.run(alpha, (db) => saveDraft(db, alpha, 1, graphId, { entryNodeId, nodes, edges, policyRef, limits }, true));
+  for (const id of [alpha, bravo]) {
+    await uow.run(id, (db) => saveDraft(db, id, 1, graphId, { entryNodeId, nodes, edges, policyRef, limits }, true));
+  }
   const suiteId = randomUUID();
   await uow.run(alpha, (db) => db.query(
     'INSERT INTO agent_eval_suites (id, tenant_id, agent_graph_id, name, scenarios) VALUES ($1, $2, $3, $4, $5)',
@@ -828,6 +832,7 @@ test('tenant provider admission fences legacy work and shares the authenticated 
   const app = express();
   app.use(express.json());
   app.use('/api/v1/ai', createAiRoutes({ gateway, byokService: byok }));
+  app.use('/api/v1/agent-graphs', createAgentStudioRoutes(uow, undefined, providerAccess));
   const server = app.listen(0, '127.0.0.1');
   await once(server, 'listening');
   t.after(() => new Promise<void>((resolve) => {
@@ -837,15 +842,18 @@ test('tenant provider admission fences legacy work and shares the authenticated 
   const address = server.address();
   assert.ok(address && typeof address === 'object');
   const jwt = require('jsonwebtoken') as { sign(claims: object, key: string): string };
-  const post = async (tenantId: number, path: string, data: object, rol = 'ADMIN') => {
-    const response = await fetch(`http://127.0.0.1:${address.port}/api/v1/ai${path}`, {
-      method: 'POST',
+  const request = async (tenantId: number, path: string, data?: object, rol = 'ADMIN') => {
+    const response = await fetch(`http://127.0.0.1:${address.port}/api/v1${path}`, {
+      method: data ? 'POST' : 'GET',
       headers: { authorization: 'Bearer ' + jwt.sign({ companyId: tenantId, userId: 1, rol }, process.env.JWT_SECRET!),
         'content-type': 'application/json' },
-      body: JSON.stringify(data),
+      body: data ? JSON.stringify(data) : undefined,
     });
     return { status: response.status, body: await response.json() };
   };
+  const post = (tenantId: number, path: string, data: object, rol?: string) => request(tenantId, '/ai' + path, data, rol);
+  const studio = (tenantId: number, path: string, data?: object, rol?: string) =>
+    request(tenantId, `/agent-graphs/${graphId}${path}?version=1`, data, rol);
   const complete = (tenantId: number, input: string) => post(tenantId, '/completions', {
     schemaVersion: 1, tenantId: tenantId === alpha ? bravo : alpha, provider: 'openai', model, maxTokens: 40, timeoutMs: 5000,
     messages: [{ role: 'system', content: 'Fixture prompt' }, { role: 'user', content: input }],
@@ -857,13 +865,20 @@ test('tenant provider admission fences legacy work and shares the authenticated 
     assert.equal(denied.body.error, 'ADMIN_REQUIRED');
   }
   assert.equal(requests.length, 0);
+  assert.equal((await studio(alpha, '/execution', undefined, 'EMPLEADO')).status, 403);
+  assert.equal((await studio(alpha, '/execution')).body.availability, 'credential_required');
+  assert.equal((await studio(alpha, '/evaluations', { suiteId, runId: randomUUID(), timeoutMs: 1000 })).body.code,
+    'STUDIO_PROVIDER_CREDENTIAL_REQUIRED');
   assert.equal((await post(alpha, '/providers', fixtureKey)).status, 200);
+  assert.equal((await studio(alpha, '/execution')).body.availability, 'ready');
 
-  const command = { tenantId: alpha, graphId, version: 1, suiteId, runId: randomUUID(), timeoutMs: 1000 };
+  const command = { suiteId, runId: randomUUID(), timeoutMs: 1000 };
   const ordinary = complete(alpha, 'Alfa en curso');
   try {
     await Promise.race([received.promise, ordinary.then(({ status, body }) => assert.fail(`Completion ended before the provider: ${status} ${body.error}`))]);
-    const blocked = await studio.evaluator.evaluate(command);
+    const response = await studio(alpha, '/evaluations', command);
+    assert.equal(response.status, 200);
+    const blocked = response.body;
     assert.equal(blocked.mode, 'provider');
     assert.equal(blocked.status, 'failed');
     assert.deepEqual(blocked.scenarios.map(({ outcome }) => outcome), ['blocked']);
@@ -879,36 +894,49 @@ test('tenant provider admission fences legacy work and shares the authenticated 
     assert.equal((await ordinary).status, 200);
   }
 
-  const evaluated = await studio.evaluator.evaluate({ ...command, runId: randomUUID() });
+  const evaluation = { ...command, runId: randomUUID() };
+  const { status: evaluationStatus, body: evaluated } = await studio(alpha, '/evaluations', evaluation);
+  assert.equal(evaluationStatus, 200);
   assert.equal(evaluated.passed, true);
+  assert.deepEqual((await studio(alpha, '/evaluations', evaluation)).body, evaluated);
+  assert.equal((await studio(bravo, '/evaluations/' + evaluation.runId)).status, 404);
+  assert.equal((await studio(bravo, '/publish', { evaluationId: evaluation.runId })).status, 409);
+  const publication = await studio(alpha, '/publish', { evaluationId: evaluation.runId });
+  assert.equal(publication.status, 200);
+  assert.equal(publication.body.mode, 'provider');
+  assert.deepEqual((await studio(alpha, '/execution')).body.active, publication.body);
+  assert.equal((await studio(bravo, '/execution')).body.active, null);
+  assert.equal(await uow.run(alpha, (db) => new AgentStudioPublications('verification').loadActive(db, alpha, graphId)), null);
+  const attempt = { attemptId: randomUUID(), input: 'Ejecución publicada Alfa', timeoutMs: 1000 };
+  assert.equal((await studio(alpha, '/execute', attempt)).body.execution.status, 'completed');
+  assert.equal((await studio(alpha, '/execute', attempt)).body.execution.status, 'not_dispatched');
+  assert.equal((await studio(bravo, '/execute', attempt)).status, 409);
   assert.deepEqual(transportHeaders, [
     { input: 'Alfa en curso', authorization: 'Bearer fixture-alpha' },
     { input: 'Bravo independiente', authorization: 'Bearer fixture-bravo' },
     { input: 'Evaluación Alfa', authorization: 'Bearer fixture-alpha' },
+    { input: 'Ejecución publicada Alfa', authorization: 'Bearer fixture-alpha' },
   ]);
   const ledger = new TokenCostLedger(uow);
   const usageA = await ledger.query(alpha);
   const usageB = await ledger.query(bravo);
   assert.deepEqual(usageA.items.map(({ operation, totalTokens }) => [operation, totalTokens]),
-    [['eval', 16], ['completion', 16], ['completion', 9]]);
+    [['completion', 16], ['eval', 16], ['completion', 16], ['completion', 9]]);
   assert.deepEqual(usageB.items.map(({ operation, totalTokens }) => [operation, totalTokens]), [['completion', 16]]);
-  const publication = await uow.run(alpha, (db) => studio.publications.publish(db, {
-    tenantId: alpha, actorId: 1, graphId, version: 1, evaluationId: evaluated.runId,
-  }));
-  assert.equal(publication?.mode, 'provider');
-  assert.equal(await uow.run(alpha, (db) => new AgentStudioPublications('verification').loadActive(db, alpha, graphId)), null);
-  assert.equal(await studio.evaluator.read(bravo, graphId, 1, evaluated.runId), null);
   const reservation = {
     id: randomUUID(), requestHash: 'a'.repeat(64), operation: 'completion' as const, provider: 'openai', model,
     maxTokens: 400040, maxCostMicroUsd: 300180,
   };
   await execution.quota.reserve(alpha, reservation);
   await otherPolicy.transition(alpha, 'paused');
+  assert.equal((await studio(alpha, '/execution')).body.availability, 'paused');
+  assert.deepEqual((await studio(alpha, '/evaluations/' + evaluation.runId)).body, evaluated);
+  assert.equal((await studio(alpha, '/execute', { ...attempt, attemptId: randomUUID() })).body.code, 'STUDIO_PROVIDER_PAUSED');
   await assert.rejects(execution.quota.claim(alpha, reservation.id, reservation.requestHash), { code: 'AI_ADMISSION_UNAVAILABLE' });
   assert.equal(await execution.quota.release(alpha, reservation.id, reservation.requestHash), true);
   assert.equal((await complete(alpha, 'Alfa en pausa')).status, 503);
   await assert.rejects(otherPolicy.transition(alpha, 'legacy'), { code: 'AI_ADMISSION_TRANSITION' });
-  assert.equal(requests.length, 3);
+  assert.equal(requests.length, 4);
 });
 
 test('a killed legacy dispatcher leaves a company cutover blocked for reconciliation', {

@@ -5,6 +5,14 @@ import { provisionCompanies } from './fixtures/provisionCompanies';
 const backend = process.env.PRODUCT_SMOKE_URL;
 test.skip(!backend || !process.env.STUDIO_FIXTURE_URL, 'Requires the local Studio verification backend and isolated PostgreSQL');
 
+const graph = {
+  entryNodeId: 'agent', policyRef: 'qa', nodes: [
+    { id: 'agent', kind: 'agent', config: { provider: 'openai', model: 'gpt-5.4-mini-2026-03-17', prompt: 'Contexto QA', maxTokens: 40 } },
+    { id: 'end', kind: 'end', config: {} },
+  ], edges: [{ id: 'finish', from: 'agent', to: 'end' }],
+  limits: { maxSteps: 4, maxDelegations: 0, maxParallelNodes: 1, maxDurationSeconds: 10, maxModelTokens: 900000, maxCostMicroUsd: 700000 },
+};
+
 test('two workspaces evaluate, publish and execute only their verified revision', async ({ browser, request }) => {
   const companies = provisionCompanies('--studio');
   const contexts = await Promise.all([
@@ -15,13 +23,6 @@ test('two workspaces evaluate, publish and execute only their verified revision'
   const apiPath = `${backend}/api/v1/agent-graphs`;
   const pagePath = `/dashboard/ia/estudio/grafos/${graphId}`;
   const headers = companies.map((company) => ({ authorization: `Bearer ${company.auth.accessToken}` }));
-  const graph = {
-    entryNodeId: 'agent', policyRef: 'qa', nodes: [
-      { id: 'agent', kind: 'agent', config: { provider: 'openai', model: 'gpt-5.4-mini-2026-03-17', prompt: 'Contexto QA', maxTokens: 40 } },
-      { id: 'end', kind: 'end', config: {} },
-    ], edges: [{ id: 'finish', from: 'agent', to: 'end' }],
-    limits: { maxSteps: 4, maxDelegations: 0, maxParallelNodes: 1, maxDurationSeconds: 10, maxModelTokens: 900000, maxCostMicroUsd: 700000 },
-  };
   try {
     const [alpha, bravo] = await Promise.all(contexts.map(async (context, index) => {
       const response = await request.post(apiPath, { headers: headers[index], data: { ...graph, graphId } });
@@ -121,3 +122,85 @@ test('two workspaces evaluate, publish and execute only their verified revision'
     await Promise.all(contexts.map((context) => context.close()));
   }
 });
+
+if (process.env.STUDIO_PROVIDER_FIXTURE === '1') {
+  test('provider mode requires a company credential and runs its published revision from Studio', async ({ browser, request }) => {
+    const companies = provisionCompanies('--studio');
+    const graphId = 'qa-provider-' + randomUUID();
+    const apiPath = `${backend}/api/v1/agent-graphs`;
+    const pagePath = `/dashboard/ia/estudio/grafos/${graphId}`;
+    const contexts = await Promise.all(companies.map(() => browser.newContext({ viewport: { width: 390, height: 720 } })));
+    try {
+      const [alpha, bravo] = await Promise.all(companies.map(async ({ auth }, index) => {
+        const headers = { authorization: `Bearer ${auth.accessToken}` };
+        const response = await request.post(apiPath, { headers, data: { ...graph, graphId } });
+        expect(response.status()).toBe(201);
+        const draft = await response.json();
+        const legacyKey = `studio-verification/${draft.tenantId}/${graphId}/1/${draft.specHash}`;
+        const attempt = { runId: randomUUID(), suiteId: randomUUID() };
+        const context = contexts[index];
+        await context.addInitScript(({ auth, legacyKey, attempt }) => {
+          localStorage.setItem('auth', JSON.stringify(auth));
+          sessionStorage.setItem(legacyKey, JSON.stringify(attempt));
+        }, { auth, legacyKey, attempt });
+        const page = await context.newPage();
+        await page.goto(pagePath);
+        const panel = page.getByRole('region', { name: 'Evaluación y publicación' });
+        await expect(panel.getByText(/Proveedor OpenAI/)).toBeVisible();
+        await expect(panel.getByText(/Configura una credencial de OpenAI/)).toBeVisible();
+        await expect(panel.getByRole('button', { name: 'Evaluar revisión' })).toBeDisabled();
+        await expect(panel.getByRole('button', { name: 'Consultar evaluación guardada' })).toHaveCount(0);
+        return { page, panel, headers };
+      }));
+
+      await alpha.panel.getByText('Credencial de OpenAI', { exact: true }).click();
+      const key = alpha.panel.getByLabel('Clave de API');
+      await key.fill('fixture-studio-provider');
+      await alpha.panel.getByRole('button', { name: 'Guardar credencial' }).press('Enter');
+      await expect(alpha.panel.getByText('Credencial guardada.')).toBeVisible();
+      await expect(key).toHaveValue('');
+      await expect(alpha.panel.getByText(/Configura una credencial de OpenAI/)).toHaveCount(0);
+      await alpha.panel.getByText('Crear suite de texto', { exact: true }).click();
+      await alpha.panel.getByRole('textbox', { name: 'Nombre de la suite' }).fill('Suite proveedor Alfa');
+      await alpha.panel.getByRole('textbox', { name: 'Entrada de prueba' }).fill('Entrada proveedor Alfa');
+      await alpha.panel.getByRole('textbox', { name: 'Patrón esperado' }).fill('Entrada proveedor Alfa$');
+      await alpha.panel.getByRole('button', { name: 'Guardar suite' }).press('Enter');
+      const evaluate = alpha.panel.getByRole('button', { name: 'Evaluar revisión' });
+      await expect(evaluate).toBeEnabled();
+      const receipt = alpha.page.waitForResponse((response) => response.url().endsWith('/evaluations?version=1') &&
+        response.request().method() === 'POST', { timeout: 12000 });
+      await evaluate.press('Enter');
+      const evaluation = await receipt;
+      expect(evaluation.status()).toBe(200);
+      const { runId, mode } = await evaluation.json();
+      expect(mode).toBe('provider');
+      await alpha.page.reload();
+      await alpha.panel.getByRole('button', { name: 'Consultar evaluación guardada' }).press('Enter');
+      await expect(alpha.panel.getByText('Evaluación aprobada', { exact: true })).toBeVisible();
+      await alpha.panel.getByRole('button', { name: 'Publicar para proveedor' }).press('Enter');
+      await expect(alpha.panel.getByText('Revisión activa para proveedor · 1')).toBeVisible();
+      await alpha.panel.getByRole('textbox', { name: 'Entrada para la revisión publicada' }).fill('Publicación Alfa');
+      await alpha.panel.getByRole('button', { name: 'Ejecutar revisión publicada' }).press('Enter');
+      await expect(alpha.panel.getByText('Resultado de prueba: Publicación Alfa')).toBeVisible();
+
+      const foreign = await request.get(`${apiPath}/${graphId}/evaluations/${runId}?version=1`, { headers: bravo.headers });
+      expect(foreign.status()).toBe(404);
+      await bravo.page.reload();
+      await expect(bravo.panel.getByText(/Configura una credencial de OpenAI/)).toBeVisible();
+      await expect(bravo.panel.getByRole('button', { name: 'Evaluar revisión' })).toBeDisabled();
+      await expect(bravo.panel.getByText(/Revisión activa para proveedor/)).toHaveCount(0);
+
+      await alpha.panel.getByText('Credencial de OpenAI', { exact: true }).click();
+      await key.fill('fixture-studio-provider');
+      await key.evaluate((input, auth) => {
+        localStorage.setItem('auth', JSON.stringify(auth));
+        (input as HTMLInputElement).form?.requestSubmit();
+      }, companies[1].auth);
+      await expect(alpha.panel.getByRole('alert')).toHaveText(/No pudimos confirmar la operación/);
+      const bravoStatus = await request.get(`${apiPath}/${graphId}/execution?version=1`, { headers: bravo.headers });
+      expect((await bravoStatus.json()).availability).toBe('credential_required');
+    } finally {
+      await Promise.all(contexts.map((context) => context.close()));
+    }
+  });
+}

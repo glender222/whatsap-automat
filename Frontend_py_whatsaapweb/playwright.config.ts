@@ -1,6 +1,10 @@
 import { defineConfig, devices } from '@playwright/test';
 
-const origin = 'http://127.0.0.1:4178';
+const port = Number(process.env.PLAYWRIGHT_PORT ?? 4178);
+if (!Number.isInteger(port) || port < 1024 || port > 65535) {
+  throw new Error('PLAYWRIGHT_PORT must be a local unprivileged port');
+}
+const origin = `http://127.0.0.1:${port}`;
 const inboxApi = process.env.PRODUCT_SMOKE_URL ? new URL(process.env.PRODUCT_SMOKE_URL) : null;
 if (inboxApi && (inboxApi.protocol !== 'http:' || inboxApi.hostname !== '127.0.0.1')) {
   throw new Error('PRODUCT_SMOKE_URL must point to a local test backend');
@@ -16,7 +20,7 @@ export default defineConfig({
   } }],
   use: { baseURL: origin, trace: 'retain-on-failure', screenshot: 'only-on-failure' },
   webServer: {
-    command: 'npm run dev -- --host 127.0.0.1 --port 4178 --strictPort',
+    command: `npm run dev -- --host 127.0.0.1 --port ${port} --strictPort`,
     url: origin,
     env: { VITE_API_URL: (inboxApi?.origin ?? origin) + '/api' },
   },
