@@ -175,6 +175,7 @@ export function messageProblem(cause: unknown, kind?: 'text' | 'attachment'): Me
 }
 
 export function deliveryLabel(state: string | undefined) {
+  if (state === 'sent') return 'Enviado';
   if (state === 'accepted' || state === 'provider_accepted' || state === 'dispatched') return 'Aceptado por WhatsApp';
   if (state === 'delivered') return 'Entregado';
   if (state === 'read') return 'Leído';

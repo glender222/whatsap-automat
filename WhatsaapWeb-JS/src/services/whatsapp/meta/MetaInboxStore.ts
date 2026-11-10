@@ -5,6 +5,7 @@ import { TenantScopedUoW } from '../../../db/TenantScopedUoW';
 import { Queryable } from '../../../shared/UnitOfWorkPort';
 import { applyCanonicalMetaStatuses, correlateCanonicalMetaStatus, isMetaDeliveryStatusAdvance, lockMetaReceipt } from './MetaCanonicalReceipt';
 import { applyCampaignMetaReceipt, campaignCallbackPrefix } from '../../campaigns/CampaignMetaReceipt';
+import { emitConversation } from '../../../sockets/socketEmitter';
 
 function toUnixSeconds(value: unknown): number | null {
   if (!value) return null;
@@ -546,7 +547,7 @@ export class MetaInboxStore {
   }
 
   async persistStatus({ status, metadata, value }: any): Promise<Record<string, unknown>> {
-    return this.tenantWork.run(this.companyId, async (client) => {
+    const { duplicate, changedChatId } = await this.tenantWork.run(this.companyId, async (client) => {
       const providerMessageId = status.id;
       if (typeof providerMessageId === 'string') {
         await lockMetaReceipt(client, this.companyId, providerMessageId);
@@ -589,7 +590,7 @@ export class MetaInboxStore {
         ]
       );
       if (!event.rows[0]) {
-        return { duplicate: true };
+        return { duplicate: true, changedChatId: null };
       }
 
       const eventId = String(event.rows[0].id);
@@ -601,12 +602,15 @@ export class MetaInboxStore {
       }
       const canonical = !campaignCallback && typeof providerMessageId === 'string' &&
         await applyCanonicalMetaStatuses(client, this.companyId, providerMessageId, eventId);
-      if (!canonical && !campaignCallback && !canonicalCallback && typeof providerMessageId === 'string') {
-        await this.applyLegacyReceipts(client, providerMessageId, eventId);
-      }
+      const legacy = !canonical && !campaignCallback && !canonicalCallback && typeof providerMessageId === 'string'
+        ? await this.applyLegacyReceipts(client, providerMessageId, eventId) : undefined;
       await client.query(`UPDATE whatsapp_webhook_events SET processed_at = NOW(), processing_status = 'processed' WHERE id = $1`, [event.rows[0].id]);
-      return { duplicate: false };
+      return { duplicate: false, changedChatId: canonical ? canonical.changedChatId : legacy?.changedChatId };
     });
+    if (changedChatId) {
+      emitConversation(this.companyId, changedChatId, 'conversation.delivery_changed', { chatId: changedChatId });
+    }
+    return { duplicate };
   }
 
   // Both the send and webhook hold the provider ID lock. Replay only receipts
@@ -633,6 +637,7 @@ export class MetaInboxStore {
       ORDER BY received_at, id
     `, [this.companyId, providerId, eventId, message.phone_number_id, message.external_contact_id, campaignCallbackPrefix]);
 
+    const originalStatus = message.status;
     for (const { status, received_at: receivedAt } of receipts) {
       const occurredAt = /^\d{1,11}$/.test(String(status.timestamp))
         ? new Date(Number(status.timestamp) * 1000)
@@ -657,7 +662,7 @@ export class MetaInboxStore {
         status.errors?.[0]?.title || status.errors?.[0]?.message || null, this.companyId]);
       if (advances) message.status = status.status;
     }
-    return message.status;
+    return { status: message.status, changedChatId: message.status === originalStatus ? null : message.external_contact_id };
   }
 
   async persistOutbound(input: {
@@ -747,7 +752,7 @@ export class MetaInboxStore {
       );
       const row = result.rows[0];
       if (input.providerMessageId) {
-        row.status = await this.applyLegacyReceipts(client, input.providerMessageId) ?? row.status;
+        row.status = (await this.applyLegacyReceipts(client, input.providerMessageId))?.status ?? row.status;
       }
       const payload = {
         id: input.providerMessageId || String(row.id),

@@ -560,7 +560,9 @@ const MessagesPanel: React.FC<MessagesPanelProps> = ({
                         </div>
                       )}
                       <div className="mt-1 flex flex-wrap justify-end gap-x-2 text-xs text-gray-600 dark:text-gray-300">
-                        {item.messageItem.fromMe && deliveryLabel(item.messageItem.status) && <span>{deliveryLabel(item.messageItem.status)}</span>}
+                        {item.messageItem.fromMe && deliveryLabel(item.messageItem.status) && (
+                          <span data-testid="message-delivery-status">{deliveryLabel(item.messageItem.status)}</span>
+                        )}
                         <span>{new Date(item.messageItem.timestamp * 1000).toLocaleString()}</span>
                       </div>
                     </div>

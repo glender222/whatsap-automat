@@ -12,12 +12,15 @@ export function useMessagesManagement() {
   const [loadingMessages, setLoadingMessages] = useAtom(loadingMessagesAtom);
   const setChats = useSetAtom(chatsAtom);
   const selectedChatRef = useRef(selectedChat);
+  const loadedHistory = useRef<string | null>(null);
+  const historyRequest = useRef<{ chatId: string; arrivals: Set<string> } | null>(null);
   const [messageError, setMessageError] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
 
   const handleNewMessage = useCallback((incoming: WhatsAppMessage) => {
     if (incoming.chatId !== selectedChatRef.current) return;
 
+    if (historyRequest.current?.chatId === incoming.chatId) historyRequest.current.arrivals.add(incoming.id);
     setMessages((current) => {
       if (current.some((message) => message.id === incoming.id)) return current;
       const incomingTime = normalizeMessageTimestamp(incoming.timestamp);
@@ -36,6 +39,7 @@ export function useMessagesManagement() {
     const nextChat = chatId || null;
     if (selectedChatRef.current === nextChat) return;
     selectedChatRef.current = nextChat;
+    loadedHistory.current = null;
     setSelectedChat(nextChat);
     setMessages([]);
     setMessageError(null);
@@ -51,19 +55,25 @@ export function useMessagesManagement() {
   useEffect(() => {
     if (!selectedChat) return;
     const controller = new AbortController();
+    const request = { chatId: selectedChat, arrivals: new Set<string>() };
+    historyRequest.current = request;
     const isCurrent = () => !controller.signal.aborted && selectedChatRef.current === selectedChat;
-    setLoadingMessages(true);
+    if (loadedHistory.current !== selectedChat) setLoadingMessages(true);
     setMessageError(null);
 
     getMessagesByChat(selectedChat, 50, controller.signal)
       .then((history) => {
         if (!isCurrent()) return;
+        loadedHistory.current = selectedChat;
         const ids = new Set(history.map((message) => message.id));
         const newest = Math.max(0, ...history.map((message) => normalizeMessageTimestamp(message.timestamp)));
+        // A socket event received during this request can be newer than the snapshot
+        // even if both messages have the same provider timestamp.
         setMessages((current) => [
           ...history,
           ...current.filter((message) => message.chatId === selectedChat && !ids.has(message.id) &&
-            (message.id.startsWith('temp-file-') || normalizeMessageTimestamp(message.timestamp) > newest)),
+            (request.arrivals.has(message.id) || message.id.startsWith('temp-file-') ||
+              normalizeMessageTimestamp(message.timestamp) > newest)),
         ]);
       })
       .catch((error: unknown) => {
@@ -72,10 +82,14 @@ export function useMessagesManagement() {
         }
       })
       .finally(() => {
+        if (historyRequest.current === request) historyRequest.current = null;
         if (isCurrent()) setLoadingMessages(false);
       });
 
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      if (historyRequest.current === request) historyRequest.current = null;
+    };
   }, [revision, selectedChat, setLoadingMessages, setMessages]);
 
   const addOptimisticMessage = useCallback((message: WhatsAppMessage) => {

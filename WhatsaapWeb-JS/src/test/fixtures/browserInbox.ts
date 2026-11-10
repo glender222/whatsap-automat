@@ -12,10 +12,12 @@ async function main() {
 
   const { default: pool } = await import('../../config/database');
   const { MetaAccountStore } = await import('../../services/whatsapp/meta/MetaAccountStore');
+  const { MetaInboxStore } = await import('../../services/whatsapp/meta/MetaInboxStore');
   try {
     const store = new MetaAccountStore();
     const firstLine = randomInt(200_000_000_000_000, 300_000_000_000_000);
     const companies = [];
+    const outboundId = process.argv.includes('--outbound') ? 'wamid.' + randomUUID() : undefined;
     for (const [index, nombre] of ['Alfa', 'Bravo'].entries()) {
       const response = await fetch(url.origin + '/api/auth/register', {
         method: 'POST',
@@ -27,8 +29,15 @@ async function main() {
       const { data } = await response.json();
       const phoneNumberId = String(firstLine + index);
       await store.upsertConnection(data.user.companyId, { phoneNumberId, status: 'configured' });
+      if (outboundId) {
+        await new MetaInboxStore({ companyId: data.user.companyId }).persistOutbound({
+          chatId: '12025550145', body: 'Envío de ' + nombre, messageType: 'text',
+          providerMessageId: outboundId, phoneNumberId, raw: {},
+        });
+      }
       companies.push({
         phoneNumberId,
+        outboundId,
         auth: {
           browserSessionId: randomUUID(),
           accessToken: data.accessToken,

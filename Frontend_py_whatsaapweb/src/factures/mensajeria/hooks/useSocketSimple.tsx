@@ -18,10 +18,13 @@ interface UseSocketSimpleProps {
   onChatUpdate: (updater: (prevChats: ChatInfo[]) => ChatInfo[]) => void;
   onConnect: () => void;
   onUnlistedChat: () => void;
+  onHistoryInvalidated: () => void;
   chats: ChatInfo[];
 }
 
-export const useSocketSimple = ({ selectedChat, onNewMessage, onChatUpdate, onConnect, onUnlistedChat, chats }: UseSocketSimpleProps) => {
+export const useSocketSimple = ({
+  selectedChat, onNewMessage, onChatUpdate, onConnect, onUnlistedChat, onHistoryInvalidated, chats,
+}: UseSocketSimpleProps) => {
   const socketRef = useRef<Socket | null>(null);
   const lastReadMarkRef = useRef<Record<string, number>>({});
 
@@ -163,11 +166,17 @@ export const useSocketSimple = ({ selectedChat, onNewMessage, onChatUpdate, onCo
     };
     socket.on('message-replaced', handleMessageReplaced);
 
+    const handleDeliveryChanged = (event: { chatId?: string } | undefined) => {
+      if (socketService.getSocket() === socket && selectedChat && event?.chatId === selectedChat) onHistoryInvalidated();
+    };
+    socket.on('conversation.delivery_changed', handleDeliveryChanged);
+
     return () => {
       socket.off('message', handleMessage);
       socket.off('message-replaced', handleMessageReplaced);
+      socket.off('conversation.delivery_changed', handleDeliveryChanged);
     };
-  }, [selectedChat, onNewMessage, onChatUpdate, onUnlistedChat, chats]);
+  }, [selectedChat, onNewMessage, onChatUpdate, onUnlistedChat, onHistoryInvalidated, chats]);
 
   useEffect(() => {
     const socket = socketRef.current;

@@ -72,6 +72,7 @@ export default function Inicio() {
   useSocketSimple({
     selectedChat, chats, onNewMessage: handleNewMessage, onChatUpdate: setChats,
     onConnect: refreshOnConnection, onUnlistedChat: reloadUnlistedChats,
+    onHistoryInvalidated: reloadMessages,
   });
 
   useEffect(() => {

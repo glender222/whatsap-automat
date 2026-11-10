@@ -66,14 +66,14 @@ export async function correlateCanonicalMetaStatus(
 
 export async function applyCanonicalMetaStatuses(
   db: Queryable, tenantId: number, providerId: string, eventId: string | null = null,
-): Promise<boolean> {
+): Promise<false | { changedChatId: string | null }> {
   const { rows: [claim] } = await db.query(`
-    SELECT c.message_id, c.phone_number_id, c.recipient_id, c.claimed_at, c.callback_ref, m.status
+    SELECT c.message_id, c.phone_number_id, c.recipient_id, c.claimed_at, c.callback_ref, m.status, m.external_contact_id
     FROM conversation_send_claims c LEFT JOIN messages m ON m.company_id = c.tenant_id AND m.id = c.message_id
     WHERE c.tenant_id = $1 AND c.provider_message_id = $2
   `, [tenantId, providerId]);
   if (!claim) return false;
-  if (!claim.message_id || !claim.status) return true;
+  if (!claim.message_id || !claim.status) return { changedChatId: null };
 
   const { rows: events } = await db.query(`
     SELECT id, payload_json->'status' AS status, received_at
@@ -111,6 +111,7 @@ export async function applyCanonicalMetaStatuses(
   }
   if (best !== claim.status) {
     await db.query('UPDATE messages SET status = $3 WHERE company_id = $1 AND id = $2', [tenantId, claim.message_id, best]);
+    return { changedChatId: claim.external_contact_id };
   }
-  return true;
+  return { changedChatId: null };
 }
