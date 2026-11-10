@@ -6,6 +6,7 @@ import { createServer } from 'node:http';
 import { setTimeout as delay } from 'node:timers/promises';
 import { test, type TestContext } from 'node:test';
 import { computeAgentSpecHash, type AgentGraphVersionV1 } from '@whatsap-automat/contracts';
+import express from 'express';
 import { Pool } from 'pg';
 import { TenantScopedUoW } from '../db/TenantScopedUoW';
 import { AiQuotaCapacityError, AiQuotaReservationConflictError, AiQuotaReservationStore } from '../services/ai/gateway/AiQuotaReservationStore';
@@ -22,6 +23,8 @@ import { BoundedAgentDispatch, preflightBoundedAgentDispatch } from '../services
 import { AgentExecutionEvaluator } from '../services/ai/studio/AgentExecutionEvaluator';
 import { AgentStudioPublications, dispatchPublishedAgent } from '../services/ai/studio/AgentStudioPublications';
 import { saveDraft } from '../services/ai/studio/AgentStudioDrafts';
+import { createStudioVerification } from '../services/ai/studio/StudioVerification';
+import createAgentStudioRoutes from '../routes/agentStudioRoutes';
 
 const databaseUrl = process.env.AI_QUOTA_RESERVATIONS_TEST_DATABASE_URL;
 const model = boundedTextCapability.model;
@@ -312,6 +315,76 @@ test('Studio execution evaluates stored revisions and suites with durable per-co
     [tenantA, executionCommand.attemptId],
   ));
   assert.deepEqual(reservation, { operation: 'completion', status: 'settled' });
+
+  const app = express();
+  app.use(express.json());
+  app.use('/studio', createAgentStudioRoutes(uow, createStudioVerification(uow, adapter)));
+  const http = app.listen(0, '127.0.0.1');
+  await once(http, 'listening');
+  t.after(() => new Promise<void>((resolve) => http.close(() => resolve())));
+  const address = http.address();
+  assert.ok(address && typeof address === 'object');
+  const jwt = require('jsonwebtoken') as { sign(claims: object, key: string): string };
+  async function api(path: string, tenantId: number, payload?: object, version = 2, rol = 'ADMIN') {
+    const token = jwt.sign({ tenantId, userId: 1, rol }, process.env.JWT_SECRET!);
+    const response = await fetch(`http://127.0.0.1:${address.port}/studio/${graphA.graphId}${path}?version=${version}`, {
+      method: payload ? 'POST' : 'GET',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', 'x-tenant-id': String(tenantB) },
+      body: payload ? JSON.stringify(payload) : undefined,
+    });
+    assert.equal(response.headers.get('cache-control'), rol === 'ADMIN' ? 'no-store' : null);
+    return { status: response.status, body: await response.json() };
+  }
+  const suite = { id: randomUUID(), name: 'API suite', scenarios: [
+    { id: 'fixture', name: 'Fixture', mockInput: 'Input from API', expectedTextPatterns: ['^Fixture output$'] },
+  ] };
+  assert.equal((await api('/evaluation-suites', tenantA, suite, 2, 'EMPLEADO')).status, 403);
+  assert.equal((await api('/evaluation-suites', tenantA, { ...suite, tenantId: tenantB })).status, 422);
+  const created = await api('/evaluation-suites', tenantA, suite);
+  assert.equal(created.status, 200);
+  assert.deepEqual(await api('/evaluation-suites', tenantA, suite), created);
+  assert.equal((await api('/evaluation-suites', tenantA, { ...suite, id: randomUUID(), scenarios: [
+    { ...suite.scenarios[0], expectedTextPatterns: ['('] },
+  ] })).status, 422);
+  assert.equal((await api('/evaluation-suites', tenantA, { ...suite, name: 'Conflicting name' })).status, 409);
+  assert.equal((await api('/evaluation-suites', tenantB, suite, 1)).status, 409);
+  const scopeA = await api('/execution', tenantA);
+  assert.equal(scopeA.status, 200);
+  assert.equal(scopeA.body.active.version, 1);
+  assert.ok(scopeA.body.suites.some(({ id }: { id: string }) => id === suite.id));
+  const scopeB = await api('/execution', tenantB, undefined, 1);
+  assert.equal(scopeB.body.active, null);
+  assert.ok(scopeB.body.suites.every(({ id }: { id: string }) => id !== suite.id));
+
+  const input = { runId: randomUUID(), suiteId: suite.id, timeoutMs: 1000 };
+  assert.equal((await api('/evaluations', tenantB, input, 1)).status, 422);
+  assert.equal((await api('/evaluations', tenantA, input, 2, 'EMPLEADO')).status, 403);
+  assert.equal((await api('/publish', tenantA, { evaluationId: input.runId, passed: true })).status, 422);
+  assert.equal((await api('/publish', tenantA, { evaluationId: input.runId })).status, 409);
+  assert.equal(requests.length, 5);
+  const evaluated = await api('/evaluations', tenantA, input);
+  assert.equal(evaluated.status, 200);
+  assert.equal(evaluated.body.passed, true);
+  assert.equal(evaluated.body.version, 2);
+  assert.equal(evaluated.body.specHash, draft?.specHash);
+  assert.deepEqual(await api('/evaluations', tenantA, input), evaluated);
+  assert.deepEqual(await api(`/evaluations/${input.runId}`, tenantA), evaluated);
+  assert.equal((await api(`/evaluations/${input.runId}`, tenantA, undefined, 1)).status, 404);
+  assert.equal((await api(`/evaluations/${input.runId}`, tenantB, undefined, 1)).status, 404);
+  assert.equal((await api('/publish', tenantB, { evaluationId: input.runId }, 1)).status, 409);
+  const publication = await api('/publish', tenantA, { evaluationId: input.runId });
+  assert.equal(publication.status, 200);
+  assert.equal(publication.body.mode, 'verification');
+  assert.equal(publication.body.specHash, draft?.specHash);
+  const execute = { attemptId: randomUUID(), timeoutMs: 1000, input: 'Published text' };
+  assert.equal((await api('/execute', tenantA, execute, 1)).status, 409);
+  assert.equal((await api('/execute', tenantB, execute, 1)).status, 409);
+  const execution = await api('/execute', tenantA, execute);
+  assert.equal(execution.status, 200);
+  assert.equal(execution.body.execution.output.text, 'Fixture output');
+  assert.equal(execution.body.publication.version, 2);
+  assert.equal(requests.length, 7);
+  assert.equal(await uow.run(tenantA, (db) => provider.loadActive(db, tenantA, graphA.graphId)), null);
 });
 
 test('bounded dispatch via a loopback provider fixture and real quota store', {

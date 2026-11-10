@@ -1,21 +1,9 @@
-import { execFileSync } from 'node:child_process';
 import { createHmac, randomUUID } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
 import { expect, test, type APIRequestContext } from '@playwright/test';
+import { provisionCompanies, type Company } from './fixtures/provisionCompanies';
 
 const backend = process.env.PRODUCT_SMOKE_URL;
 test.skip(!backend, 'Requires the local product smoke backend and isolated PostgreSQL database');
-
-type Company = { phoneNumberId: string; outboundId?: string; auth: { accessToken: string } };
-
-function provisionCompanies(...options: string[]): Company[] {
-  const fixtures = execFileSync(process.execPath, ['--import', 'tsx', 'src/test/fixtures/browserInbox.ts', ...options], {
-    cwd: fileURLToPath(new URL('../../WhatsaapWeb-JS/', import.meta.url)),
-    encoding: 'utf8',
-    timeout: 15000,
-  }).trim().split('\n').at(-1)!;
-  return JSON.parse(fixtures);
-}
 
 async function postWebhook(request: APIRequestContext, company: Company, change: object) {
   const payload = JSON.stringify({ entry: [{ changes: [{ field: 'messages', value: {

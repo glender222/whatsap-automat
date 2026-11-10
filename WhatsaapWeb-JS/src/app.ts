@@ -28,6 +28,7 @@ import createWorkspaceRoutes from './routes/workspaceRoutes';
 import createWorkflowRoutes from './routes/workflowRoutes';
 import createAiRoutes from './routes/ai.routes';
 import createAgentStudioRoutes, { createAgentSimulationRoutes } from './routes/agentStudioRoutes';
+import type { StudioVerification } from './services/ai/studio/StudioVerification';
 import createApprovalRoutes from './routes/approvalRoutes';
 import createChannelConnectionRoutes from './routes/channelConnectionRoutes';
 import createOperationExecutionRoutes from './routes/operationExecutionRoutes';
@@ -66,7 +67,7 @@ export class App {
   private readonly socketHandler: SocketHandler;
   private conversationCore: any;
 
-  constructor() {
+  constructor(private readonly studioVerification?: StudioVerification) {
     this.app = express();
     this.server = http.createServer(this.app);
     this.io = new Server(this.server, {
@@ -240,7 +241,7 @@ export class App {
     this.app.use('/api/media', requireJwt, createMediaRoutes(this.whatsappService));
     this.app.use('/api/v1/workflows', createWorkflowRoutes());
     this.app.use('/api/v1/ai', createAiRoutes());
-    this.app.use('/api/v1/agent-graphs', createAgentStudioRoutes());
+    this.app.use('/api/v1/agent-graphs', createAgentStudioRoutes(undefined, this.studioVerification));
     this.app.use('/api/v1/agent-runs', createAgentSimulationRoutes());
     this.app.use('/api/v1/approvals', createApprovalRoutes());
     this.app.use('/api/v1/channel-connections', createChannelConnectionRoutes());

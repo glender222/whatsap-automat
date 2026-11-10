@@ -22,6 +22,8 @@ El timeout local abarca la conexión y la lectura del cuerpo, con un máximo de 
 
 El adaptador requiere un transporte inyectado. Las pruebas usan solo HTTP de loopback sin credenciales. La aplicación no registra este servicio, y su resultado interno siempre lleva `publicationEvidence: false`. Aplican las condiciones de activación de la sección anterior. Antes de componer un transporte real también deben verificarse la disponibilidad del snapshot en la cuenta, la tarifa, las condiciones de facturación y la configuración del proveedor.
 
+La composición explícita `createStudioVerification` conecta el evaluador, las reservas y las publicaciones con las rutas de Studio. `App` puede recibir esa capacidad mediante inyección del servidor. La construcción habitual de la aplicación sigue sin ella. La carga de prueba `src/test/fixtures/browserStudio.ts` admite únicamente una base local de smoke y un proveedor HTTP de loopback. Sus publicaciones tienen modo `verification`. La ejecución usa una publicación activa fijada a la revisión solicitada y contabiliza `completion` bajo la misma cuota que `eval`.
+
 ## Admisión estricta del gateway
 
 El `ModelGateway` de producción conserva la admisión `legacy`. La composición inyectada de pruebas admite `legacy`, `draining` y `strict` por tenant. Un fallo de consulta o el modo `draining` bloquea las tres entradas al proveedor sin recurrir al gateway anterior.

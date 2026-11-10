@@ -152,4 +152,6 @@ En las conversaciones de WhatsApp Cloud, «Cargar mensajes anteriores» aparece 
 
 El detalle de un pedido abierto desde el listado conserva la página de origen en la URL. «Volver a pedidos» abre esa página incluso después de recargar el detalle. Las superficies, diálogos y controles de validación de pagos y conciliación usan los colores del tema activo del espacio de trabajo.
 
+Agent Studio distingue la simulación de fixtures de la evaluación de ejecución. Cuando el servidor ofrece el modo de verificación, el detalle permite guardar suites de texto, consultar el resultado de una evaluación tras recargar, publicar la revisión aprobada y ejecutar esa revisión en el entorno de verificación. Los controles muestran la revisión activa y la incompatibilidad del perfil. El modo de la publicación se presenta junto a las acciones. La configuración habitual muestra que la publicación está indisponible.
+
 Campañas muestra el listado del servidor y permite preparar borradores. Segmentos solicita el recuento al backend. Auditoría y Salud del sistema muestran el error de consulta cuando el servicio no está disponible.

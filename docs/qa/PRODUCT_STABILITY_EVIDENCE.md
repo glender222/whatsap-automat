@@ -111,7 +111,25 @@ Para reproducirlo, aplicar la migración 056 en la base local de pruebas y ejecu
 
 - **Publicación.** El servicio interno requiere una evaluación completada de la misma empresa, revisión y modo. Comprueba la huella actual de la suite y las reservas liquidadas de cada escenario. En PostgreSQL rechazó evidencia de otra empresa, de una suite editada, de una ejecución fallida y de un informe copiado a otro UUID. Dos publicaciones simultáneas de la misma revisión devolvieron el mismo registro.
 - **Ejecución.** Tras guardar la revisión 2 como borrador, el servicio ejecutó la revisión 1 publicada y registró el consumo como `completion`. Otra empresa no pudo ejecutar esa revisión y el proveedor local no recibió una llamada adicional. El modo de verificación tampoco activó una revisión para el modo de proveedor.
-- **Verificación.** Se aplicó la migración 057 en la misma base de pruebas de IA-01. Pasaron 38 casos en `bounded-agent-dispatch`, `agent-studio-postgres`, `agent-eval-simulator` y `publication-gate`. La interfaz y las rutas de producción todavía no utilizan la publicación interna.
+- **Verificación.** Se aplicó la migración 057 en la misma base de pruebas de IA-01. Pasaron 38 casos en `bounded-agent-dispatch`, `agent-studio-postgres`, `agent-eval-simulator` y `publication-gate`. IA-03 conecta esa evidencia con HTTP y la interfaz en una composición explícita de verificación.
+
+## IA-03. Recorrido de Studio desde la interfaz
+
+- El backend admite una composición explícita de verificación. Todas sus rutas requieren administrador y una revisión guardada explícita. Las suites guardadas y los UUID de evaluación se reutilizan en los reintentos. El servidor comprueba la pertenencia, el contenido y la evidencia antes de publicar, y ejecuta únicamente la revisión activa seleccionada.
+- La configuración habitual de la aplicación devuelve `mode: null` y mantiene la ejecución y publicación indisponibles. La composición de verificación conserva su propio modo en PostgreSQL. Las pruebas confirman que esas publicaciones no habilitan el modo de proveedor.
+- En Chrome, Alfa y Bravo crearon el mismo identificador de grafo en sus empresas. Alfa guardó y aprobó dos escenarios. Bravo guardó un escenario fallido y su botón de publicación quedó deshabilitado. Bravo obtuvo `404` al consultar el UUID de Alfa. Tras recargar, Alfa recuperó su evaluación, publicó la revisión 1 y la ejecutó. Guardar una revisión 2 conservó la revisión 1 activa y la pantalla dejó de ofrecer la ejecución desde el borrador 2.
+- La suite conjunta pasó 13 recorridos de Chrome con las simulaciones locales de IA y Graph en el mismo backend. Pasaron también 38 pruebas de backend de Studio y 72 del frontend, además de los builds y la comprobación de tipos.
+
+Para reproducir el recorrido con la base local y las migraciones de IA-02, ejecutar desde el backend:
+
+```sh
+export HOST=127.0.0.1 PORT=34256
+export PRODUCT_SMOKE_URL=http://127.0.0.1:34256
+export STUDIO_FIXTURE_URL=http://127.0.0.1:34257
+node --import tsx src/test/fixtures/browserStudio.ts
+```
+
+Con las mismas variables exportadas en el frontend, ejecutar `npm run test:e2e -- e2e/agent-studio.integration.spec.ts`. El proveedor HTTP local devuelve el perfil acotado con uso verificado de prueba y el estado persiste bajo RLS. La activación del proveedor de producción, la cancelación y el resto de perfiles del harness requieren completar sus recorridos pendientes.
 
 ## WF-01. Ingreso mientras se revierte una revisión publicada
 
@@ -124,5 +142,5 @@ Para reproducirlo, aplicar la migración 056 en la base local de pruebas y ejecu
 | --- | --- |
 | Bandeja en tiempo real | Filtro por etiqueta, reconexión, reorden de webhooks e historial paginado cubiertos en MSG-04 y MSG-05. |
 | Envío y recepción | Toma de control, ventana de atención, reintento, adjuntos y recuperación de una entrega incierta cubiertos en MSG-06. |
-| Harness IA | Borrador, validación, evaluación de ejecución, publicación y ejecución de una revisión inmutable. Comprobar permisos, límites, cancelación, recuperación y efectos concurrentes. |
+| Harness IA | El recorrido de revisión, evaluación, publicación y ejecución de texto está cubierto en modo de verificación en IA-03. Completar la admisión coordinada del proveedor de producción, cancelación, recuperación tras caída y los perfiles restantes. |
 | Flujo operativo y navegación | Atención, pedido, pago, aprobación y conexión. Recorrer como administrador y operador, con teclado y diferentes tamaños de pantalla. |

@@ -20,11 +20,14 @@ export async function dispatchPublishedAgent(
   uow: TenantScopedUoW,
   publications: AgentStudioPublications,
   dispatcher: Pick<BoundedAgentDispatch, 'dispatch'>,
-  command: { tenantId: number; graphId: string; attemptId: string; input: string; timeoutMs: number },
+  command: { tenantId: number; graphId: string; version?: number; attemptId: string; input: string; timeoutMs: number },
 ) {
   const { tenantId, graphId, attemptId, input, timeoutMs } = command;
   const active = await uow.run(tenantId, (db) => publications.loadActive(db, tenantId, graphId));
   if (!active) return null;
+  if (command.version !== undefined && command.version !== active.publication.version) {
+    throw new AgentPublicationConflict('The selected revision is no longer the active publication');
+  }
   const execution = await dispatcher.dispatch({
     tenantId, graph: active.graph, attemptId, input, timeoutMs, operation: 'completion',
   });

@@ -13,6 +13,7 @@ async function main() {
   const { default: pool } = await import('../../config/database');
   const { MetaAccountStore } = await import('../../services/whatsapp/meta/MetaAccountStore');
   const { MetaInboxStore } = await import('../../services/whatsapp/meta/MetaInboxStore');
+  const { tenantScopedUoW } = await import('../../db/TenantScopedUoW');
   const postAuth = async (action: string, body: object, token?: string) => {
     const response = await fetch(`${url.origin}/api/auth/${action}`, {
       method: 'POST',
@@ -28,8 +29,9 @@ async function main() {
     const companies = [];
     const outboundId = process.argv.includes('--outbound') ? 'wamid.' + randomUUID() : undefined;
     const send = process.argv.includes('--send');
-    if (send) {
-      const provider = new URL(process.env.PRODUCT_GRAPH_FIXTURE_URL ?? '');
+    const studio = process.argv.includes('--studio');
+    if (send || studio) {
+      const provider = new URL((send ? process.env.PRODUCT_GRAPH_FIXTURE_URL : process.env.STUDIO_FIXTURE_URL) ?? '');
       assert.equal(provider.protocol, 'http:');
       assert.equal(provider.hostname, '127.0.0.1');
       const health = await fetch(provider.origin + '/health', { signal: AbortSignal.timeout(3000) });
@@ -43,6 +45,14 @@ async function main() {
         phoneNumberId, status: 'configured',
         ...(send && { accessToken: 'synthetic-local-token', graphVersion: 'v25.0' }),
       });
+      if (studio) {
+        await tenantScopedUoW.run(data.user.companyId, (db) => db.query(`
+          INSERT INTO tenant_ai_quotas (tenant_id, monthly_token_limit, monthly_cost_limit_micro_usd)
+          VALUES ($1, 10000000, 10000000)
+          ON CONFLICT (tenant_id) DO UPDATE SET monthly_token_limit = EXCLUDED.monthly_token_limit,
+            monthly_cost_limit_micro_usd = EXCLUDED.monthly_cost_limit_micro_usd
+        `, [data.user.companyId]));
+      }
       if (outboundId) {
         await new MetaInboxStore({ companyId: data.user.companyId }).persistOutbound({
           chatId: '12025550145', body: 'Envío de ' + nombre, messageType: 'text',

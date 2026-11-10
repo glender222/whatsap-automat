@@ -102,6 +102,18 @@ export class AgentExecutionEvaluator {
     private readonly mode: ExecutionMode = 'verification',
   ) {}
 
+  async read(tenantId: number, graphId: string, version: number, runId: string) {
+    const { rows: [row] } = await this.uow.run(tenantId, (db) => db.query(`
+      SELECT *, execution_deadline_at <= clock_timestamp() AS expired
+      FROM agent_eval_runs WHERE tenant_id = $1 AND agent_graph_id = $2 AND graph_version = $3
+        AND id = $4 AND execution_mode = $5 AND execution_deadline_at IS NOT NULL
+    `, [tenantId, graphId, version, runId, this.mode]));
+    if (!row) return null;
+    const summary = summarize(row);
+    return summary.status === 'running' && row.expired
+      ? { ...summary, status: 'failed' as const } : summary;
+  }
+
   async evaluate(command: EvaluationCommand) {
     const { tenantId, graphId, version, suiteId, runId, timeoutMs } = command;
     if (!Number.isSafeInteger(version) || version < 1 || version > 2_147_483_647 ||

@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, ArrowRight, CheckCircle2, CircleAlert, GitBranch, LockKeyhole } from 'lucide-react';
+import { ArrowLeft, ArrowRight, CheckCircle2, CircleAlert, GitBranch } from 'lucide-react';
 import { Link, useLocation, useParams, useSearchParams } from 'react-router-dom';
 import AgentGraphComparisonPanel from './AgentGraphComparisonPanel';
 import AgentGraphFixturePanel from './AgentGraphFixturePanel';
+import AgentGraphExecutionPanel from './AgentGraphExecutionPanel';
 import GraphProblemNotice from './GraphProblemNotice';
 import {
   draftSpec, getGraphDraft, graphPath, graphProblem, nodeKinds, readVersion, studioPath,
@@ -123,11 +124,7 @@ function RevisionChecks({ draft }: { draft: GraphDraft }) {
           </div>
         )}
       </section>
-      <section className="space-y-2 rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-900" aria-labelledby="graph-publication-title">
-        <h2 id="graph-publication-title" className="flex items-center gap-2 text-lg font-semibold"><LockKeyhole size={18} aria-hidden="true" /> Publicación</h2>
-        <p className="text-sm font-medium">Publicación no disponible</p>
-        <p className="text-sm text-gray-600 dark:text-gray-300">El servidor requiere evidencia de ejecución verificada para publicar. En este espacio puedes comprobar la estructura y ejecutar pruebas.</p>
-      </section>
+      <AgentGraphExecutionPanel draft={draft} />
     </div>
   );
 }

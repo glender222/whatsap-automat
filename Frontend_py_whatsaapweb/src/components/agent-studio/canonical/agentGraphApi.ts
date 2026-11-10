@@ -207,3 +207,86 @@ export function graphFixtureProblem(cause: unknown): GraphProblem {
   }
   return graphProblem(cause, 'No pudimos ejecutar la simulación de esta revisión.');
 }
+
+export interface ExecutionSuite { id: string; name: string; scenarioCount: number }
+export interface VerificationPublication {
+  graphId: string; version: number; specHash: string; evaluationId: string; mode: 'verification';
+}
+export interface ExecutionEvaluation {
+  runId: string; suiteId: string; graphId: string; version: number; specHash: string;
+  mode: 'verification'; status: 'running' | 'completed' | 'failed' | 'cancelled'; passed: boolean;
+  scenarios: { scenarioId: string; outcome: 'passed' | 'assertion_failed' | 'uncertain' | 'blocked' }[];
+}
+
+function verificationConfig(draft: GraphDraft, signal: AbortSignal) {
+  return { params: { version: draft.version }, signal };
+}
+
+function verifiedPublication(publication: VerificationPublication | undefined, draft: GraphDraft) {
+  return publication?.graphId === draft.graphId && publication.mode === 'verification' &&
+    Number.isSafeInteger(publication.version) && publication.version > 0 && /^[a-f0-9]{64}$/.test(publication.specHash) &&
+    (publication.version !== draft.version || publication.specHash === draft.specHash);
+}
+
+export async function readStudioExecution(draft: GraphDraft, signal: AbortSignal) {
+  const { data } = await api.get<{
+    mode: 'verification' | null; suites: ExecutionSuite[]; active: VerificationPublication | null;
+    profile?: { compatible: boolean; issue: string | null; model: string };
+  }>(
+    graphEndpoint(draft.graphId) + '/execution', verificationConfig(draft, signal),
+  );
+  if ((data?.mode !== 'verification' && data?.mode !== null) || !Array.isArray(data.suites) ||
+      !data.suites.every((suite) => typeof suite.id === 'string' && typeof suite.name === 'string' && Number.isSafeInteger(suite.scenarioCount)) ||
+      (data.active !== null && !verifiedPublication(data.active, draft)) ||
+      (data.mode === 'verification' && (typeof data.profile?.compatible !== 'boolean' || typeof data.profile.model !== 'string'))) {
+    throw new Error('El servidor no confirmó la capacidad de verificación.');
+  }
+  return data;
+}
+
+export async function saveStudioSuite(draft: GraphDraft, suite: {
+  id: string; name: string; scenarios: { id: string; name: string; mockInput: string; expectedTextPatterns: string[] }[];
+}, signal: AbortSignal) {
+  const { data } = await api.post<ExecutionSuite>(graphEndpoint(draft.graphId) + '/evaluation-suites', suite, verificationConfig(draft, signal));
+  if (data?.id !== suite.id || data.name !== suite.name || data.scenarioCount !== suite.scenarios.length) {
+    throw new Error('El servidor no confirmó la suite guardada.');
+  }
+  return data;
+}
+
+export async function studioEvaluation(draft: GraphDraft, attempt: { runId: string; suiteId: string }, signal: AbortSignal, read = false) {
+  const endpoint = graphEndpoint(draft.graphId) + '/evaluations';
+  const config = verificationConfig(draft, signal);
+  const { data } = read
+    ? await api.get<ExecutionEvaluation>(endpoint + '/' + encodeURIComponent(attempt.runId), config)
+    : await api.post<ExecutionEvaluation>(endpoint, { ...attempt, timeoutMs: 1000 }, { ...config, timeout: 65000 });
+  if (data?.runId !== attempt.runId || data.suiteId !== attempt.suiteId || data.graphId !== draft.graphId ||
+      data.version !== draft.version || data.specHash !== draft.specHash || data.mode !== 'verification' ||
+      typeof data.passed !== 'boolean' || !['running', 'completed', 'failed', 'cancelled'].includes(data.status) || !Array.isArray(data.scenarios)) {
+    throw new Error('El servidor no confirmó una evaluación para esta revisión.');
+  }
+  return data;
+}
+
+export async function publishStudioVerification(draft: GraphDraft, evaluationId: string, signal: AbortSignal) {
+  const { data } = await api.post<VerificationPublication>(
+    graphEndpoint(draft.graphId) + '/publish', { evaluationId }, verificationConfig(draft, signal),
+  );
+  if (!verifiedPublication(data, draft) || data.version !== draft.version || data.evaluationId !== evaluationId) {
+    throw new Error('El servidor no confirmó la publicación de esta revisión.');
+  }
+  return data;
+}
+
+export async function executeStudioVerification(draft: GraphDraft, attempt: { attemptId: string; input: string }, signal: AbortSignal) {
+  const { data } = await api.post<{ publication: VerificationPublication; execution: { status: string; output?: { text: string } } }>(
+    graphEndpoint(draft.graphId) + '/execute', { ...attempt, timeoutMs: 1000 }, verificationConfig(draft, signal),
+  );
+  if (!verifiedPublication(data?.publication, draft) || data.publication.version !== draft.version || typeof data.execution?.status !== 'string') {
+    throw new Error('El servidor no confirmó la ejecución de esta revisión.');
+  }
+  if (data.execution.status !== 'completed' || typeof data.execution.output?.text !== 'string') {
+    throw new Error('La prueba de ejecución terminó con estado ' + data.execution.status + '.');
+  }
+  return data.execution.output.text;
+}

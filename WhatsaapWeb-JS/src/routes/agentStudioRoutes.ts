@@ -14,6 +14,11 @@ import { requireJwt } from '../middleware/jwtAuth';
 import { type TenantContext, tenantContext } from '../middleware/tenantContext';
 import { agentEvalService, SimulationInputError } from '../services/ai/eval/AgentEvalService';
 import { compileAgentExecutionProfile, executionProfile } from '../services/ai/studio/AgentExecutionProfile';
+import { executionRunIdPattern, listExecutionSuites, saveExecutionSuite } from '../services/ai/studio/AgentExecutionEvidence';
+import { AgentPublicationConflict } from '../services/ai/studio/AgentStudioPublications';
+import type { StudioVerification } from '../services/ai/studio/StudioVerification';
+import { boundedTextCapability, isBoundedText } from '../services/ai/gateway/BoundedTextCompletion';
+import { preflightBoundedAgentDispatch } from '../services/ai/studio/BoundedAgentDispatch';
 import {
   listDrafts,
   loadDraft,
@@ -40,6 +45,20 @@ const simulationSchema = agentSimulationRequestV1Schema.extend({
   graphVersion: agentSimulationRequestV1Schema.shape.graphVersion.unwrap().max(2_147_483_647).optional(),
   mockInput: agentSimulationRequestV1Schema.shape.mockInput.max(2048),
   assertions: evalScenarioV1Schema.shape.assertions.removeDefault().max(16).optional(),
+}).strict();
+const runId = graphIdSchema.regex(executionRunIdPattern);
+const suiteScenario = evalScenarioV1Schema.pick({ id: true, name: true, mockInput: true, expectedTextPatterns: true }).extend({
+  id: graphIdSchema, mockInput: evalScenarioV1Schema.shape.mockInput.refine(isBoundedText),
+  expectedTextPatterns: evalScenarioV1Schema.shape.expectedTextPatterns.removeDefault().min(1).max(8),
+}).strict();
+const suiteInput = createGraphDraftSchema.pick({}).extend({
+  id: runId, name: evalScenarioV1Schema.shape.name.trim().min(1).max(120), scenarios: suiteScenario.array().min(1).max(20),
+}).strict().refine(({ scenarios }) => new Set(scenarios.map(({ id }) => id)).size === scenarios.length);
+const timeoutMs = agentGraphVersionV1Schema.shape.version.max(boundedTextCapability.maxTimeoutMs);
+const evaluateInput = createGraphDraftSchema.pick({}).extend({ suiteId: graphIdSchema, runId, timeoutMs }).strict();
+const publishInput = createGraphDraftSchema.pick({}).extend({ evaluationId: runId }).strict();
+const executeInput = createGraphDraftSchema.pick({}).extend({
+  attemptId: runId, timeoutMs, input: evalScenarioV1Schema.shape.mockInput.refine(isBoundedText),
 }).strict();
 
 type StudioActor = TenantContext & { userId: number };
@@ -68,6 +87,10 @@ function guarded(handler: StudioHandler) {
     }
     res.setHeader('Cache-Control', 'no-store');
     handler(req, res, { ...actor, userId: actor.userId }).catch((error: unknown) => {
+      if (error instanceof SimulationInputError || error instanceof AgentPublicationConflict) {
+        problem(res, error instanceof AgentPublicationConflict ? 'CONFLICT' : 'VALIDATION_ERROR', error.message);
+        return;
+      }
       const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
       console.error('Agent Studio request failed', { code });
       next(new Error('The Agent Studio request could not be completed.'));
@@ -94,7 +117,7 @@ function readPositiveInt(value: unknown, max: number): number | null {
   return number <= max ? number : null;
 }
 
-function withDraft(handler: (res: Response, draft: AgentGraphVersionV1) => void, requireVersion = false) {
+function withDraft(handler: (res: Response, draft: AgentGraphVersionV1, req: Request, actor: StudioActor) => void | Promise<void>, requireVersion = false) {
   return guarded(async (req, res, actor) => {
     const id = pathId(req, res);
     if (!id) return;
@@ -106,7 +129,7 @@ function withDraft(handler: (res: Response, draft: AgentGraphVersionV1) => void,
     }
 
     const draft = await actor.runInScope((db) => loadDraft(db, actor.tenantId, id, version));
-    if (draft) handler(res, draft);
+    if (draft) await handler(res, draft, req, actor);
     else notFound(res);
   });
 }
@@ -177,7 +200,7 @@ export function createAgentSimulationRoutes(uow?: TenantScopedUoW): Router {
   return router;
 }
 
-export default function createAgentStudioRoutes(uow?: TenantScopedUoW): Router {
+export default function createAgentStudioRoutes(uow?: TenantScopedUoW, verification?: StudioVerification): Router {
   const router = Router();
   router.use(requireJwt, tenantContext({ allowSandbox: false, uow }));
 
@@ -239,7 +262,7 @@ export default function createAgentStudioRoutes(uow?: TenantScopedUoW): Router {
     });
   }, true));
 
-  router.post('/:id/publish', withDraft((res, draft) => {
+  function unavailable(res: Response, draft: AgentGraphVersionV1) {
     res.status(501).json({
       code: 'PUBLICATION_UNAVAILABLE',
       detail: 'Publication requires a server-verified execution evaluation for this immutable revision.',
@@ -247,7 +270,75 @@ export default function createAgentStudioRoutes(uow?: TenantScopedUoW): Router {
       version: draft.version,
       specHash: draft.specHash,
     });
-  }));
+  }
+
+  router.get('/:id/execution', withDraft(async (res, draft, _req, actor) => {
+    if (!verification) {
+      res.json({ mode: null, suites: [], active: null });
+      return;
+    }
+    const preflight = preflightBoundedAgentDispatch({ tenantId: actor.tenantId, graph: draft, input: 'Verification preflight', timeoutMs: 1000 });
+    const status = await actor.runInScope(async (db) => ({
+      mode: verification.mode,
+      profile: { compatible: preflight.ok, issue: preflight.ok ? null : preflight.code, model: boundedTextCapability.model },
+      suites: await listExecutionSuites(db, actor.tenantId, draft.graphId),
+      active: (await verification.publications.loadActive(db, actor.tenantId, draft.graphId))?.publication ?? null,
+    }));
+    res.json(status);
+  }, true));
+
+  router.post('/:id/evaluation-suites', withDraft(async (res, draft, req, actor) => {
+    if (!verification) return unavailable(res, draft);
+    const input = suiteInput.safeParse(req.body);
+    if (!input.success) return problem(res, 'VALIDATION_ERROR', 'Invalid bounded text evaluation suite.');
+    const suite = await actor.runInScope((db) => saveExecutionSuite(db, {
+      ...input.data, tenantId: actor.tenantId, graphId: draft.graphId,
+      scenarios: input.data.scenarios.map((scenario) => evalScenarioV1Schema.parse(scenario)),
+    }));
+    if (!suite) return problem(res, 'CONFLICT', 'The suite ID is already bound to another suite.');
+    res.json(suite);
+  }, true));
+
+  router.post('/:id/evaluations', withDraft(async (res, draft, req, actor) => {
+    if (!verification) return unavailable(res, draft);
+    const input = evaluateInput.safeParse(req.body);
+    if (!input.success) return problem(res, 'VALIDATION_ERROR', 'Invalid execution evaluation request.');
+    const evaluation = await verification.evaluator.evaluate({
+      ...input.data, tenantId: actor.tenantId, graphId: draft.graphId, version: draft.version,
+    });
+    res.status(evaluation.status === 'running' ? 202 : 200).json(evaluation);
+  }, true));
+
+  router.get('/:id/evaluations/:runId', withDraft(async (res, draft, req, actor) => {
+    if (!verification) return unavailable(res, draft);
+    const id = runId.safeParse(req.params.runId);
+    if (!id.success) return problem(res, 'VALIDATION_ERROR', 'Invalid evaluation ID.');
+    const evaluation = await verification.evaluator.read(actor.tenantId, draft.graphId, draft.version, id.data);
+    if (!evaluation) return problem(res, 'NOT_FOUND', 'Evaluation was not found.');
+    res.json(evaluation);
+  }, true));
+
+  router.post('/:id/publish', withDraft(async (res, draft, req, actor) => {
+    if (!verification) return unavailable(res, draft);
+    const input = publishInput.safeParse(req.body);
+    if (!input.success) return problem(res, 'VALIDATION_ERROR', 'Invalid execution evaluation ID.');
+    const publication = await actor.runInScope((db) => verification.publications.publish(db, {
+      ...input.data, tenantId: actor.tenantId, actorId: actor.userId, graphId: draft.graphId, version: draft.version,
+    }));
+    if (!publication) return notFound(res);
+    res.json(publication);
+  }, Boolean(verification)));
+
+  router.post('/:id/execute', withDraft(async (res, draft, req, actor) => {
+    if (!verification) return unavailable(res, draft);
+    const input = executeInput.safeParse(req.body);
+    if (!input.success) return problem(res, 'VALIDATION_ERROR', 'Invalid verification execution request.');
+    const result = await verification.execute({
+      ...input.data, tenantId: actor.tenantId, graphId: draft.graphId, version: draft.version,
+    });
+    if (!result) return problem(res, 'CONFLICT', 'There is no active verification publication.');
+    res.json(result);
+  }, true));
 
   return router;
 }

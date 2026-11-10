@@ -213,6 +213,11 @@ test('Agent Studio revisions are durable, immutable, tenant scoped and ineligibl
   assert.equal(publish.status, 501);
   assert.equal(publish.body.code, 'PUBLICATION_UNAVAILABLE');
   assert.equal(publish.body.specHash, first.specHash);
+  const unavailableExecution = await request(`${path}/execution?version=1`, adminA);
+  assert.equal(unavailableExecution.status, 200);
+  assert.deepEqual(unavailableExecution.body, { mode: null, suites: [], active: null });
+  assert.equal((await request(`${path}/evaluations?version=1`, adminA, {})).status, 501);
+  assert.equal((await request(`${path}/execute?version=1`, adminA, {})).status, 501);
   assert.equal((await request(path, adminA)).body.status, 'draft');
 
   const sameId = await request('/', adminB, { ...spec, graphId, policyRef: 'other-tenant' });
