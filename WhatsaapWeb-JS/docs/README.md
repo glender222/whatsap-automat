@@ -10,6 +10,11 @@ Estos archivos deben mantenerse vivos durante todo el proyecto:
 - `current-state.md`: estado actual del proyecto, sprint activo, sprint cerrado más reciente y foco inmediato.
 - `specs/catalogo-comercial-inventario.md`: especificación del catálogo comercial operable por IA para productos, servicios, cursos, suscripciones y ofertas vendibles.
 
+## Mercado Pago
+
+- [Intenciones, despacho y conciliación](payment-checkout-intents.md) explica los estados y las pruebas de PostgreSQL.
+- [Ruta administrativa y configuración](payment-checkout-reconciliation-runtime.md) describe los permisos, las credenciales y el despliegue.
+
 ## Documentos De Sprint
 
 Estos archivos describen el cierre o planificación de cada sprint:
