@@ -19,6 +19,7 @@ import createProductRoutes from './routes/productRoutes';
 import createOrderRoutes from './routes/orderRoutes';
 import createDashboardRoutes from './routes/dashboardRoutes';
 import createPaymentRoutes from './routes/paymentRoutes';
+import createPaymentCheckoutReconciliationRuntime from './routes/paymentCheckoutReconciliationRuntime';
 import createIaPauseRoutes from './routes/iaPauseRoutes';
 import createPaymentWebhookRoutes from './routes/paymentWebhookRoutes';
 import createConversationRoutes from './routes/conversationRoutes';
@@ -222,6 +223,7 @@ export class App {
     this.app.use('/api/commercial-items', requireJwt, createProductRoutes());
     this.app.use('/api/products', requireJwt, createProductRoutes());
     this.app.use('/api/orders', requireJwt, createOrderRoutes());
+    this.app.use('/api/payments/checkout-intents', createPaymentCheckoutReconciliationRuntime());
     this.app.use('/api/payments', requireJwt, createPaymentRoutes());
     this.app.use('/api/dashboard', requireJwt, createDashboardRoutes());
     this.app.use('/api/chats/ia', requireJwt, createIaPauseRoutes());
