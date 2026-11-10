@@ -3,11 +3,12 @@ import assert from 'node:assert/strict';
 import { randomInt, randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { test, type TestContext } from 'node:test';
-import { computeAgentSpecHash } from '@whatsap-automat/contracts';
+import { computeAgentSpecHash, type AgentGraphVersionV1 } from '@whatsap-automat/contracts';
 import express from 'express';
 import { Pool } from 'pg';
 import { TenantScopedUoW } from '../db/TenantScopedUoW';
 import createAgentStudioRoutes, { createAgentSimulationRoutes } from '../routes/agentStudioRoutes';
+import { compileAgentExecutionProfile } from '../services/ai/studio/AgentExecutionProfile';
 
 const jwt = require('jsonwebtoken') as { sign(claims: Record<string, unknown>, key: string): string };
 const connectionString = process.env.AGENT_STUDIO_TEST_DATABASE_URL;
@@ -27,6 +28,64 @@ const spec = {
     maxDurationSeconds: 10, maxModelTokens: 100, maxCostMicroUsd: 100,
   },
 };
+const fixturePrompt = 'Internal fixture prompt';
+const linearSpec = {
+  ...spec,
+  entryNodeId: 'model',
+  nodes: [
+    { id: 'model', kind: 'agent' as const, config: { provider: 'openai', model: 'gpt-4o-mini', prompt: fixturePrompt, maxTokens: 40 } },
+    { id: 'end', kind: 'end' as const, config: {} },
+  ],
+  edges: [{ id: 'finish', from: 'model', to: 'end' }],
+};
+
+function compiled(overrides: Partial<AgentGraphVersionV1> = {}) {
+  const graph = {
+    ...linearSpec, schemaVersion: 1 as const, tenantId: String(tenantA), graphId,
+    version: 1, status: 'draft' as const, specHash: '',
+    ...overrides,
+  };
+  if (overrides.specHash === undefined) graph.specHash = computeAgentSpecHash(graph);
+  return compileAgentExecutionProfile(graph);
+}
+
+test('the initial execution profile compiles only bounded explicit model-to-end plans', () => {
+  const positive = compiled();
+  assert.equal(positive.compatible, true);
+  if (positive.compatible) {
+    assert.equal(positive.plan.profile, 'linear-text-v1');
+    assert.deepEqual(positive.plan.nodeOrder, ['model', 'end']);
+    assert.deepEqual(positive.plan.completion, linearSpec.nodes[0].config);
+    assert.equal(positive.plan.tenantId, String(tenantA));
+    assert.equal(positive.plan.specHash, computeAgentSpecHash(linearSpec));
+  }
+  const changedConfig = (patch: Record<string, unknown>) => [
+    { ...linearSpec.nodes[0], config: { ...linearSpec.nodes[0].config, ...patch } }, linearSpec.nodes[1],
+  ];
+  const cases: Array<[Partial<AgentGraphVersionV1>, string]> = [
+    [{ specHash: 'invalid' }, 'SPEC_HASH_MISMATCH'],
+    [{ edges: [...linearSpec.edges, { id: 'cycle', from: 'end', to: 'model' }] }, 'GRAPH_CYCLE'],
+    [{ edges: [{ ...linearSpec.edges[0], condition: 'true' }] }, 'PROFILE_TOPOLOGY'],
+    [{ edges: [{ ...linearSpec.edges[0], priority: 0 }] }, 'PROFILE_TOPOLOGY'],
+    [{
+      nodes: [...linearSpec.nodes, { id: 'other-end', kind: 'end', config: {} }],
+      edges: [...linearSpec.edges, { id: 'branch', from: 'model', to: 'other-end' }],
+    }, 'PROFILE_TOPOLOGY'],
+    [{ nodes: [{ ...linearSpec.nodes[0], kind: 'tool' }, linearSpec.nodes[1]] }, 'PROFILE_TOPOLOGY'],
+    [{ nodes: changedConfig({ provider: 'unavailable' }) }, 'PROFILE_AGENT_CONFIG'],
+    [{ nodes: changedConfig({ prompt: '   ' }) }, 'PROFILE_AGENT_CONFIG'],
+    [{ nodes: changedConfig({ tools: ['external.send'] }) }, 'PROFILE_AGENT_CONFIG'],
+    [{ nodes: changedConfig({ maxTokens: 4097 }) }, 'PROFILE_AGENT_CONFIG'],
+    [{ nodes: [linearSpec.nodes[0], { ...linearSpec.nodes[1], config: { send: true } }] }, 'PROFILE_END_CONFIG'],
+    [{ limits: { ...linearSpec.limits, maxSteps: 1 } }, 'PROFILE_LIMITS'],
+    [{ limits: { ...linearSpec.limits, maxModelTokens: 39 } }, 'PROFILE_LIMITS'],
+  ];
+  for (const [overrides, code] of cases) {
+    const result = compiled(overrides);
+    assert.equal(result.compatible, false, code);
+    if (!result.compatible) assert.ok(result.issues.some((issue) => issue.code === code), code);
+  }
+});
 
 function token(tenantId: number, userId: number, rol = 'ADMIN', secret = process.env.JWT_SECRET!) {
   return jwt.sign({ tenantId, userId, rol }, secret);
@@ -67,6 +126,12 @@ test('Agent Studio requires a signed tenant administrator and rejects client own
   assert.equal((await request('/', token(tenantA, 20, 'USER'), { ...payload, role: 'ADMIN' })).status, 403);
   assert.equal((await request('/', token(tenantA, 0), payload)).status, 403);
   assert.equal((await request('/', token(tenantA, 20), { ...payload, tenantId: tenantB, status: 'published' })).status, 422);
+  const preflight = `/${graphId}/execution-preflight`;
+  assert.equal((await request(`${preflight}?version=1`)).status, 401);
+  assert.equal((await request(`${preflight}?version=1`, token(tenantA, 20, 'EMPLEADO'))).status, 403);
+  for (const query of ['', '?version=0', '?version=1&version=2', '?version=2147483648']) {
+    assert.equal((await request(preflight + query, token(tenantA, 20))).status, 422);
+  }
 });
 
 test('Agent Studio revisions are durable, immutable, tenant scoped and ineligible for publication', {
@@ -170,6 +235,25 @@ test('Agent Studio revisions are durable, immutable, tenant scoped and ineligibl
     'DELETE FROM agent_studio_revisions WHERE graph_id = $1', [graphId],
   )), { code: '55000' });
   assert.deepEqual((await request(`${path}?version=1`, adminA)).body, first);
+
+  const fourth = await request(`${path}/revisions`, adminA, linearSpec);
+  assert.equal(fourth.status, 201);
+  const preflightPath = `${path}/execution-preflight`;
+  const actual = await request(`${preflightPath}?version=4`, adminA);
+  assert.deepEqual(actual, { status: 200, body: {
+    graphId, version: 4, specHash: fourth.body.specHash, scope: 'execution_profile',
+    profile: 'linear-text-v1', publicationEvidence: false, compatible: true, nodeOrder: ['model', 'end'], issues: [],
+  } });
+  assert.deepEqual(await request(`${preflightPath}?version=4`, adminA), actual);
+  assert.equal(JSON.stringify(actual).includes(fixturePrompt), false);
+  const earlier = await request(`${preflightPath}?version=1`, adminA);
+  assert.equal(earlier.status, 200);
+  assert.equal(earlier.body.compatible, false);
+  assert.equal(earlier.body.specHash, first.specHash);
+  assert.equal(earlier.body.issues[0].code, 'PROFILE_TOPOLOGY');
+  assert.equal((await request(`${preflightPath}?version=4`, adminB)).status, 404);
+  assert.equal((await request(`${path}/publish?version=4`, adminA, actual.body)).status, 501);
+  assert.equal((await request(path, adminA)).body.status, 'draft');
 });
 
 test('both Studio fixture routes reject unsigned, unauthorized or ambiguous selectors', async (t) => {

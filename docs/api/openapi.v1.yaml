@@ -711,6 +711,38 @@ paths:
         '422':
           $ref: '#/components/responses/ValidationError'
 
+  /agent-graphs/{id}/execution-preflight:
+    get:
+      summary: Comprobar el perfil de ejecución de una revisión guardada
+      description: Requiere rol ADMIN y una revisión explícita. Comprueba la compatibilidad estática con linear-text-v1. El perfil requiere un nodo agent con provider, model, prompt y maxTokens, conectado a un end de configuración vacía por una arista incondicional sin prioridad. El resultado se limita a la forma y a los límites declarados de la revisión. publicationEvidence siempre vale false.
+      operationId: preflightAgentGraphExecution
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/AgentGraphId'
+        - name: version
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 2147483647
+      responses:
+        '200':
+          description: Compatibilidad estática y problemas de la revisión
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentExecutionPreflightResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Acceso reservado a administradores del tenant
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
   /agent-graphs/{id}/simulate:
     post:
       summary: Simular una revisión guardada con fixtures
@@ -1894,6 +1926,33 @@ components:
                 type: string
               nodeId:
                 type: string
+
+    AgentExecutionPreflightResult:
+      type: object
+      required: [graphId, version, specHash, scope, profile, publicationEvidence, compatible, nodeOrder, issues]
+      properties:
+        graphId:
+          type: string
+        version:
+          type: integer
+        specHash:
+          type: string
+        scope:
+          const: execution_profile
+        profile:
+          const: linear-text-v1
+        publicationEvidence:
+          const: false
+        compatible:
+          type: boolean
+        nodeOrder:
+          type: array
+          description: Identificadores en orden de ejecución para una revisión compatible. Vacío si es incompatible.
+          maxItems: 2
+          items:
+            type: string
+        issues:
+          $ref: '#/components/schemas/GraphValidationResult/properties/issues'
 
     AgentSimulationRequest:
       allOf:

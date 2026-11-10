@@ -13,6 +13,7 @@ import { TenantScopedUoW } from '../db/TenantScopedUoW';
 import { requireJwt } from '../middleware/jwtAuth';
 import { type TenantContext, tenantContext } from '../middleware/tenantContext';
 import { agentEvalService, SimulationInputError } from '../services/ai/eval/AgentEvalService';
+import { compileAgentExecutionProfile, executionProfile } from '../services/ai/studio/AgentExecutionProfile';
 import {
   listDrafts,
   loadDraft,
@@ -93,14 +94,14 @@ function readPositiveInt(value: unknown, max: number): number | null {
   return number <= max ? number : null;
 }
 
-function withDraft(handler: (res: Response, draft: AgentGraphVersionV1) => void) {
+function withDraft(handler: (res: Response, draft: AgentGraphVersionV1) => void, requireVersion = false) {
   return guarded(async (req, res, actor) => {
     const id = pathId(req, res);
     if (!id) return;
     const rawVersion = req.query.version;
     const version = readPositiveInt(rawVersion, 2_147_483_647);
-    if (rawVersion !== undefined && version === null) {
-      problem(res, 'VALIDATION_ERROR', 'Invalid revision version.');
+    if (version === null && (rawVersion !== undefined || requireVersion)) {
+      problem(res, 'VALIDATION_ERROR', requireVersion ? 'An explicit valid revision version is required.' : 'Invalid revision version.');
       return;
     }
 
@@ -226,6 +227,17 @@ export default function createAgentStudioRoutes(uow?: TenantScopedUoW): Router {
   router.post('/:id/simulate', simulateDraft);
 
   router.post('/:id/validate', withDraft((res, draft) => { res.json(validateDraft(draft)); }));
+
+  router.get('/:id/execution-preflight', withDraft((res, draft) => {
+    const result = compileAgentExecutionProfile(draft);
+    res.json({
+      graphId: draft.graphId, version: draft.version, specHash: draft.specHash,
+      scope: 'execution_profile', profile: executionProfile, publicationEvidence: false,
+      compatible: result.compatible,
+      nodeOrder: result.compatible ? result.plan.nodeOrder : [],
+      issues: result.compatible ? [] : result.issues,
+    });
+  }, true));
 
   router.post('/:id/publish', withDraft((res, draft) => {
     res.status(501).json({
