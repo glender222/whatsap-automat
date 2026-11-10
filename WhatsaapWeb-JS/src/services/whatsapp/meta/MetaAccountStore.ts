@@ -81,7 +81,14 @@ export class MetaAccountStore {
         statusCode: 503, code: 'META_CREDENTIAL_ENCRYPTION_UNAVAILABLE',
       });
     }
-    const account = await this.persistConnection(companyId, input, false);
+    const account = await this.persistConnection(companyId, input, false).catch((error) => {
+      if (error?.code === '23505' && error?.constraint === 'uq_whatsapp_accounts_provider_phone_active') {
+        throw Object.assign(new Error('La línea de WhatsApp ya está vinculada.'), {
+          statusCode: 409, code: 'META_PHONE_ALREADY_LINKED',
+        });
+      }
+      throw error;
+    });
     if (!account) {
       throw Object.assign(new Error('Para reconectar WhatsApp Business, introduce un token.'), {
         statusCode: 409, code: 'META_RECONNECTION_TOKEN_REQUIRED',
@@ -150,7 +157,7 @@ export class MetaAccountStore {
          EXCLUDED.access_token_encrypted IS NOT NULL OR
          (whatsapp_business_accounts.status <> 'disconnected' AND whatsapp_business_accounts.disconnected_at IS NULL)
        )) OR (
-         $15::boolean AND whatsapp_business_accounts.status IN ('connected', 'configured', 'missing_token')
+         $15::boolean AND whatsapp_business_accounts.status IN ('connected', 'configured', 'missing_token', 'verification_required')
          AND whatsapp_business_accounts.disconnected_at IS NULL
          AND whatsapp_business_accounts.access_token_encrypted IS NULL
          AND whatsapp_business_accounts.metadata_json ->> 'source' = 'env'
@@ -185,7 +192,7 @@ export class MetaAccountStore {
        WHERE company_id = $1
          AND provider = 'meta-cloud'
        ORDER BY
-         CASE status WHEN 'connected' THEN 0 WHEN 'configured' THEN 1 WHEN 'missing_token' THEN 2 WHEN 'disconnected' THEN 4 ELSE 3 END,
+         CASE status WHEN 'connected' THEN 0 WHEN 'configured' THEN 1 WHEN 'verification_required' THEN 2 WHEN 'missing_token' THEN 3 WHEN 'disconnected' THEN 5 ELSE 4 END,
          updated_at DESC
        LIMIT 1`,
       [companyId]
@@ -210,7 +217,8 @@ export class MetaAccountStore {
       const { rows } = await client.query(
         `SELECT company_id
          FROM whatsapp_business_accounts
-         WHERE provider = 'meta-cloud' AND phone_number_id = $1 AND status <> 'disconnected' AND disconnected_at IS NULL
+         WHERE provider = 'meta-cloud' AND phone_number_id = $1
+           AND status IN ('configured', 'connected') AND disconnected_at IS NULL
          LIMIT 2`,
         [phoneNumberId]
       );

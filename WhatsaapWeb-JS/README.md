@@ -80,6 +80,10 @@ Desde la migración 046, cada ejecución tiene un permiso de despacho de dos min
 
 Para producción, compila con las dependencias de desarrollo y prepara el entorno de ejecución con `npm ci --omit=dev`. Ejecuta `npm start` con `NODE_ENV=production` y `WHATSAPP_PROVIDER=meta-cloud`. El adaptador Web.js queda disponible en desarrollo. Si vas a probar esa conexión, instala sin `PUPPETEER_SKIP_DOWNLOAD` para incluir su navegador. El dispositivo Web.js pertenece a `DEFAULT_COMPANY_ID` (1 si no se configura). Solo sus administradores pueden ver el QR, inicializar o desvincular el dispositivo. En Meta Cloud API la desconexión revoca únicamente la conexión registrada de la empresa autenticada. `npm run start:legacy` y `npm run dev:legacy` usan el mismo servidor que los comandos principales.
 
+Una conexión Meta añadida desde la configuración de empresa activa la línea después de que Graph confirme el ID con la credencial indicada. Guardar datos sin token crea una configuración pendiente que no recibe webhooks ni reserva la línea para esa empresa. Un ID verificado solo puede estar activo en una empresa a la vez. [Consulta de línea en la API de Meta](https://www.postman.com/meta/whatsapp-business-platform/request/xrj32er/get-business-phone-number)
+
+Para aplicar la migración 055, detén las réplicas anteriores antes de migrar y arranca la nueva compilación antes de reabrir el tráfico. Una línea manual con una comprobación satisfactoria posterior a su última actualización conserva su estado. Las demás líneas previamente activas quedan en **Verificación requerida** y su credencial sigue cifrada. Vuelve a guardar una credencial autorizada para reanudar la mensajería de cada una. El arranque recupera la vinculación administrada por el servidor cuando coinciden la empresa y la línea configuradas.
+
 Desde la raíz del repositorio frontend (`Frontend_py_whatsaapweb`), en otra terminal:
 
 ```bash

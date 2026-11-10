@@ -168,6 +168,7 @@ export class WhatsAppService {
     const account = await this.metaAccountStore?.getAccountForCompany(companyId);
     const clientConfig = this.metaAccountStore?.toClientConfig(account || null, true);
     const configured = Boolean(clientConfig?.accessToken && clientConfig?.phoneNumberId);
+    const verificationRequired = account?.status === 'verification_required';
 
     return {
       provider: 'meta-cloud',
@@ -184,9 +185,9 @@ export class WhatsAppService {
       graphVersion: clientConfig?.graphVersion || config.meta.graphVersion,
       accountStatus: account?.status || (configured ? 'connected' : 'missing_config'),
       tokenConfigured: Boolean(clientConfig?.accessToken),
-      message: configured
-        ? 'Meta Cloud API configurado para la empresa'
-        : 'Conecta WhatsApp Business para esta empresa',
+      message: verificationRequired
+        ? 'Guarda una credencial autorizada para verificar esta línea.'
+        : configured ? 'Meta Cloud API configurado para la empresa' : 'Conecta WhatsApp Business para esta empresa',
     };
   }
 
@@ -198,14 +199,30 @@ export class WhatsAppService {
   async saveCompanyConnection(companyId: number, input: Record<string, any>): Promise<Record<string, unknown> | null> {
     if (!this.metaAccountStore) return null;
     const phoneNumberId = String(input.phoneNumberId || input.phone_number_id || '').trim();
-    if (!phoneNumberId) {
-      const error = new Error('phoneNumberId es requerido') as Error & { statusCode?: number; code?: string };
-      error.statusCode = 400;
-      error.code = 'VALIDATION_ERROR';
-      throw error;
+    const graphVersion = String(input.graphVersion || input.graph_version || config.meta.graphVersion || 'v25.0').trim();
+    if (!/^\d{1,100}$/.test(phoneNumberId) || !/^v\d{1,3}\.\d{1,3}$/.test(graphVersion)) {
+      throw Object.assign(new Error('Ingresa un ID de línea y una versión de Graph válidos.'), {
+        statusCode: 400, code: 'META_CONNECTION_INVALID',
+      });
+    }
+    const accessToken = typeof input.accessToken === 'string' ? input.accessToken.trim() : '';
+    if (accessToken) {
+      const rejected = () => Object.assign(new Error('La credencial no acredita acceso a esta línea de WhatsApp.'), {
+        statusCode: 403, code: 'META_PHONE_ACCESS_NOT_VERIFIED',
+      });
+      let verified: boolean;
+      try {
+        verified = await new MetaCloudClient({ ...config.meta, phoneNumberId, graphVersion, accessToken }).verifyPhoneAccess();
+      } catch (error) {
+        const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
+        if (code === 'META_AUTH_ERROR' || code === 'META_PERMISSION_ERROR') throw rejected();
+        throw Object.assign(new Error('No pudimos verificar la línea con Meta. Intenta de nuevo.'), {
+          statusCode: 503, code: 'META_PHONE_VERIFICATION_UNAVAILABLE',
+        });
+      }
+      if (!verified) throw rejected();
     }
 
-    const accessToken = typeof input.accessToken === 'string' ? input.accessToken.trim() : '';
     const account = await this.metaAccountStore.upsertConnection(companyId, {
       phoneNumberId,
       accessToken: accessToken || null,

@@ -49,8 +49,10 @@ const WhatsAppConnectionSection: React.FC<WhatsAppConnectionSectionProps> = ({
   const legacyUnavailable = whatsapp?.accountStatus === 'unavailable_for_company';
   const isLegacy = whatsapp?.provider === 'webjs' && !legacyUnavailable && !loadingOverview;
   const displayNumber = legacyUnavailable ? null : whatsapp?.displayPhoneNumber || numeroAfiliado;
+  const verificationRequired = whatsapp?.accountStatus === 'verification_required';
   const statusLabel = isMetaCloud
-    ? whatsapp?.accountStatus === 'disconnected' ? 'Desconectado' : whatsapp?.configured ? 'Configurado' : 'Pendiente'
+    ? verificationRequired ? 'Verificación requerida'
+      : whatsapp?.accountStatus === 'disconnected' ? 'Desconectado' : whatsapp?.configured ? 'Configurado' : 'Pendiente'
     : legacyUnavailable ? 'No disponible' : whatsapp?.connected ? 'Conectado' : 'Pendiente';
   const statusClass = statusLabel === 'Conectado' || statusLabel === 'Configurado'
     ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800'
@@ -188,6 +190,12 @@ const WhatsAppConnectionSection: React.FC<WhatsAppConnectionSectionProps> = ({
             )}
           </div>
         </div>
+      )}
+
+      {verificationRequired && (
+        <p className="mt-3 text-sm text-amber-800 dark:text-amber-300">
+          Guarda una credencial autorizada para verificar esta línea y reanudar la mensajería.
+        </p>
       )}
 
       {isMetaCloud && whatsapp?.lastErrorMessage && (

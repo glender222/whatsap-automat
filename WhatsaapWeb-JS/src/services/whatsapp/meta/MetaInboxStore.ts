@@ -85,39 +85,6 @@ export class MetaInboxStore {
       .replace(/[^\d]/g, '');
   }
 
-  async ensureAccount(metaConfig: any): Promise<Record<string, unknown> | null> {
-    if (!metaConfig.phoneNumberId) return null;
-    const result = await this.query(
-      `INSERT INTO whatsapp_business_accounts (
-         company_id, provider, waba_id, phone_number_id,
-         display_phone_number, business_phone_number, graph_version,
-         token_secret_ref, status, metadata_json, updated_at
-       )
-       VALUES ($1, 'meta-cloud', $2, $3, $4, $5, $6, 'META_WA_ACCESS_TOKEN', $7, $8, NOW())
-       ON CONFLICT (company_id, provider, phone_number_id)
-       DO UPDATE SET
-         waba_id = COALESCE(EXCLUDED.waba_id, whatsapp_business_accounts.waba_id),
-         display_phone_number = COALESCE(EXCLUDED.display_phone_number, whatsapp_business_accounts.display_phone_number),
-         business_phone_number = COALESCE(EXCLUDED.business_phone_number, whatsapp_business_accounts.business_phone_number),
-         graph_version = EXCLUDED.graph_version,
-         status = EXCLUDED.status,
-         metadata_json = whatsapp_business_accounts.metadata_json || EXCLUDED.metadata_json,
-         updated_at = NOW()
-       RETURNING *`,
-      [
-        this.companyId,
-        metaConfig.wabaId || null,
-        metaConfig.phoneNumberId,
-        metaConfig.displayPhoneNumber || null,
-        metaConfig.displayPhoneNumber || null,
-        metaConfig.graphVersion || 'v25.0',
-        metaConfig.accessToken ? 'configured' : 'missing_token',
-        json({ source: 'env' }),
-      ]
-    );
-    return result.rows[0] || null;
-  }
-
   async getChats({ limit = 50, offset = 0 } = {}): Promise<Record<string, unknown>[]> {
     const result = await this.query(
       `SELECT

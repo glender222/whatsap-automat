@@ -57,6 +57,7 @@ function localError(row: ConnectionRow): string | null {
   if (row.channel !== 'whatsapp-cloud') return 'CHANNEL_UNSUPPORTED';
   if (row.status === 'inactive' || row.meta_status === 'disconnected') return 'CONNECTION_INACTIVE';
   if (!row.meta_id) return 'META_ACCOUNT_NOT_CONNECTED';
+  if (row.meta_status === 'verification_required') return 'META_ACCOUNT_VERIFICATION_REQUIRED';
   if (row.meta_status === 'missing_token' || !row.has_encrypted_token) return 'META_CREDENTIAL_MISSING';
   if (row.meta_status !== 'configured' && row.meta_status !== 'connected') return 'META_ACCOUNT_UNAVAILABLE';
   if (!/^\d+$/.test(row.account_id) || !/^v\d+\.\d+$/.test(row.graph_version ?? '')) return 'META_ACCOUNT_INVALID';
@@ -86,6 +87,7 @@ function displayStatus(row: ConnectionRow, health: ChannelConnectionHealthV1): C
       return row.status === 'active' ? 'inactive' : row.status;
     case 'META_AUTH_ERROR':
     case 'META_PERMISSION_ERROR':
+    case 'META_ACCOUNT_VERIFICATION_REQUIRED':
     case 'META_CREDENTIAL_MISSING':
     case 'META_CREDENTIAL_UNREADABLE':
       return 'needs_reauthorization';

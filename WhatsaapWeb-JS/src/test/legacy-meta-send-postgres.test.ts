@@ -78,8 +78,6 @@ test('legacy HTTP routes never send or persist free-form Meta text and preserve 
   t.after(() => db.end());
   config.whatsapp.provider = 'meta-cloud';
   config.multer.dest = uploadDir;
-  // tsx also executes the JS routes against the source CommonJS config.
-  require('../config').multer.dest = uploadDir;
   const uow = new TenantScopedUoW(db);
   const { rows: [role] } = await db.query('SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user');
   assert.deepEqual(role, { rolsuper: false, rolbypassrls: false });
@@ -107,13 +105,26 @@ test('legacy HTTP routes never send or persist free-form Meta text and preserve 
   let failUpload = false;
   let failVideoSend = false;
   const graphCredentials = new Map([[graphPhoneId, fixtureToken]]);
+  const graphProofs: string[] = [];
   const graph = await listen(t, createServer(async (req, res) => {
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(Buffer.from(chunk));
     const bytes = Buffer.concat(chunks);
     const payload = bytes.toString();
     const path = req.url || '';
-    const credential = graphCredentials.get(path.split('/')[2]);
+    const phoneId = path.split('/')[2]?.split('?')[0];
+    const credential = graphCredentials.get(phoneId);
+    if (req.method === 'GET') {
+      graphProofs.push(path);
+      assert.equal(path, `/v25.0/${phoneId}?fields=id`);
+      res.setHeader('content-type', 'application/json');
+      if (credential && req.headers.authorization === `Bearer ${credential}`) {
+        res.end(JSON.stringify({ id: phoneId }));
+      } else {
+        res.writeHead(403).end(JSON.stringify({ error: { code: 200, message: 'fixture permission denied' } }));
+      }
+      return;
+    }
     assert.ok(credential);
     assert.equal(req.headers.authorization, `Bearer ${credential}`);
     assert.equal(req.method, 'POST');
@@ -513,10 +524,21 @@ fs.truncateSync(file, ${overLimit});
     const graphStart = attempts.length;
     assert.equal((await settings()).body.data.status.accountStatus, 'missing_config');
     assert.equal(await accountRow(), undefined);
+    const draft = await request(connectionPath, tenantB, 'POST', { phoneNumberId: envPhoneId });
+    assert.equal(draft.status, 200);
+    assert.equal(draft.body.data.status, 'missing_token');
+    assert.equal(await service.metaAccountStore!.findByPhoneNumberId(envPhoneId), null);
+    const forbidden = await request(connectionPath, tenantB, 'POST', {
+      phoneNumberId: envPhoneId, accessToken: 'fixture-unauthorized-token', graphVersion: 'v25.0',
+    });
+    assert.equal(forbidden.status, 403);
+    assert.equal(forbidden.body.error, 'META_PHONE_ACCESS_NOT_VERIFIED');
+    assert.equal(await service.metaAccountStore!.findByPhoneNumberId(envPhoneId), null);
     assert.equal((await sendTemplate()).status, 409);
     assert.equal(attempts.length, graphStart);
 
     await service.initialize();
+    assert.deepEqual(await service.metaAccountStore!.findByPhoneNumberId(envPhoneId), { company_id: defaultTenant });
     assert.equal((await settings()).body.data.status.configured, true);
     assert.equal((await request('/status')).body.configured, true);
     assert.equal((await request('/me')).body.id, envPhoneId);
@@ -580,6 +602,7 @@ fs.truncateSync(file, ${overLimit});
     await service.initialize();
     origin = await appFor(service);
     assert.equal((await settings()).body.data.status.configured, false);
+    graphCredentials.set(envPhoneId, reconnectedToken);
     const connected = await request(connectionPath, defaultTenant, 'POST', {
       phoneNumberId: envPhoneId, accessToken: reconnectedToken, graphVersion: 'v25.0',
     });
@@ -589,7 +612,13 @@ fs.truncateSync(file, ${overLimit});
     assert.equal((await accountRow()).status, 'connected');
     assert.equal((await accountRow()).disconnected_at, null);
     assert.ok((await accountRow()).access_token_encrypted);
-    graphCredentials.set(envPhoneId, reconnectedToken);
+    const alreadyLinked = await request(connectionPath, tenantB, 'POST', {
+      phoneNumberId: envPhoneId, accessToken: reconnectedToken, graphVersion: 'v25.0',
+    });
+    assert.equal(alreadyLinked.status, 409);
+    assert.equal(alreadyLinked.body.error, 'META_PHONE_ALREADY_LINKED');
+    assert.deepEqual(await service.metaAccountStore!.findByPhoneNumberId(envPhoneId), { company_id: defaultTenant });
+    assert.deepEqual(graphProofs, Array(3).fill(`/v25.0/${envPhoneId}?fields=id`));
     assert.equal((await request(connectionPath, defaultTenant, 'POST', {
       phoneNumberId: envPhoneId, displayPhoneNumber: '12025550123',
     })).body.data.tokenConfigured, true);
