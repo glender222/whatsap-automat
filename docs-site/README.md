@@ -20,10 +20,10 @@ python3 scripts/package-developer-kit.py --output /tmp/whatsap-automat-developer
 python3 docs-site/build.py --developer-kit /tmp/whatsap-automat-developer-kit.zip
 ```
 
-El portal comprueba las sumas del kit y publica la descarga junto con la documentación.
+El portal comprueba las sumas del kit e incluye el ZIP entre las descargas.
 
 ## Distribución
 
-Sirve `docs-site/dist/` en un host estático con el acceso que corresponda al equipo. En un repositorio privado, usa un host privado o publica un artefacto de CI restringido a las personas con acceso. El ZIP del portal lleva solo documentación. Los enlaces al código fuente y a las versiones requieren los permisos de GitHub del visitante.
+GitHub es la fuente de la documentación y las descargas. Puedes generar el portal desde una copia del repositorio o descargar el artefacto `whatsap-automat-docs-site` de una ejecución exitosa de GitHub Actions. Descomprime el artefacto y abre `index.html` para consultar la guía y descargar los ZIP. Tanto Actions como los enlaces al código fuente requieren acceso al repositorio.
 
-Publica archivos instalables en GitHub Releases cuando exista una versión con artefactos verificados. Conserva el repositorio y sus archivos de entorno fuera del directorio publicado.
+Distribuye los instaladores verificados desde GitHub Releases. El ZIP de documentación contiene la guía, los contratos y la licencia.
