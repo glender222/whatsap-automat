@@ -35,11 +35,10 @@ interface EvaluationRow {
   graph_version: number;
   execution_spec_hash: string | null;
   execution_suite_hash: string | null;
-  execution_deadline_at: Date | null;
   execution_mode: ExecutionMode;
   status: 'running' | 'completed' | 'failed' | 'cancelled';
   passed: boolean;
-  scorecard: { timeoutMs?: number; scenarios?: ExecutionResult[] };
+  scorecard: { timeoutMs?: number; scenarios?: ExecutionResult[]; admittedScenarioId?: string };
 }
 
 interface Measurement {
@@ -92,6 +91,7 @@ function summarize(row: EvaluationRow) {
     runId: row.id, suiteId: row.suite_id, graphId: row.agent_graph_id, version: row.graph_version,
     specHash: row.execution_spec_hash, suiteHash: row.execution_suite_hash,
     mode: row.execution_mode, status: row.status, passed: row.passed, scenarios: row.scorecard.scenarios ?? [],
+    admittedScenarioId: row.scorecard.admittedScenarioId ?? null,
   };
 }
 
@@ -103,15 +103,31 @@ export class AgentExecutionEvaluator {
   ) {}
 
   async read(tenantId: number, graphId: string, version: number, runId: string) {
-    const { rows: [row] } = await this.uow.run(tenantId, (db) => db.query(`
-      SELECT *, execution_deadline_at <= clock_timestamp() AS expired
-      FROM agent_eval_runs WHERE tenant_id = $1 AND agent_graph_id = $2 AND graph_version = $3
-        AND id = $4 AND execution_mode = $5 AND execution_deadline_at IS NOT NULL
-    `, [tenantId, graphId, version, runId, this.mode]));
-    if (!row) return null;
-    const summary = summarize(row);
-    return summary.status === 'running' && row.expired
-      ? { ...summary, status: 'failed' as const } : summary;
+    return this.observe(tenantId, graphId, version, runId, false);
+  }
+
+  async cancel(tenantId: number, graphId: string, version: number, runId: string) {
+    return this.observe(tenantId, graphId, version, runId, true);
+  }
+
+  private async observe(tenantId: number, graphId: string, version: number, runId: string, cancel: boolean) {
+    const identity = [tenantId, graphId, version, runId, this.mode];
+    const row = await this.uow.run(tenantId, async (db) => {
+      const scope = `tenant_id = $1 AND agent_graph_id = $2 AND graph_version = $3
+        AND id = $4 AND execution_mode = $5 AND execution_deadline_at IS NOT NULL`;
+      const { rows: [stopped] } = await db.query(`
+        WITH observed AS (SELECT clock_timestamp() AS at)
+        UPDATE agent_eval_runs SET status = CASE WHEN execution_deadline_at <= observed.at THEN 'failed' ELSE 'cancelled' END,
+          passed = false, completed_at = observed.at
+        FROM observed WHERE ${scope} AND status = 'running'
+          AND ($6::boolean OR execution_deadline_at <= observed.at)
+        RETURNING agent_eval_runs.*
+      `, [...identity, cancel]);
+      if (stopped) return stopped;
+      const { rows: [existing] } = await db.query(`SELECT * FROM agent_eval_runs WHERE ${scope}`, identity);
+      return existing;
+    });
+    return row ? summarize(row) : null;
   }
 
   async evaluate(command: EvaluationCommand) {
@@ -150,9 +166,9 @@ export class AgentExecutionEvaluator {
         )
         VALUES ($1, $2, $3, $4, $5, 'running', jsonb_build_object('timeoutMs', $6::integer),
           $7, $8, clock_timestamp() + $9::integer * interval '1 millisecond', $10)
-        ON CONFLICT (id) DO NOTHING RETURNING *
+        ON CONFLICT (id) DO NOTHING RETURNING id
       `, [runId, tenantId, suiteId, graphId, version, timeoutMs, graph.specHash, suiteHash, deadlineMs, this.mode]);
-      if (created) return { kind: 'claimed' as const, created: created as EvaluationRow, graph, scenarios, threshold: Math.max(95, suite.passThresholdPercent) };
+      if (created) return { kind: 'claimed' as const, graph, scenarios, threshold: Math.max(95, suite.passThresholdPercent) };
 
       const { rows: [existing] } = await db.query(
         'SELECT * FROM agent_eval_runs WHERE id = $1 AND tenant_id = $2', [runId, tenantId],
@@ -163,48 +179,66 @@ export class AgentExecutionEvaluator {
           existing.scorecard.timeoutMs !== timeoutMs) {
         throw new SimulationInputError('Evaluation run UUID is already bound to a different execution');
       }
-      const { rows: [expired] } = await db.query(`
-        UPDATE agent_eval_runs SET status = 'failed', completed_at = clock_timestamp()
-        WHERE id = $1 AND tenant_id = $2 AND status = 'running' AND execution_deadline_at < clock_timestamp()
-        RETURNING *
-      `, [runId, tenantId]);
-      return { kind: 'existing' as const, existing: (expired ?? existing) as EvaluationRow };
+      return { kind: 'existing' as const };
     });
-    if (claim.kind === 'existing') return summarize(claim.existing);
+    if (claim.kind === 'existing') {
+      const existing = await this.read(tenantId, graphId, version, runId);
+      if (!existing) throw new Error('Execution evaluation disappeared after replay');
+      return existing;
+    }
 
     const results: ExecutionResult[] = [];
-    const deadline = claim.created.execution_deadline_at!.getTime();
     for (const { scenario, assertions } of claim.scenarios) {
-      const remaining = Math.min(timeoutMs, deadline - Date.now());
-      if (remaining <= 0) break;
-      const result = await this.execute(tenantId, claim.graph, scenario, assertions, remaining, executionAttemptId(runId, scenario.id));
+      const started = performance.now();
+      // Admission and cancellation update the same row. A case admitted before cancellation may settle.
+      const { rows: [admission] } = await this.uow.run(tenantId, (db) => db.query(`
+        UPDATE agent_eval_runs SET scorecard = scorecard || jsonb_build_object('admittedScenarioId', $3::text)
+        WHERE id = $1 AND tenant_id = $2 AND status = 'running'
+          AND execution_deadline_at > clock_timestamp() AND NOT (scorecard ? 'admittedScenarioId')
+        RETURNING FLOOR(EXTRACT(EPOCH FROM (execution_deadline_at - clock_timestamp())) * 1000)::int AS remaining_ms
+      `, [runId, tenantId, scenario.id]));
+      if (!admission) break;
+      const remaining = Math.min(timeoutMs, admission.remaining_ms - Math.ceil(performance.now() - started));
+      const result: ExecutionResult = remaining > 0
+        ? await this.execute(tenantId, claim.graph, scenario, assertions, remaining, executionAttemptId(runId, scenario.id))
+        : { scenarioId: scenario.id, outcome: 'blocked' };
       results.push(result);
+      await this.checkpoint(tenantId, runId, claim.scenarios.length, results, scenario.id);
       if (result.outcome === 'uncertain' || result.outcome === 'blocked') break;
     }
     const executed = results.length === claim.scenarios.length &&
       results.every(({ outcome }) => outcome === 'passed' || outcome === 'assertion_failed');
+    const { rows: [finished] } = await this.uow.run(tenantId, (db) => db.query(`
+      WITH finished AS (SELECT clock_timestamp() AS at)
+      UPDATE agent_eval_runs
+      SET status = CASE WHEN $3::boolean AND execution_deadline_at >= finished.at THEN 'completed' ELSE 'failed' END,
+          passed = $3::boolean AND pass_rate_percent >= $4 AND execution_deadline_at >= finished.at,
+          completed_at = finished.at
+      FROM finished WHERE id = $1 AND tenant_id = $2 AND status = 'running'
+      RETURNING agent_eval_runs.*
+    `, [runId, tenantId, executed, claim.threshold]));
+    if (finished) return summarize(finished);
+    const stored = await this.read(tenantId, graphId, version, runId);
+    if (!stored) throw new Error('Execution evaluation disappeared before finalization');
+    return stored;
+  }
+
+  private async checkpoint(tenantId: number, runId: string, total: number, results: ExecutionResult[], scenarioId: string) {
     const passRate = Math.floor(results.filter(({ outcome }) => outcome === 'passed').length /
-      claim.scenarios.length * 10_000) / 100;
+      total * 10_000) / 100;
     const latencies = results.flatMap(({ latencyMs }) => latencyMs === undefined ? [] : [latencyMs]).sort((a, b) => a - b);
     const percentile = (fraction: number) => latencies[Math.ceil(latencies.length * fraction) - 1] ?? 0;
-    const { rows: [finished] } = await this.uow.run(tenantId, (db) => db.query(`
+    const stored = await this.uow.run(tenantId, (db) => db.query(`
       UPDATE agent_eval_runs
-      SET status = CASE WHEN $3::boolean AND execution_deadline_at >= statement_timestamp() THEN 'completed' ELSE 'failed' END,
-          passed = $3::boolean AND $4::boolean AND execution_deadline_at >= statement_timestamp(),
-          scorecard = $5, pass_rate_percent = $6, total_tokens_used = $7, total_cost_micro_usd = $8,
-          p50_latency_ms = $9, p95_latency_ms = $10, completed_at = clock_timestamp()
-      WHERE id = $1 AND tenant_id = $2 AND status = 'running'
-      RETURNING *
-    `, [runId, tenantId, executed, passRate >= claim.threshold, JSON.stringify({ timeoutMs, scenarios: results }), passRate,
+      SET scorecard = (scorecard - 'admittedScenarioId') || jsonb_build_object('scenarios', $3::jsonb),
+          pass_rate_percent = $4, total_tokens_used = $5, total_cost_micro_usd = $6,
+          p50_latency_ms = $7, p95_latency_ms = $8
+      WHERE id = $1 AND tenant_id = $2 AND scorecard->>'admittedScenarioId' = $9
+    `, [runId, tenantId, JSON.stringify(results), passRate,
       results.reduce((sum, result) => sum + (result.tokens ?? 0), 0),
       results.reduce((sum, result) => sum + (result.costMicroUsd ?? 0), 0),
-      percentile(0.5), percentile(0.95)]));
-    if (finished) return summarize(finished);
-    const { rows: [stored] } = await this.uow.run(tenantId, (db) => db.query(
-      'SELECT * FROM agent_eval_runs WHERE id = $1 AND tenant_id = $2', [runId, tenantId],
-    ));
-    if (!stored) throw new Error('Execution evaluation disappeared before finalization');
-    return summarize(stored);
+      percentile(0.5), percentile(0.95), scenarioId]));
+    if (stored.rowCount !== 1) throw new Error('Execution evaluation lost the admitted scenario');
   }
 
   private async execute(

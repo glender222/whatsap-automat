@@ -3,6 +3,9 @@ import { once } from 'node:events';
 import { createServer } from 'node:http';
 import { boundedTextCapability } from '../../services/ai/gateway/BoundedTextCompletion';
 import { OpenAiBoundedTextAdapter } from '../../services/ai/gateway/adapters/OpenAiBoundedTextAdapter';
+import { AiQuotaReservationStore } from '../../services/ai/gateway/AiQuotaReservationStore';
+import { AgentExecutionEvaluator } from '../../services/ai/studio/AgentExecutionEvaluator';
+import { BoundedAgentDispatch } from '../../services/ai/studio/BoundedAgentDispatch';
 
 async function main() {
   const backend = new URL(process.env.PRODUCT_SMOKE_URL ?? '');
@@ -19,9 +22,17 @@ async function main() {
   assert.equal(process.env.WHATSAPP_PROVIDER, 'meta-cloud');
   assert.equal(process.env.META_WA_ACCESS_TOKEN, 'synthetic-local-token');
 
+  const checkpoints = new Map<string, () => void>();
   const server = createServer(async (req, res) => {
     res.setHeader('content-type', 'application/json');
     if (req.method === 'GET' && req.url === '/health') return res.end(JSON.stringify({ backend: backend.origin }));
+    const checkpoint = req.url?.match(/^\/checkpoint\/([a-f0-9-]{36})$/)?.[1];
+    if (checkpoint && req.method === 'GET') return res.writeHead(checkpoints.has(checkpoint) ? 200 : 404).end('{}');
+    if (checkpoint && req.method === 'POST') {
+      const resume = checkpoints.get(checkpoint);
+      resume?.();
+      return res.writeHead(resume ? 200 : 404).end('{}');
+    }
     if (req.method !== 'POST' || req.url !== '/v1/chat/completions' || req.headers.authorization) return res.writeHead(400).end('{}');
     try {
       const chunks = [];
@@ -45,7 +56,28 @@ async function main() {
   const { App } = await import('../../app');
   const { tenantScopedUoW } = await import('../../db/TenantScopedUoW');
   const { createStudioVerification } = await import('../../services/ai/studio/StudioVerification');
-  await new App(createStudioVerification(tenantScopedUoW, adapter)).start();
+  const verification = createStudioVerification(tenantScopedUoW, adapter);
+  const dispatcher = new BoundedAgentDispatch(new AiQuotaReservationStore(tenantScopedUoW), adapter, false);
+  const evaluator = new AgentExecutionEvaluator(tenantScopedUoW, {
+    async dispatch(command) {
+      const result = await dispatcher.dispatch(command);
+      const checkpoint = command.input.match(/^Pausa QA ([a-f0-9-]{36})$/)?.[1];
+      if (checkpoint) {
+        // Hold the settled dispatch before the evaluator writes its checkpoint.
+        await new Promise<void>((resolve) => {
+          const resume = () => {
+            clearTimeout(timer);
+            checkpoints.delete(checkpoint);
+            resolve();
+          };
+          const timer = setTimeout(resume, 8000);
+          checkpoints.set(checkpoint, resume);
+        });
+      }
+      return result;
+    },
+  });
+  await new App({ ...verification, evaluator }).start();
 }
 
 void main().catch((error: unknown) => {

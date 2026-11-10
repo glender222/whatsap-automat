@@ -1,5 +1,6 @@
 import './fixtures/testEnv';
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { randomInt, randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
@@ -21,6 +22,7 @@ import { ByokService } from '../services/ai/gateway/byok/ByokService';
 import type { ModelGatewayRequest } from '../services/ai/gateway/types';
 import { BoundedAgentDispatch, preflightBoundedAgentDispatch } from '../services/ai/studio/BoundedAgentDispatch';
 import { AgentExecutionEvaluator } from '../services/ai/studio/AgentExecutionEvaluator';
+import { executionAttemptId } from '../services/ai/studio/AgentExecutionEvidence';
 import { AgentStudioPublications, dispatchPublishedAgent } from '../services/ai/studio/AgentStudioPublications';
 import { saveDraft } from '../services/ai/studio/AgentStudioDrafts';
 import { createStudioVerification } from '../services/ai/studio/StudioVerification';
@@ -136,13 +138,14 @@ async function startFixture(t: TestContext) {
   });
   const address = server.address();
   assert.ok(address && typeof address !== 'string');
+  const endpoint = 'http://127.0.0.1:' + address.port + '/v1/chat/completions';
   const adapter = new OpenAiBoundedTextAdapter((url, init) => {
     assert.equal(url, 'https://api.openai.com/v1/chat/completions');
     assert.equal(init?.redirect, 'error');
     assert.equal(new Headers(init?.headers).has('authorization'), false);
-    return fetch(`http://127.0.0.1:${address.port}/v1/chat/completions`, init);
+    return fetch(endpoint, init);
   });
-  return { adapter, requests, stalledBodyClosed: () => stalledBodyClosed };
+  return { adapter, endpoint, requests, stalledBodyClosed: () => stalledBodyClosed };
 }
 
 test('Studio execution evaluates stored revisions and suites with durable per-company evidence', {
@@ -178,7 +181,7 @@ test('Studio execution evaluates stored revisions and suites with durable per-co
     makeSuite(tenantA, graphA.graphId, [['First input', '^Fixture output$'], ['Second input', 'output$']]),
     makeSuite(tenantB, graphB.graphId, [['Tenant B input', '^Different answer$']]),
   ]);
-  const { adapter, requests } = await startFixture(t);
+  const { adapter, endpoint, requests } = await startFixture(t);
   const dispatcher = new BoundedAgentDispatch(new AiQuotaReservationStore(uow), adapter, false);
   const entered = Promise.withResolvers<void>();
   const proceed = Promise.withResolvers<void>();
@@ -385,6 +388,123 @@ test('Studio execution evaluates stored revisions and suites with durable per-co
   assert.equal(execution.body.publication.version, 2);
   assert.equal(requests.length, 7);
   assert.equal(await uow.run(tenantA, (db) => provider.loadActive(db, tenantA, graphA.graphId)), null);
+
+  await t.test('a completed scenario is visible while the next one is in flight', async () => {
+    const suiteId = await makeSuite(tenantA, graphA.graphId, [['First checkpoint', 'output$'], ['Second checkpoint', 'output$']]);
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const checkpointEvaluator = new AgentExecutionEvaluator(uow, {
+      dispatch: async (dispatchCommand) => {
+        if (dispatchCommand.input === 'Second checkpoint') {
+          entered.resolve();
+          await release.promise;
+        }
+        return dispatcher.dispatch(dispatchCommand);
+      },
+    });
+    const runId = randomUUID();
+    const evaluation = checkpointEvaluator.evaluate({ ...command, suiteId, runId });
+    try {
+      await Promise.race([entered.promise, evaluation.then(() => assert.fail('The second scenario did not start'))]);
+      const current = await checkpointEvaluator.read(tenantA, graphA.graphId, 1, runId);
+      assert.equal(current?.status, 'running');
+      assert.deepEqual(current?.scenarios.map(({ outcome }) => outcome), ['passed']);
+    } finally {
+      release.resolve();
+      await evaluation;
+    }
+  });
+
+  await t.test('cancel only stops pending scenarios and preserves the admitted result', async () => {
+    const suiteId = await makeSuite(tenantA, graphA.graphId, [['Admitted', 'output$'], ['Must not dispatch', 'output$']]);
+    const settled = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const runner = new AgentExecutionEvaluator(uow, {
+      dispatch: async (dispatchCommand) => {
+        const result = await dispatcher.dispatch(dispatchCommand);
+        settled.resolve();
+        await release.promise;
+        return result;
+      },
+    });
+    const runId = randomUUID();
+    const path = '/evaluations/' + runId + '/cancel';
+    const requestCount = requests.length;
+    const evaluation = runner.evaluate({ ...command, suiteId, runId });
+    try {
+      await Promise.race([settled.promise, evaluation.then(() => assert.fail('The first scenario did not settle'))]);
+      const cancelled = await api(path, tenantA, {}, 1);
+      assert.equal(cancelled.status, 200);
+      assert.equal(cancelled.body.status, 'cancelled');
+      assert.equal(cancelled.body.admittedScenarioId, 'scenario-0');
+      assert.deepEqual(await api(path, tenantA, {}, 1), cancelled);
+      assert.equal((await api(path, tenantB, {}, 1)).status, 404);
+      assert.equal((await api(path, tenantA, {}, 2)).status, 404);
+      assert.equal((await api(path, tenantA, {}, 1, 'EMPLEADO')).status, 403);
+      assert.equal((await api(path, tenantA, { tenantId: tenantB }, 1)).status, 422);
+    } finally {
+      release.resolve();
+      await evaluation;
+    }
+    const final = await evaluation;
+    assert.equal(final.status, 'cancelled');
+    assert.equal(final.admittedScenarioId, null);
+    assert.deepEqual(final.scenarios.map(({ outcome }) => outcome), ['passed']);
+    assert.deepEqual(await api('/evaluations', tenantA, { suiteId, runId, timeoutMs: 1000 }, 1), { status: 200, body: final });
+    assert.equal((await api('/publish', tenantA, { evaluationId: runId }, 1)).status, 409);
+    assert.deepEqual(await api('/evaluations/' + input.runId + '/cancel', tenantA, {}, 2), evaluated);
+    assert.equal(requests.length, requestCount + 1);
+  });
+
+  await t.test('a killed worker leaves a checkpoint and an unreplayed reservation after expiry', async () => {
+    const next = await uow.run(tenantA, (db) => saveDraft(db, tenantA, 1, graphA.graphId, {
+      entryNodeId: graphA.entryNodeId, policyRef: graphA.policyRef, nodes: graphA.nodes, edges: graphA.edges,
+      limits: { ...graphA.limits, maxDurationSeconds: 15 },
+    }, false));
+    assert.equal(next?.version, 3);
+    const suiteId = await makeSuite(tenantA, graphA.graphId, [['Before crash', 'output$'], ['stalled-body', 'output$']]);
+    const runId = randomUUID();
+    const workerCommand = { ...command, suiteId, runId, version: 3, timeoutMs: 5000 };
+    const requestCount = requests.length;
+    const worker = spawn(process.execPath, ['--import', 'tsx', 'src/test/fixtures/studioCrashWorker.ts',
+      endpoint, JSON.stringify(workerCommand)], { stdio: 'ignore' });
+    const stopped = once(worker, 'exit');
+    try {
+      const timeout = AbortSignal.timeout(10_000);
+      while (requests.length < requestCount + 2) {
+        assert.equal(worker.exitCode, null, 'Worker exited before the second provider request');
+        await delay(10, undefined, { signal: timeout });
+      }
+      assert.equal(worker.kill('SIGKILL'), true);
+      assert.deepEqual(await stopped, [null, 'SIGKILL']);
+    } finally {
+      worker.kill('SIGKILL');
+      await stopped;
+    }
+
+    const recovery = createStudioVerification(uow, adapter).evaluator;
+    const partial = await recovery.read(tenantA, graphA.graphId, 3, runId);
+    assert.equal(partial?.status, 'running');
+    assert.equal(partial.admittedScenarioId, 'scenario-1');
+    assert.deepEqual(partial.scenarios.map(({ outcome }) => outcome), ['passed']);
+    // Move the fixture's deadline into the past without waiting for wall time.
+    await uow.run(tenantA, (db) => db.query(
+      "UPDATE agent_eval_runs SET execution_deadline_at = clock_timestamp() - interval '1ms' WHERE id = $1", [runId],
+    ));
+    const expired = await recovery.read(tenantA, graphA.graphId, 3, runId);
+    assert.deepEqual(expired, { ...partial, status: 'failed' });
+    assert.equal(await recovery.read(tenantB, graphA.graphId, 3, runId), null);
+    assert.deepEqual(await recovery.evaluate(workerCommand), expired);
+    assert.equal((await api('/publish', tenantA, { evaluationId: runId }, 3)).status, 409);
+    const { rows } = await uow.run(tenantA, (db) => db.query(
+      'SELECT id, status FROM ai_quota_reservations WHERE id = ANY($1::uuid[])',
+      [['scenario-0', 'scenario-1'].map((scenarioId) => executionAttemptId(runId, scenarioId))],
+    ));
+    const statuses = new Map(rows.map(({ id, status }) => [id, status]));
+    assert.equal(statuses.get(executionAttemptId(runId, 'scenario-0')), 'settled');
+    assert.equal(statuses.get(executionAttemptId(runId, 'scenario-1')), 'claimed');
+    assert.equal(requests.length, requestCount + 2);
+  });
 });
 
 test('bounded dispatch via a loopback provider fixture and real quota store', {

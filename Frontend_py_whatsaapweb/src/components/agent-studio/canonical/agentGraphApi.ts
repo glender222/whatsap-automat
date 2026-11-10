@@ -215,6 +215,7 @@ export interface VerificationPublication {
 export interface ExecutionEvaluation {
   runId: string; suiteId: string; graphId: string; version: number; specHash: string;
   mode: 'verification'; status: 'running' | 'completed' | 'failed' | 'cancelled'; passed: boolean;
+  admittedScenarioId: string | null;
   scenarios: { scenarioId: string; outcome: 'passed' | 'assertion_failed' | 'uncertain' | 'blocked' }[];
 }
 
@@ -260,8 +261,19 @@ export async function studioEvaluation(draft: GraphDraft, attempt: { runId: stri
   const { data } = read
     ? await api.get<ExecutionEvaluation>(endpoint + '/' + encodeURIComponent(attempt.runId), config)
     : await api.post<ExecutionEvaluation>(endpoint, { ...attempt, timeoutMs: 1000 }, { ...config, timeout: 65000 });
+  return confirmEvaluation(data, draft, attempt);
+}
+
+export async function cancelStudioEvaluation(draft: GraphDraft, attempt: { runId: string; suiteId: string }, signal: AbortSignal) {
+  const endpoint = graphEndpoint(draft.graphId) + '/evaluations/' + encodeURIComponent(attempt.runId) + '/cancel';
+  const { data } = await api.post<ExecutionEvaluation>(endpoint, {}, verificationConfig(draft, signal));
+  return confirmEvaluation(data, draft, attempt);
+}
+
+function confirmEvaluation(data: ExecutionEvaluation, draft: GraphDraft, attempt: { runId: string; suiteId: string }) {
   if (data?.runId !== attempt.runId || data.suiteId !== attempt.suiteId || data.graphId !== draft.graphId ||
       data.version !== draft.version || data.specHash !== draft.specHash || data.mode !== 'verification' ||
+      (data.admittedScenarioId != null && typeof data.admittedScenarioId !== 'string') ||
       typeof data.passed !== 'boolean' || !['running', 'completed', 'failed', 'cancelled'].includes(data.status) || !Array.isArray(data.scenarios)) {
     throw new Error('El servidor no confirmó una evaluación para esta revisión.');
   }

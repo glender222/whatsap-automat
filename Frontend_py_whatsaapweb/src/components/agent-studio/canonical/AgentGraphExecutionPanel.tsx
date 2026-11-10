@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import GraphProblemNotice from './GraphProblemNotice';
 import {
-  executeStudioVerification, graphProblem, publishStudioVerification, readStudioExecution, saveStudioSuite, studioEvaluation,
+  cancelStudioEvaluation, executeStudioVerification, graphProblem, publishStudioVerification, readStudioExecution, saveStudioSuite, studioEvaluation,
   type ExecutionEvaluation, type GraphDraft, type GraphProblem,
 } from './agentGraphApi';
 
@@ -11,6 +11,7 @@ type Attempt = { runId: string; suiteId: string };
 type Case = { id: string; input: string; pattern: string };
 const firstCase: Case = { id: 'case-1', input: '', pattern: '' };
 const outcomes = { passed: 'Aprobado', assertion_failed: 'Aserción incumplida', uncertain: 'Resultado incierto', blocked: 'Bloqueado' };
+const evaluating = 'Evaluando revisión…';
 
 function readAttempt(key: string): Attempt | null {
   try {
@@ -25,6 +26,7 @@ export default function AgentGraphExecutionPanel({ draft }: { draft: GraphDraft 
   const [statusAttempt, setStatusAttempt] = useState(0);
   const [problem, setProblem] = useState<GraphProblem>();
   const [busy, setBusy] = useState('');
+  const [cancelling, setCancelling] = useState(false);
   const [selected, setSelected] = useState('');
   const [attempt, setAttempt] = useState<Attempt | null>(() => readAttempt(storageKey));
   const [result, setResult] = useState<ExecutionEvaluation>();
@@ -33,6 +35,7 @@ export default function AgentGraphExecutionPanel({ draft }: { draft: GraphDraft 
   const [executionInput, setExecutionInput] = useState('');
   const [output, setOutput] = useState<string>();
   const action = useRef<AbortController>(null);
+  const cancellation = useRef<AbortController>(null);
   const suiteSave = useRef<{ id: string; signature: string } | null>(null);
   const executionAttempt = useRef<{ attemptId: string; input: string } | null>(null);
 
@@ -43,11 +46,11 @@ export default function AgentGraphExecutionPanel({ draft }: { draft: GraphDraft 
     }).catch((cause: unknown) => {
       if (!request.signal.aborted) setProblem(graphProblem(cause, 'No pudimos consultar el estado de verificación.'));
     });
-    return () => { request.abort(); action.current?.abort(); };
+    return () => { request.abort(); action.current?.abort(); cancellation.current?.abort(); };
   }, [draft, statusAttempt]);
 
   async function perform(label: string, work: (signal: AbortSignal) => Promise<void>) {
-    if (action.current) return;
+    if (action.current || cancellation.current) return;
     const request = new AbortController();
     action.current = request;
     setBusy(label);
@@ -83,16 +86,41 @@ export default function AgentGraphExecutionPanel({ draft }: { draft: GraphDraft 
 
   const suiteId = selected || attempt?.suiteId || status?.suites[0]?.id || '';
   const active = status?.active;
+  const controlsBusy = Boolean(busy) || cancelling;
+  const canCancel = attempt && (result ? result.status === 'running' : busy === evaluating);
   function evaluate() {
+    if (action.current || cancellation.current) return;
     const reusable = attempt?.suiteId === suiteId && (!result || result.status === 'running');
     const next = reusable ? attempt : { runId: crypto.randomUUID(), suiteId };
     setAttempt(next);
     setResult(undefined);
     try { sessionStorage.setItem(storageKey, JSON.stringify(next)); } catch { /* Browser storage is optional. */ }
-    void perform('Evaluando revisión…', async (signal) => {
+    void perform(evaluating, async (signal) => {
       const evaluation = await studioEvaluation(draft, next, signal);
-      if (!signal.aborted) setResult(evaluation);
+      if (!signal.aborted) {
+        setResult((current) => current?.status === 'cancelled' && evaluation.status === 'running' ? current : evaluation);
+      }
     });
+  }
+
+  async function cancelEvaluation() {
+    if (!attempt || cancellation.current) return;
+    const request = new AbortController();
+    cancellation.current = request;
+    setCancelling(true);
+    setProblem(undefined);
+    try {
+      const evaluation = await cancelStudioEvaluation(draft, attempt, request.signal);
+      if (!request.signal.aborted) {
+        setResult((current) => current?.runId === evaluation.runId && current.scenarios.length > evaluation.scenarios.length
+          ? current : evaluation);
+      }
+    } catch (cause: unknown) {
+      if (!request.signal.aborted) setProblem(graphProblem(cause, 'No pudimos confirmar la cancelación.'));
+    } finally {
+      cancellation.current = null;
+      if (!request.signal.aborted) setCancelling(false);
+    }
   }
 
   function publish() {
@@ -134,8 +162,8 @@ export default function AgentGraphExecutionPanel({ draft }: { draft: GraphDraft 
         <details>
           <summary className="cursor-pointer text-sm font-semibold">Crear suite de texto</summary>
           <form className="mt-3 space-y-3" onSubmit={saveSuite}>
-            <label className="block text-sm">Nombre de la suite<input className={control} required disabled={Boolean(busy)} maxLength={120} value={suiteName} onChange={(event) => setSuiteName(event.target.value)} /></label>
-            {cases.map((item, index) => <fieldset key={item.id} disabled={Boolean(busy)} className="space-y-2 rounded-md border border-subtle p-3">
+            <label className="block text-sm">Nombre de la suite<input className={control} required disabled={controlsBusy} maxLength={120} value={suiteName} onChange={(event) => setSuiteName(event.target.value)} /></label>
+            {cases.map((item, index) => <fieldset key={item.id} disabled={controlsBusy} className="space-y-2 rounded-md border border-subtle p-3">
               <legend className="text-sm font-semibold">Caso {index + 1}</legend>
               <label className="block text-sm">Entrada de prueba<textarea className={control} required maxLength={4096} value={item.input}
                 onChange={(event) => setCases((previous) => previous.map((entry) => entry.id === item.id ? { ...entry, input: event.target.value } : entry))} /></label>
@@ -144,13 +172,13 @@ export default function AgentGraphExecutionPanel({ draft }: { draft: GraphDraft 
               {cases.length > 1 && <button type="button" className={button} onClick={() => setCases((previous) => previous.filter((entry) => entry.id !== item.id))}>Quitar caso {index + 1}</button>}
             </fieldset>)}
             <div className="flex flex-wrap gap-2">
-              <button type="button" className={button} disabled={Boolean(busy) || cases.length >= 20}
+              <button type="button" className={button} disabled={controlsBusy || cases.length >= 20}
                 onClick={() => setCases((previous) => [...previous, { id: crypto.randomUUID(), input: '', pattern: '' }])}>Agregar caso</button>
-              <button className={button} disabled={Boolean(busy) || !suiteName.trim()}>Guardar suite</button>
+              <button className={button} disabled={controlsBusy || !suiteName.trim()}>Guardar suite</button>
             </div>
           </form>
         </details>
-        <label className="block text-sm">Suite para evaluar<select className={control} value={suiteId} disabled={Boolean(busy)} onChange={(event) => {
+        <label className="block text-sm">Suite para evaluar<select className={control} value={suiteId} disabled={controlsBusy} onChange={(event) => {
           setSelected(event.target.value);
           setResult(undefined);
         }}>
@@ -158,28 +186,39 @@ export default function AgentGraphExecutionPanel({ draft }: { draft: GraphDraft 
           {status.suites.map((suite) => <option key={suite.id} value={suite.id}>{suite.name} · {suite.scenarioCount} casos</option>)}
         </select></label>
         <div className="flex flex-wrap gap-2">
-          <button className={button} type="button" disabled={Boolean(busy) || !status.profile?.compatible || !status.suites.some((suite) => suite.id === suiteId)} onClick={evaluate}>Evaluar revisión</button>
-          {attempt && <button className={button} type="button" disabled={Boolean(busy)} onClick={() => void perform('Consultando evaluación…', async (signal) => {
+          <button className={button} type="button" disabled={controlsBusy || !status.profile?.compatible || !status.suites.some((suite) => suite.id === suiteId)} onClick={evaluate}>Evaluar revisión</button>
+          {attempt && <button className={button} type="button" disabled={controlsBusy} onClick={() => void perform('Consultando evaluación…', async (signal) => {
             const evaluation = await studioEvaluation(draft, attempt, signal, true);
             if (!signal.aborted) {
               setSelected(evaluation.suiteId);
               setResult(evaluation);
             }
           })}>Consultar evaluación guardada</button>}
+          {canCancel && (
+            <button className={button} type="button" disabled={cancelling} aria-describedby="graph-cancel-description"
+              onClick={() => void cancelEvaluation()}>{cancelling ? 'Cancelando…' : 'Cancelar evaluación'}</button>
+          )}
         </div>
+        {canCancel && (
+          <p id="graph-cancel-description" className="text-sm text-secondary">La cancelación detiene los casos pendientes. El caso iniciado aún puede registrar un resultado.</p>
+        )}
         {result && <div className="space-y-2 text-sm">
-          <p role="status">{result.status === 'running' ? 'Evaluación en curso' : result.passed ? 'Evaluación aprobada' : 'Evaluación sin aprobación'}</p>
+          <p role="status">{result.status === 'cancelled' ? 'Evaluación cancelada' : result.status === 'running' ? 'Evaluación en curso'
+            : result.passed ? 'Evaluación aprobada' : 'Evaluación sin aprobación'}</p>
+          {result.admittedScenarioId && result.status !== 'running' && (
+            <p className="text-secondary">El último caso iniciado aún no tiene un resultado confirmado.</p>
+          )}
           <ul className="list-disc break-words pl-5">{result.scenarios.map((scenario, index) => <li key={scenario.scenarioId}>Caso {index + 1} · {outcomes[scenario.outcome]}</li>)}</ul>
-          <button className={button} type="button" disabled={Boolean(busy) || result.status !== 'completed' || !result.passed || (active?.version ?? 0) >= draft.version} onClick={publish}>Publicar en verificación</button>
+          <button className={button} type="button" disabled={controlsBusy || result.status !== 'completed' || !result.passed || (active?.version ?? 0) >= draft.version} onClick={publish}>Publicar en verificación</button>
         </div>}
         {active && <p role="status" className="text-sm font-medium">Revisión activa en verificación · {active.version}</p>}
         {active?.version === draft.version && <form className="space-y-2" onSubmit={execute}>
           <label className="block text-sm">Entrada para la revisión publicada<textarea className={control} required maxLength={4096}
             value={executionInput} onChange={(event) => setExecutionInput(event.target.value)} /></label>
-          <button className={button} disabled={Boolean(busy)}>Ejecutar revisión publicada</button>
+          <button className={button} disabled={controlsBusy}>Ejecutar revisión publicada</button>
           {output !== undefined && <p role="status" className="whitespace-pre-wrap break-words text-sm">{output}</p>}
         </form>}
-        {busy && <p role="status" className="text-sm text-secondary">{busy}</p>}
+        {busy && !(busy === evaluating && result?.status === 'cancelled') && <p role="status" className="text-sm text-secondary">{busy}</p>}
       </>}
     </section>
   );

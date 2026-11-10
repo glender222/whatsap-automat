@@ -129,7 +129,15 @@ export STUDIO_FIXTURE_URL=http://127.0.0.1:34257
 node --import tsx src/test/fixtures/browserStudio.ts
 ```
 
-Con las mismas variables exportadas en el frontend, ejecutar `npm run test:e2e -- e2e/agent-studio.integration.spec.ts`. El proveedor HTTP local devuelve el perfil acotado con uso verificado de prueba y el estado persiste bajo RLS. La activación del proveedor de producción, la cancelación y el resto de perfiles del harness requieren completar sus recorridos pendientes.
+Con las mismas variables exportadas en el frontend, ejecutar `npm run test:e2e -- e2e/agent-studio.integration.spec.ts`. El proveedor HTTP local devuelve el perfil acotado con uso verificado de prueba y el estado persiste bajo RLS.
+
+## IA-04. Cancelación y recuperación de resultados parciales
+
+- **Antes.** La regresión contra PostgreSQL encontró cero resultados al consultar la evaluación mientras corría el segundo caso, aunque el primero ya había terminado.
+- **Cambio.** Studio persiste cada resultado antes de admitir el siguiente. La cancelación y la admisión se coordinan en la misma fila. El caso admitido puede registrar su resultado y su consumo. La lectura de una evaluación huérfana pasada de plazo la cierra como fallida y conserva los casos ya guardados. Repetir el UUID recupera ese estado.
+- **PostgreSQL.** Un proceso hijo murió por `SIGKILL` mientras esperaba el segundo caso del proveedor local. El primer resultado y su consumo liquidado se conservaron. La reserva del segundo quedó abierta al faltar confirmación. Al vencer el plazo, un nuevo evaluador recuperó el resultado parcial, rechazó publicar y no hizo otra llamada al proveedor.
+- **Chrome.** Bravo canceló con teclado desde una pantalla de 390 px y vio la confirmación mientras el caso iniciado seguía pendiente de registro. Tras completarse ese registro, la pantalla y la consulta después de recargar mostraron un único caso aprobado. La publicación siguió deshabilitada. Alfa recibió `404` al intentar cancelar la ejecución de Bravo.
+- **Reproducción.** Ejecutar las suites de IA-01 a IA-03 contra la base local migrada y el proveedor HTTP de prueba. Pasaron 41 pruebas de backend de Studio y los 13 recorridos de Playwright, además de ambos builds, la comprobación de tipos del backend y las pruebas del cliente web.
 
 ## WF-01. Ingreso mientras se revierte una revisión publicada
 
@@ -142,5 +150,5 @@ Con las mismas variables exportadas en el frontend, ejecutar `npm run test:e2e -
 | --- | --- |
 | Bandeja en tiempo real | Filtro por etiqueta, reconexión, reorden de webhooks e historial paginado cubiertos en MSG-04 y MSG-05. |
 | Envío y recepción | Toma de control, ventana de atención, reintento, adjuntos y recuperación de una entrega incierta cubiertos en MSG-06. |
-| Harness IA | El recorrido de revisión, evaluación, publicación y ejecución de texto está cubierto en modo de verificación en IA-03. Completar la admisión coordinada del proveedor de producción, cancelación, recuperación tras caída y los perfiles restantes. |
+| Harness IA | IA-03 e IA-04 cubren publicación, ejecución de texto, cancelación y recuperación de resultados parciales en modo de verificación. Completar la admisión coordinada del proveedor de producción y los perfiles restantes. |
 | Flujo operativo y navegación | Atención, pedido, pago, aprobación y conexión. Recorrer como administrador y operador, con teclado y diferentes tamaños de pantalla. |

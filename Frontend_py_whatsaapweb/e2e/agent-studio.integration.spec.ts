@@ -68,6 +68,46 @@ test('two workspaces evaluate, publish and execute only their verified revision'
     await expect(alpha.panel.getByText('Resultado de prueba: Ejecución Alfa', { exact: true })).toBeVisible();
     await expect(bravo.panel.getByRole('button', { name: 'Ejecutar revisión publicada' })).toHaveCount(0);
 
+    const checkpointId = randomUUID();
+    const checkpointUrl = process.env.STUDIO_FIXTURE_URL + '/checkpoint/' + checkpointId;
+    const bravoSuite = { id: randomUUID(), name: 'Suite para cancelar', scenarios: [
+      { id: 'settled', name: 'Caso iniciado', mockInput: 'Pausa QA ' + checkpointId, expectedTextPatterns: [checkpointId + '$'] },
+      { id: 'pending', name: 'Caso pendiente', mockInput: 'No debe ejecutarse', expectedTextPatterns: ['ejecutarse$'] },
+    ] };
+    const suiteResponse = await request.post(`${apiPath}/${graphId}/evaluation-suites?version=1`, {
+      headers: headers[1], data: bravoSuite,
+    });
+    expect(suiteResponse.status()).toBe(200);
+    await bravo.page.reload();
+    await bravo.panel.getByRole('combobox', { name: 'Suite para evaluar' }).selectOption(bravoSuite.id);
+    const finished = bravo.page.waitForResponse((response) => response.url().endsWith('/evaluations?version=1') &&
+      response.request().method() === 'POST');
+    try {
+      await bravo.panel.getByRole('button', { name: 'Evaluar revisión' }).press('Enter');
+      await expect.poll(async () => (await request.get(checkpointUrl)).status(), { timeout: 5000 }).toBe(200);
+      const cancelled = bravo.page.waitForResponse((response) => response.url().endsWith('/cancel?version=1') &&
+        response.request().method() === 'POST');
+      await bravo.panel.getByRole('button', { name: 'Cancelar evaluación' }).press('Enter');
+      const cancellation = await cancelled;
+      expect(cancellation.status()).toBe(200);
+      const { runId } = await cancellation.json();
+      await expect(bravo.panel.getByText('Evaluación cancelada', { exact: true })).toBeVisible();
+      await expect(bravo.panel.getByText('El último caso iniciado aún no tiene un resultado confirmado.')).toBeVisible();
+      const crossTenant = await request.post(`${apiPath}/${graphId}/evaluations/${runId}/cancel?version=1`, {
+        headers: headers[0], data: {},
+      });
+      expect(crossTenant.status()).toBe(404);
+    } finally {
+      await request.post(checkpointUrl);
+      await finished;
+    }
+    await expect(bravo.panel.getByRole('listitem')).toHaveText(['Caso 1 · Aprobado']);
+    await expect(bravo.panel.getByRole('button', { name: 'Publicar en verificación' })).toBeDisabled();
+    await bravo.page.reload();
+    await bravo.panel.getByRole('button', { name: 'Consultar evaluación guardada' }).press('Enter');
+    await expect(bravo.panel.getByText('Evaluación cancelada', { exact: true })).toBeVisible();
+    await expect(bravo.panel.getByRole('listitem')).toHaveText(['Caso 1 · Aprobado']);
+
     const revision = await request.post(`${apiPath}/${graphId}/revisions`, { headers: headers[0], data: {
       ...graph, policyRef: 'qa-v2', nodes: [{ ...graph.nodes[0], config: { ...graph.nodes[0].config, model: 'gpt-4o-mini' } }, graph.nodes[1]],
     } });

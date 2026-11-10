@@ -57,6 +57,7 @@ const suiteInput = createGraphDraftSchema.pick({}).extend({
 const timeoutMs = agentGraphVersionV1Schema.shape.version.max(boundedTextCapability.maxTimeoutMs);
 const evaluateInput = createGraphDraftSchema.pick({}).extend({ suiteId: graphIdSchema, runId, timeoutMs }).strict();
 const publishInput = createGraphDraftSchema.pick({}).extend({ evaluationId: runId }).strict();
+const cancelInput = createGraphDraftSchema.pick({}).strict();
 const executeInput = createGraphDraftSchema.pick({}).extend({
   attemptId: runId, timeoutMs, input: evalScenarioV1Schema.shape.mockInput.refine(isBoundedText),
 }).strict();
@@ -314,6 +315,17 @@ export default function createAgentStudioRoutes(uow?: TenantScopedUoW, verificat
     const id = runId.safeParse(req.params.runId);
     if (!id.success) return problem(res, 'VALIDATION_ERROR', 'Invalid evaluation ID.');
     const evaluation = await verification.evaluator.read(actor.tenantId, draft.graphId, draft.version, id.data);
+    if (!evaluation) return problem(res, 'NOT_FOUND', 'Evaluation was not found.');
+    res.json(evaluation);
+  }, true));
+
+  router.post('/:id/evaluations/:runId/cancel', withDraft(async (res, draft, req, actor) => {
+    if (!verification) return unavailable(res, draft);
+    const id = runId.safeParse(req.params.runId);
+    if (!id.success || !cancelInput.safeParse(req.body ?? {}).success) {
+      return problem(res, 'VALIDATION_ERROR', 'Invalid evaluation cancellation request.');
+    }
+    const evaluation = await verification.evaluator.cancel(actor.tenantId, draft.graphId, draft.version, id.data);
     if (!evaluation) return problem(res, 'NOT_FOUND', 'Evaluation was not found.');
     res.json(evaluation);
   }, true));
