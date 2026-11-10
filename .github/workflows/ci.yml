@@ -129,6 +129,7 @@ jobs:
             packages/contracts/package-lock.json
             packages/sdk/package-lock.json
             WhatsaapWeb-JS/package-lock.json
+            Frontend_py_whatsaapweb/package-lock.json
       - name: Instalar contratos y backend
         run: |
           npm --prefix ../packages/contracts ci
@@ -193,6 +194,51 @@ jobs:
           LEGACY_META_TEST_VIDEO: '1'
         run: |
           node --import tsx --test --test-concurrency=3 src/test/campaign-persistence.integration.test.ts src/test/marketplace-postgres.test.ts src/test/agent-studio-postgres.test.ts src/test/ai-quota-reservations-postgres.test.ts src/test/bounded-agent-dispatch.test.ts src/test/agent-domains-postgres.test.ts src/test/channel-connections-postgres.test.ts src/test/workflow-console.integration.test.ts src/test/conversation-send-postgres.test.ts src/test/attachment-rls-postgres.test.ts src/test/challenger_f8_immutability_compliance.test.ts src/test/operation-executions-postgres.test.ts src/test/catalog-inventory-postgres.test.ts src/test/orders-postgres.test.ts src/test/payment-gateway-postgres.test.ts src/test/payment-checkout-intents-postgres.test.ts src/test/payment-checkout-dispatch-postgres.test.ts src/test/payment-checkout-reconciliation-postgres.test.ts src/test/payment-checkout-reconciliation-routes.test.ts src/test/legacy-meta-send-postgres.test.ts
+      - name: Instalar cliente web y Chromium
+        working-directory: Frontend_py_whatsaapweb
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Probar renovación de sesión y reconexión Socket.IO del cliente
+        working-directory: Frontend_py_whatsaapweb
+        run: npm run test:socket-session
+      - name: Probar bandeja, Studio, apariencia, pedidos y pagos en Chromium
+        timeout-minutes: 6
+        env:
+          DB_NAME: whatsap_automat_browser_smoke
+          PORT: 3026
+          PRODUCT_SMOKE_URL: http://127.0.0.1:3026
+          STUDIO_FIXTURE_URL: http://127.0.0.1:3027
+          PRODUCT_GRAPH_FIXTURE_URL: http://127.0.0.1:3028
+          PGPASSWORD: ci-postgres-only
+        run: |
+          psql -X -v ON_ERROR_STOP=1 -h "$DB_HOST" -U postgres -d postgres \
+            -c 'CREATE DATABASE whatsap_automat_browser_smoke OWNER whatsap_smoke'
+          npm run db:migrate
+          evidence="$RUNNER_TEMP/browser-smoke"
+          mkdir -p "$evidence"
+          node --import tsx --import ./src/test/fixtures/browserGraph.mjs src/test/fixtures/browserStudio.ts \
+            > "$evidence/backend.log" 2>&1 &
+          app_pid=$!
+          trap 'kill "$app_pid" 2>/dev/null || true' EXIT
+          for attempt in {1..30}; do
+            if curl -fsS "$PRODUCT_SMOKE_URL/ready" >/dev/null 2>&1; then break; fi
+            if ! kill -0 "$app_pid" 2>/dev/null; then break; fi
+            sleep 1
+          done
+          curl -fsS "$PRODUCT_SMOKE_URL/ready"
+          curl -fsS "$STUDIO_FIXTURE_URL/health"
+          curl -fsS "$PRODUCT_GRAPH_FIXTURE_URL/health"
+          export PLAYWRIGHT_JSON_OUTPUT_FILE="$evidence/results.json"
+          npm --prefix ../Frontend_py_whatsaapweb run test:e2e -- --reporter=list,json --output "$evidence/traces"
+          node -e 'const { expected, skipped } = require(process.argv[1]).stats;
+            if (!expected || skipped) throw new Error(`Expected all browser tests to run. Passed: ${expected}, skipped: ${skipped}`)' "$PLAYWRIGHT_JSON_OUTPUT_FILE"
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: browser-smoke-diagnostics
+          path: ${{ runner.temp }}/browser-smoke
+          if-no-files-found: ignore
       - name: Ejecutar workflows con el worker compilado y Temporal
         env:
           DB_NAME: whatsap_automat_temporal_smoke
