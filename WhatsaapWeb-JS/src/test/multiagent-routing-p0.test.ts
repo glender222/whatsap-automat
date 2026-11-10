@@ -401,9 +401,11 @@ test('orchestrator descarta un final handoff del loop sin ticket persistido', as
 test('un turno vencido descarta una llamada de herramienta recibida tarde del proveedor', async (t) => {
   const { AgentToolRuntimeLoop } = await import('../modules/ai/application/AgentToolRuntimeLoop');
   const { AgentToolRegistry } = await import('../modules/ai/application/AgentToolRegistry');
-  const { getAiProviderFactory } = await import('../modules/ai/infra/provider/AiProviderFactory');
-  const entered = Promise.withResolvers<void>();
-  const response = Promise.withResolvers<string>();
+  const { getAiProviderFactory } = require('../modules/ai/infra/provider/AiProviderFactory') as typeof import('../modules/ai/infra/provider/AiProviderFactory');
+  let notifyEntered!: () => void;
+  const entered = new Promise<void>((resolve) => { notifyEntered = resolve; });
+  let releaseResponse!: (value: string) => void;
+  const response = new Promise<string>((resolve) => { releaseResponse = resolve; });
   const controller = new AbortController();
   const expired = new Error('El trabajo de entrada ya venció');
   let modelCalls = 0;
@@ -412,8 +414,8 @@ test('un turno vencido descarta una llamada de herramienta recibida tarde del pr
     complete: () => {
       modelCalls++;
       if (modelCalls === 1) {
-        entered.resolve();
-        return response.promise;
+        notifyEntered();
+        return response;
       }
       return Promise.resolve('{"type":"final","action":"block","reply":"","confidence":1}');
     },
@@ -429,9 +431,9 @@ test('un turno vencido descarta una llamada de herramienta recibida tarde del pr
     ctx: { companyId: 1, chatId: '51999999999' } as never, agent: makeAgent(40, 'support'),
     message: 'Prueba', history: [], companyMode: 'automator', signal: controller.signal,
   });
-  await Promise.race([entered.promise, pending.then(() => assert.fail('El proveedor no recibió el turno'))]);
+  await Promise.race([entered, pending.then(() => assert.fail('El proveedor no recibió el turno'))]);
   controller.abort(expired);
-  response.resolve('{"type":"tool_request","toolCalls":[{"name":"tag.applySystem","input":{"tag":"ia-asistiendo"}}]}');
+  releaseResponse('{"type":"tool_request","toolCalls":[{"name":"tag.applySystem","input":{"tag":"ia-asistiendo"}}]}');
   await assert.rejects(pending, (error) => error === expired);
   assert.equal(modelCalls, 1);
   assert.equal(toolCalls, 0);
