@@ -83,6 +83,7 @@ test('reconciles only verified checkout observations and settles once under tena
   const requests: string[] = [];
   const reads = new Map<string, (res: ServerResponse, remote: Record<string, unknown>) => void>();
   let loseAcknowledgment = false;
+  let allowSearch = false;
   let createdId: string;
   let sequence = randomInt(100_000_000, 999_999_999);
   const server = createServer(async (req, res) => {
@@ -103,7 +104,15 @@ test('reconciles only verified checkout observations and settles once under tena
         if (loseAcknowledgment) return sendJson(res, 502, { code: 'fixture' });
         return sendJson(res, 201, remote);
       }
-      const id = req.url?.split('/').at(-1) ?? '';
+      const requestUrl = new URL(req.url ?? '/', 'http://127.0.0.1');
+      if (req.method === 'GET' && requestUrl.pathname === '/v1/orders') {
+        const reference = requestUrl.searchParams.get('external_reference');
+        assert.equal(requestUrl.searchParams.get('page'), '1');
+        assert.equal(requestUrl.searchParams.get('page_size'), '2');
+        const data = allowSearch ? [...provider.values()].filter((row) => row.external_reference === reference) : [];
+        return sendJson(res, 200, { data, paging: { total: data.length, total_pages: data.length, offset: 0, limit: 2 } });
+      }
+      const id = requestUrl.pathname.split('/').at(-1) ?? '';
       const remote = provider.get(id);
       if (req.method !== 'GET' || !remote) return sendJson(res, 404, { code: 'not_found' });
       const read = reads.get(id);
@@ -119,7 +128,7 @@ test('reconciles only verified checkout observations and settles once under tena
   const address = server.address();
   assert.ok(address && typeof address !== 'string');
   const adapter = new MercadoPagoOrdersAdapter(
-    (url, init) => fetch(`http://127.0.0.1:${address.port}${url.pathname}`, init),
+    (url, init) => fetch(`http://127.0.0.1:${address.port}${url.pathname}${url.search}`, init),
     async (scope) => scope.companyId === companyId && scope.gatewayId === String(gatewayId)
       ? { ...scope, sellerId, accessToken: 'fixture-access-token' } : null,
   );
@@ -217,12 +226,15 @@ test('reconciles only verified checkout observations and settles once under tena
     const checkout = await prepare();
     loseAcknowledgment = false;
     const count = requests.length;
-    await assert.rejects(reconciliation.reconcile({ ...actor, intentId: checkout.id }), { code: 'CHECKOUT_PROVIDER_ORDER_REQUIRED' });
+    assert.deepEqual(await reconciliation.reconcile({ ...actor, intentId: checkout.id }),
+      { kind: 'retry', reason: 'provider_order_unresolved' });
+    assert.equal(requests.length, count + 1);
+    assert.match(requests[count], /^GET \/v1\/orders\?/);
     await assert.rejects(reconciliation.reconcile({
       companyId: companyId + 1, actorUserId: actorIds.get(companyId + 1)!, sessionRole: 'ADMIN',
       intentId: checkout.id, providerOrderId: checkout.providerId,
     }), { code: 'CHECKOUT_INTENT_NOT_FOUND' });
-    assert.equal(requests.length, count);
+    assert.equal(requests.length, count + 1);
 
     const correctReference = provider.get(checkout.providerId)!.external_reference;
     remoteStatus(checkout.providerId, { external_reference: randomUUID(), ...credited('0.40') });
@@ -230,7 +242,11 @@ test('reconciles only verified checkout observations and settles once under tena
       { kind: 'retry', reason: 'provider_unavailable' });
     assert.equal((await settlementActions(checkout.orderId)).length, 0);
     remoteStatus(checkout.providerId, { external_reference: correctReference });
-    assert.equal((await observe(checkout.id, checkout.providerId)).state, 'settled');
+    allowSearch = true;
+    assert.equal((await observe(checkout.id)).state, 'settled');
+    allowSearch = false;
+    assert.match(requests.at(-2)!, /^GET \/v1\/orders\?/);
+    assert.equal(requests.at(-1), `GET /v1/orders/${checkout.providerId}`);
     await assert.rejects(reconciliation.reconcile({ ...actor, intentId: checkout.id, providerOrderId: providerId(900) }),
       { code: 'CHECKOUT_PROVIDER_ORDER_CONFLICT' });
     assert.equal(requests.slice(count).filter((request) => request.startsWith('POST')).length, 0);

@@ -268,6 +268,7 @@ test('discovers a candidate using the claim window and requires the individual o
   fixture.respond((response) => sendJson(response, 200, responseOrder({ country_code })));
   assert.deepEqual(await fixture.adapter.lookup({ ...lookupInput, orderId: candidate.orderId }), {
     kind: 'observed', orderId: remoteId, status: 'created', statusDetail: 'created', amountPaid: '0.00', payment: 'unpaid',
+    providerPayment: 'unpaid', providerExpiresAt: now + 77_000,
   });
   assert.deepEqual(fixture.requests.slice(1).map(({ method, path }) => [method, path]), [
     ['GET', `/v1/orders/${remoteId}`], ['GET', `/v1/orders/${remoteId}`],

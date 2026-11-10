@@ -21,7 +21,7 @@ type Lookup = Awaited<ReturnType<MercadoPagoOrdersAdapter['lookup']>>;
 type Observed = Extract<Lookup, { kind: 'observed' }>;
 type ReconcileResult =
   | { kind: 'observed'; reconciliation: CheckoutReconciliation }
-  | { kind: 'retry'; reason: 'provider_unavailable' | 'observation_superseded' };
+  | { kind: 'retry'; reason: 'provider_unavailable' | 'provider_order_unresolved' | 'observation_superseded' };
 type LockedCheckout = Awaited<ReturnType<typeof lockCheckoutIntent>>;
 const uuid = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 const claimGraceMs = 30_000;
@@ -44,20 +44,26 @@ function review(reviewCode: Extract<ObservationDecision, { state: 'review_requir
 
 export class PaymentCheckoutReconciliationService {
   constructor(
-    private readonly adapter: Pick<MercadoPagoOrdersAdapter, 'lookup'>,
+    private readonly adapter: Pick<MercadoPagoOrdersAdapter, 'lookup' | 'search'>,
     private readonly uow: Pick<TenantScopedUoW, 'run'> = tenantScopedUoW,
   ) {}
 
   async reconcile(input: ReconcileInput): Promise<ReconcileResult> {
     requireInput(input);
-    const plan = await this.begin(input);
-    const evidence = await this.adapter.lookup(plan.lookup);
-    if (evidence.kind !== 'observed' || evidence.orderId !== plan.lookup.orderId) return { kind: 'retry', reason: 'provider_unavailable' };
+    const { lookupVersion, checkout, orderId: registeredOrderId } = await this.begin(input);
+    let orderId = registeredOrderId;
+    if (!orderId) {
+      const candidate = await this.adapter.search(checkout);
+      if (candidate.kind !== 'candidate') return { kind: 'retry', reason: 'provider_order_unresolved' };
+      orderId = candidate.orderId;
+    }
+    const evidence = await this.adapter.lookup({ ...checkout, orderId });
+    if (evidence.kind !== 'observed' || evidence.orderId !== orderId) return { kind: 'retry', reason: 'provider_unavailable' };
     try {
-      return await this.record(input, plan.lookupVersion, evidence);
+      return await this.record(input, lookupVersion, evidence);
     } catch (error) {
       if (!(error instanceof OrderError) || error.code !== 'ORDER_RESERVATION_EXPIRED') throw error;
-      return this.record(input, plan.lookupVersion, evidence, true);
+      return this.record(input, lookupVersion, evidence, true);
     }
   }
 
@@ -73,16 +79,16 @@ export class PaymentCheckoutReconciliationService {
         throw new PaymentCheckoutIntentError(409, 'CHECKOUT_PROVIDER_ORDER_CONFLICT', 'La orden del proveedor difiere de la registrada.');
       }
       const orderId = dispatch.providerOrderId ?? input.providerOrderId;
-      if (!orderId) {
-        throw new PaymentCheckoutIntentError(409, 'CHECKOUT_PROVIDER_ORDER_REQUIRED', 'Identifica la orden en el proveedor antes de conciliar.');
-      }
       if (dispatch.state === 'claimed' && !dispatch.providerOrderId) {
         const { rows: [clock] } = await client.query('SELECT clock_timestamp() >= $1::timestamptz AS elapsed',
           [new Date(dispatch.plannedAt + claimGraceMs)]);
         if (!clock.elapsed) throw unavailableDispatch();
       }
       const lookupVersion = await new PaymentCheckoutReconciliationRepositoryPg(client).begin(companyId, intentId);
-      return { lookupVersion, lookup: { companyId, intent, orderId, validUntil: dispatch.validUntil } };
+      return {
+        lookupVersion, orderId,
+        checkout: { companyId, intent, plannedAt: dispatch.plannedAt, validUntil: dispatch.validUntil },
+      };
     });
   }
 
