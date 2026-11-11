@@ -18,3 +18,10 @@ Los avisos de Meta llegaron fuera de orden. La prueba de regresión reprodujo qu
 Al terminar se retiró el callback temporal y se cerró el túnel. Graph confirmó que el callback ya no estaba registrado y que la app seguía suscrita a la cuenta de WhatsApp. Para repetir la prueba con otra URL, véase [Configuración manual exacta en Meta Developers](../../WhatsaapWeb-JS/README.md#configuración-manual-exacta-en-meta-developers).
 
 En una comprobación posterior, la consulta de inventario de líneas devolvió HTTP 401 y código Graph 190 con la credencial disponible. La prueba de dos líneas reales sigue pendiente. Esta comprobación fue de solo lectura.
+
+
+## Revisión del panel el 11 de noviembre
+
+La sesión del navegador permitió consultar la aplicación y WhatsApp Manager. El selector mostró una cuenta de prueba y su inventario una línea con estado Connected. El panel Step 1. Try it out mostró el campo Access Token String con el estado Not generated yet. La revisión fue de lectura del panel.
+
+La comprobación con dos líneas reales sigue pendiente de una segunda línea configurada y del acceso de prueba vigente. El backend local conserva la evidencia separada de dos líneas sintéticas y la prueba real anterior con una línea.

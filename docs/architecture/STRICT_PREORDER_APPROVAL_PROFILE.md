@@ -4,34 +4,39 @@ Este documento delimita el siguiente corte después de la identidad única de ap
 
 ## Recorrido propuesto
 
-El cliente consulta el catálogo y solicita un prepedido. El agente prepara una propuesta con productos autorizados, cantidades y estado `draft` o `pending_handoff`. El supervisor revisa la propuesta en Aprobaciones, decide y vuelve al pedido y la conversación de origen. El primer efecto consiste en crear ese prepedido mediante el dominio de pedidos.
+El cliente consulta el catálogo y solicita un prepedido. El agente prepara una intención durable con productos autorizados, cantidades y uno de los estados solicitables `draft`, `quoted` o `pending_handoff`. El estado por defecto es `draft`. El dominio crea o actualiza el prepedido editable de la conversación y devuelve su resultado.
+
+El prepedido corresponde a `medium_write` en el blueprint y a `write` en el contrato actual del broker. Su ejecución automática exige empresa en modo `automator`, agente en modo `auto`, módulo `orders`, flag `orderUpsertPreorder`, autorización e idempotencia. La revisión humana se activa cuando la política aplicable, `requiresApproval` o un nodo `approval` explícito del grafo la exigen. En ese recorrido el supervisor decide en Aprobaciones y regresa al pedido y la conversación de origen.
+
+El estado comercial `pending_approval` es un resultado del dominio que puede aparecer al detectar condiciones de revisión del producto, disponibilidad o backorder. El perfil debe conservar ese resultado, así como `unavailable`, en el prepedido y en la respuesta al cliente.
 
 El perfil necesita identidad explícita en compilación, evaluación, publicación y vinculación. Una revisión publicada con perfil de texto o lectura conserva su alcance original. Se mantienen los contratos de invocación existentes del ToolBroker; la autorización del runtime añade la fuente canónica y la revisión publicada verificadas por el servidor.
 
 ## Propuesta durable
 
-Antes de abrir la solicitud de aprobación, persistir una propuesta inmutable que incluya lo siguiente.
+Antes de ejecutar el efecto o abrir una aprobación requerida, persistir una intención inmutable que incluya lo siguiente.
 
 - Empresa, canal, conversación, mensaje entrante canónico y ejecución autorizada.
 - Grafo, revisión, hash de especificación, nodo y acción lógica asignada por el servidor.
 - Herramienta `order.upsertPreorder`, argumentos normalizados, estado permitido y hash de acción.
 - Productos y alcance de catálogo verificados, cantidades, precios calculados por el servidor y versiones usadas para el resumen revisado.
 - Política efectiva, grants, modo de empresa/agente y `ownership_epoch` de la conversación.
-- Referencia a la solicitud de aprobación, vencimiento y estado de continuación.
+- Referencia al prepedido editable y su versión cuando la acción actualiza uno existente.
+- Decisión de política, referencia a aprobación cuando se requiera, vencimiento y estado de continuación.
 
-La aprobación muestra exactamente esa propuesta. La continuación recupera sus argumentos persistidos y conserva el paso original. La generación de otra acción por el modelo requiere otra propuesta y otra autorización.
+Cuando se requiere aprobación, su detalle muestra exactamente la intención que se va a ejecutar. La continuación recupera los argumentos persistidos y conserva el paso original. Una acción posterior legítima tiene su propia identidad y puede actualizar el mismo prepedido conforme al dominio.
 
 ## Frontera transaccional
 
-La decisión usa la sesión firmada, membresía vigente, CAS, motivo y reautenticación según el riesgo y la política existentes. La versión de la fila de aprobación y la versión de política se conservan como datos distintos.
+La admisión evalúa la política efectiva del paso. Una aprobación requerida usa sesión firmada, membresía vigente, CAS, motivo y reautenticación según riesgo. La versión de la fila de aprobación y la versión de política se conservan como datos distintos.
 
-Al consumir una aprobación, bloquear y revalidar la propuesta, su autorización y la conversación. Revalidar la vigencia del supervisor, estado de pausa/propiedad, publicación fijada, grants, alcance y condiciones comerciales de los productos. Un cambio que altere el contenido aprobado exige una propuesta nueva.
+Antes del efecto, bloquear y revalidar la intención, su autorización, la conversación, el modo de empresa/agente, la publicación fijada, los grants y las condiciones comerciales de los productos. Cuando se consume una aprobación, comprobar además su vigencia, la del supervisor y la correspondencia exacta con el paso. Un cambio que altere el contenido aprobado exige una propuesta nueva.
 
-El prepedido, el consumo de la autorización y el recibo del efecto se confirman en la misma transacción PostgreSQL. La clave de idempotencia pertenece a empresa, ejecución, nodo y acción lógica. El receipt conserva el hash exacto y el ID de pedido. Una restricción de dominio evita crear otro prepedido para ese paso.
+La creación o actualización del prepedido, el consumo de la autorización que corresponda y el recibo del efecto se confirman en la misma transacción PostgreSQL. La clave de idempotencia pertenece a empresa, ejecución, nodo y acción lógica. El recibo conserva el hash exacto y el ID de pedido. Una restricción de dominio evita repetir la mutación de ese paso.
 
-Reutilizar el claim durable 061 y el repositorio de pedidos mediante el mismo cliente transaccional. El consumo queda referenciado de forma durable sin cambiar el significado de los estados públicos de aprobación. El servicio legacy de prepedidos necesita propagar la referencia canónica y la identidad del efecto al repositorio antes de servir como adaptador del perfil.
+Reutilizar el claim durable 061 y el repositorio de pedidos mediante el mismo cliente transaccional. El servicio de prepedidos necesita propagar la referencia canónica y la identidad del efecto al repositorio. El upsert conserva la selección del último prepedido editable, la fusión de líneas por producto y la continuidad de `pending_handoff`. El consumo queda referenciado por el paso ejecutado.
 
-Después de un reinicio, la continuación consulta propuesta, consumo y recibo. Un commit confirmado permite recuperar el mismo pedido. Una transacción interrumpida permite retomar el paso con la misma clave y volver a comprobar permisos. La implementación debe evitar transacciones hijas que esperen los bloqueos de la transacción exterior.
+Después de un reinicio, la continuación consulta intención, autorización y recibo. Un commit confirmado permite recuperar el mismo pedido. Una transacción interrumpida permite retomar el paso con la misma clave y volver a comprobar permisos y estado del pedido. La implementación debe evitar transacciones hijas que esperen los bloqueos de la transacción exterior.
 
 ## Límites del corte
 
@@ -41,20 +46,20 @@ Los futuros efectos externos requieren el acuse y la conciliación específicos 
 
 ## Orden de implementación
 
-1. Añadir la representación durable de la propuesta y su referencia a aprobación y efecto, con RLS y compatibilidad con ejecuciones existentes.
+1. Añadir la intención durable y su referencia al efecto, al prepedido y a la aprobación requerida, con RLS y compatibilidad con ejecuciones existentes.
 2. Incorporar el compilador y la evidencia de evaluación del perfil explícito. Probar validación de argumentos, aislamiento y resultados de dominio antes de admitir la publicación.
-3. Implementar la continuación y el consumo transaccional junto al prepedido. Conservar la API de ToolBroker y los consumidores anteriores.
+3. Implementar la admisión automática y la continuación de los pasos que requieran aprobación, con consumo transaccional junto al upsert. Conservar la API de ToolBroker y los consumidores anteriores.
 4. Componer el recorrido desde un mensaje canónico, la cola de Aprobaciones y el pedido hasta regresar a la conversación. Usar las rutas y los controles de navegación existentes.
 5. Fijar un candidato y pasar la revisión independiente antes de activar el perfil.
 
 ## Criterios de aceptación
 
 - Alfa y Bravo pueden compartir remitente e ID externo sin compartir propuestas, decisiones, pedidos o eventos.
-- La misma acción solicitada desde dos procesos tiene una sola propuesta, aprobación y pedido. Una modificación de argumentos recibe conflicto.
-- Rechazo, vencimiento, falta de permiso, revocación del supervisor, cambio de política y pausa o toma humana dejan el efecto sin ejecutar.
+- La misma acción solicitada desde dos procesos tiene una intención y una mutación confirmadas. Si requiere aprobación, ambos procesos comparten su solicitud. Una modificación de argumentos con la misma clave recibe conflicto.
+- La admisión cubre ejecución automática permitida y aprobación requerida por nodo o política. Rechazo, vencimiento de una aprobación necesaria, falta de permiso, revocación, cambio de política y pausa o toma humana impiden despachar el paso.
 - La contraseña se comprueba según la política existente y queda fuera de la propuesta, almacenamiento del cliente, auditoría e historial del runtime.
 - SIGKILL antes de la decisión, después de aprobar y antes o después del commit recupera el estado sin duplicar el pedido.
-- El resultado confirmado conserva el ID de pedido al reintentar. Ningún reintento vuelve a consumir la aprobación o admite un paso nuevo.
+- El resultado confirmado conserva el ID de pedido al reintentar. Una acción posterior autorizada puede actualizar ese pedido con su propia clave. Se conservan `draft`, `quoted`, `pending_handoff` y los resultados comerciales derivados del dominio.
 - Web y móvil muestran pendiente, aprobada, rechazada, vencida y recuperación. El operador puede abrir el pedido resultante y volver a la conversación con su borrador y contexto.
 - Las evaluaciones y simulaciones identifican sus efectos sintéticos. Las revisiones de texto y catálogo publicadas previamente conservan sus recorridos.
 - Las pruebas de Chromium, PostgreSQL, cuota y autorización corren sobre el mismo SHA y registran omisiones y requisitos externos.

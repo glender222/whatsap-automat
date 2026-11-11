@@ -169,6 +169,8 @@ Chromium amplía el recorrido de Studio en modo proveedor con la aplicación y P
 
 La bandeja de Alfa muestra un mensaje entrante y una respuesta automática. Graph registra un solo envío, por la línea de Alfa, y ninguno por la de Bravo. La aceptación del proveedor aparece como «Aceptado por WhatsApp». Un recibo de lectura presentado por Bravo no altera ese estado. Los recibos propios cambian la respuesta a «Enviado» y «Leído». Un recibo «Entregado» posterior y una recarga conservan «Leído» y la misma respuesta única. La bandeja de Bravo muestra su propio mensaje. [Prueba de Studio y WhatsApp](../../Frontend_py_whatsaapweb/e2e/agent-studio.integration.spec.ts).
 
+El CI de `9977303` también reprodujo una pulsación de Guardar antes de que llegara la revisión histórica al editor. El caso ahora retiene esa respuesta, comprueba el bloqueo durante la carga y guarda mediante Tab y Enter después de confirmar el contenido editable. Verifica el POST exacto y la revisión 3. [Disponibilidad del formulario en el E2E](STUDIO_DRAFT_SAVE_READINESS.md).
+
 ## UX-14. Vincular un catálogo y recuperar su estado desde Studio y Bandeja
 
 - **Recorrido.** En móvil y con teclado, Alfa y Bravo evalúan, publican y vinculan su propio catálogo. Ambas empresas reciben el mismo contacto e ID externo. Bandeja muestra la sugerencia identificada por perfil y revisión, con el producto de la empresa correspondiente.

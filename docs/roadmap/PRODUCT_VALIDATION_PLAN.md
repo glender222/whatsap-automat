@@ -49,6 +49,32 @@ Refactorizar a partir de los fallos reproducidos: mantener la apariencia en el e
 | Harness, runtime y proveedor | ¿Qué autoriza cada ejecución y en qué punto se invalida un resultado? ¿Quién conserva la decisión de cuota y el estado del efecto? | Cambiar vínculo, pausa, propietario o publicación mientras hay una ejecución en curso. Comprobar por separado el resultado visible, el consumo registrado, las llamadas al proveedor y los envíos. Si una versión amplia de conversación cambia durante una operación válida, verificar qué transición requiere una señal de invalidación específica. |
 | Aplicación, sesión y módulos | ¿Qué estado dura mientras se usa el navegador, qué estado pertenece a la sesión y qué conserva el recorrido al volver? | Recorrer módulos desde el menú, enlaces directos y el botón Atrás. Comparar primer render, foco, apariencia, filtros y borradores. Repetir con cambio de empresa y comprobar que solo se conservan las preferencias con alcance de navegador. |
 
+### Recorrido canónico que cubren las pruebas
+
+```mermaid
+flowchart TD
+  Studio[Evaluación de Studio] --> Publication[Publicación por empresa y revisión]
+  Studio --> Gateway
+  Inbound[Webhook firmado] --> Work[Outbox entrante durable]
+  Inbound --> History
+  Publication --> Runtime[Runtime con vínculo y autoridad de conversación]
+  Work --> Runtime
+  Runtime --> Gateway[Gateway y cuota compartida]
+  Gateway --> Model[Modelo autorizado]
+  Model --> Checkpoints[Checkpoints y ledgers por ronda]
+  Checkpoints --> Runtime
+  Runtime --> Suggestion[Sugerencia con lectura autorizada]
+  Runtime --> Outbound[Outbox y claim de envío]
+  Outbound --> Graph[WhatsApp Graph]
+  Graph --> Receipt[Webhook de entrega y lectura]
+  Receipt --> History[Historial persistido]
+  History --> Client[HTTP y Socket.IO]
+  Suggestion --> Client
+  Client --> Inbox[Bandeja]
+```
+
+El mensaje entrante y su trabajo se persisten en una transacción. Los cortes de proceso se prueban en los límites de persistencia, llamada al modelo y envío. La comprobación de la interfaz incluye el resultado tras reconectar y recargar el historial.
+
 ### Recorrido de referencia para UX/UI
 
 1. Abrir un enlace directo a Bandeja con una preferencia de tema guardada distinta de la del sistema. Comprobar el primer render, antes de que carguen los módulos. Cambiar de Bandeja a Pedidos, Pagos, Studio y Configuración. Repetir en Claro, Oscuro y Sistema, incluyendo recarga y navegación Atrás. Revisar superficies, texto, diálogos y estados de foco en ambos temas.
@@ -85,7 +111,7 @@ La batería parte de dos empresas, Alfa y Bravo, con un administrador y un opera
 
 ### Siguiente corte de arquitectura
 
-El [plan del perfil de prepedidos con aprobación](../architecture/STRICT_PREORDER_APPROVAL_PROFILE.md) delimita la siguiente capacidad. Parte de una propuesta exacta y durable del paso canónico y termina en un prepedido local con recibo. La aprobación, su consumo y la mutación de dominio comparten una frontera verificable. Los criterios incluyen dos empresas, concurrencia, revocación, reinicios y regreso desde Aprobaciones al pedido y la conversación.
+El [plan del perfil de prepedidos](../architecture/STRICT_PREORDER_APPROVAL_PROFILE.md) delimita la siguiente capacidad. Una intención durable identifica el paso canónico y su creación o actualización del prepedido con recibo. La política decide la admisión automática o la aprobación requerida. Su consumo y la mutación de dominio comparten una frontera verificable. Los criterios incluyen dos empresas, concurrencia, revocación, reinicios y regreso desde Aprobaciones al pedido y la conversación.
 
 ## Matriz de aceptación
 
