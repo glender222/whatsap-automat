@@ -32,6 +32,8 @@ import createAgentStudioRoutes, { createAgentSimulationRoutes } from './routes/a
 import { createStudioProviderAccess, type StudioVerification } from './services/ai/studio/StudioVerification';
 import { createTenantBoundedModelExecution } from './services/ai/gateway/TenantBoundedModelExecution';
 import { tenantScopedUoW } from './db/TenantScopedUoW';
+import { CatalogRouterCheckpointStore } from './services/ai/runtime/CatalogRouterCheckpointStore';
+import { startCatalogCheckpointRetention } from './services/ai/runtime/CatalogCheckpointRetention';
 import createApprovalRoutes from './routes/approvalRoutes';
 import createChannelConnectionRoutes from './routes/channelConnectionRoutes';
 import createOperationExecutionRoutes from './routes/operationExecutionRoutes';
@@ -380,6 +382,10 @@ export class App {
 
       this.server.listen(config.server.port, config.server.host, () => {
         this.server.once('close', startOrderReservationExpiry(pool));
+        const stopCatalogRetention = startCatalogCheckpointRetention(pool, new CatalogRouterCheckpointStore(tenantScopedUoW));
+        this.server.once('close', () => {
+          void stopCatalogRetention().catch(() => console.error('No se pudo cerrar la limpieza de checkpoints de catálogo'));
+        });
         const stopMetaInbound = this.whatsappService.startMetaInboundWorker();
         this.server.once('close', () => {
           void stopMetaInbound().catch(() => console.error('No se pudo cerrar el worker de mensajes entrantes'));

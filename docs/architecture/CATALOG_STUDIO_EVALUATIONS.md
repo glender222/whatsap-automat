@@ -59,7 +59,13 @@ Dos POST simultáneos comparten el caso admitido, sus reservas y checkpoints. Un
 
 La cancelación se revalida entre pasos y antes del proveedor. Una llamada ya admitida puede liquidar su consumo, pero no habilita catálogo, otra ronda o un aprobado posterior. El scorecard cancelado se actualiza cuando llega ese consumo. La API no crea un canal alternativo de respuestas del worker.
 
-GET de una evaluación terminada conserva **historia** (`status` y `passed`), pero 066 vuelve a verificar la evidencia cifrada y los permisos para calcular disponibilidad de publicación. No llama al proveedor ni vuelve a cobrar; si falta evidencia vigente, mantiene el scorecard y devuelve `publicationAllowed:false`. Los resultados cifrados siguen sujetos al TTL de 064; las operaciones de evaluación ejecutan limpieza acotada por tenant. El barrido periódico independiente continúa pendiente de la composición operativa del runtime.
+GET de una evaluación terminada conserva el `status` y `passed` históricos. Desde 066, la lectura verifica la evidencia cifrada y los permisos para calcular la disponibilidad de publicación con los registros existentes. Si la evidencia perdió vigencia, mantiene el scorecard y devuelve `publicationAllowed:false`.
+
+Los resultados cifrados siguen sujetos al TTL de 064; las operaciones de evaluación conservan su limpieza acotada por tenant. `App.start` también inicia `CatalogCheckpointRetention` al escuchar HTTP, sin depender de visitas o llamadas a Studio. El barrido pagina `companies` por ID (100 por vuelta), procesa hasta cuatro empresas simultáneas y llama una vez a `eraseExpired` por empresa. Cada llamada elimina cifrados de hasta 100 runs vencidos con `SKIP LOCKED` y timeout de sentencia de un segundo. Tras completar la página espera diez segundos; al alcanzar el final vuelve al inicio. Una empresa con errores no detiene a las otras y su trabajo se vuelve a intentar en la siguiente vuelta completa.
+
+El barrido no consulta proveedores ni requiere clave de cifrado: el almacén construye el cifrador sólo al leer/escribir payloads. Conserva filas, hashes, ledgers, reservas y consumos; marca los runs vencidos como `expired`. Una base todavía sin las tablas de 064 genera un aviso acotado y se reintenta. Cerrar el servidor solicita la detención: cancela el siguiente tick e impide admitir nuevas empresas. La promesa de `stop()` termina después de las operaciones ya admitidas. No hay ticks solapados dentro de un proceso; varias instancias coordinan las filas mediante los bloqueos del almacén.
+
+La eliminación física es eventual: el TTL de una hora bloquea reutilizar el contenido, pero la demora del barrido depende del número de empresas, la cola vencida, los bloqueos y los fallos de base de datos. No se promete eliminación exactamente al cumplir una hora. [Reproducción de inactividad, concurrencia y apagado](../qa/CATALOG_CHECKPOINT_RETENTION.md).
 
 ## Publicación y próximos controles
 

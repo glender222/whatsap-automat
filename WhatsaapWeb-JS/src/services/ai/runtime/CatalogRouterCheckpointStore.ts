@@ -116,7 +116,11 @@ function serializeTool(value: CatalogRouterToolOutput): string {
 
 /** Identity and accounting are durable. Plaintext access always requires authorization in the same transaction. */
 export class CatalogRouterCheckpointStore {
-  constructor(private readonly uow: TenantScopedUoW = tenantScopedUoW, private readonly cipher = new SecretCipher()) {}
+  constructor(private readonly uow: TenantScopedUoW = tenantScopedUoW, private cipher?: SecretCipher) {}
+
+  private payloadCipher(): SecretCipher {
+    return this.cipher ??= new SecretCipher();
+  }
 
   async prepare(tenantId: number, command: CatalogRouterPrepareCommand): Promise<CatalogRouterCheckpointRun> {
     requireId(command.id);
@@ -236,7 +240,7 @@ export class CatalogRouterCheckpointStore {
         tokens_used=$8,cost_micro_usd=$9,updated_at=clock_timestamp()
       FROM eligibility WHERE round.tenant_id=$1 AND round.run_id=$2 AND round.slot=$3 RETURNING round.state`,
     [tenantId,id,command.slot,eligible,command.ledgerId,outputHash,
-      eligible?this.cipher.encrypt(command.output!):null,ledger.total_tokens,ledger.cost_micro_usd,run.deadline_at]);
+      eligible?this.payloadCipher().encrypt(command.output!):null,ledger.total_tokens,ledger.cost_micro_usd,run.deadline_at]);
     await db.query(`UPDATE catalog_router_runs SET tokens_used=$3,cost_micro_usd=$4,updated_at=clock_timestamp()
       WHERE tenant_id=$1 AND id=$2`, [tenantId,id,tokens.toString(),cost.toString()]);
     // A late/failed/over-budget result still commits its accounting, but cannot authorize another step.
@@ -280,7 +284,7 @@ export class CatalogRouterCheckpointStore {
         SELECT $1,$2,$3,$4,$5,$6 FROM catalog_router_runs
         WHERE tenant_id=$1 AND id=$2 AND state='active' AND deadline_at>clock_timestamp()
           AND clock_timestamp()<$7::timestamptz RETURNING run_id`,
-      [tenantId,id,command.inputHash,command.authorizationHash,hash(text),this.cipher.encrypt(text),toolDeadline]);
+      [tenantId,id,command.inputHash,command.authorizationHash,hash(text),this.payloadCipher().encrypt(text),toolDeadline]);
       if (saved.rowCount !== 1) throw new CatalogRouterCheckpointError('CHECKPOINT_EXPIRED');
       return JSON.parse(text) as CatalogRouterToolOutput;
     });
@@ -379,7 +383,7 @@ export class CatalogRouterCheckpointStore {
   }
   private decrypt(encrypted: string, expectedHash: string): string {
     try {
-      const text = this.cipher.decrypt(encrypted);
+      const text = this.payloadCipher().decrypt(encrypted);
       if (text.length > 4096 || hash(text) !== expectedHash) throw new Error('Invalid checkpoint');
       return text;
     } catch { throw new CatalogRouterCheckpointError('CHECKPOINT_INVALID'); }
