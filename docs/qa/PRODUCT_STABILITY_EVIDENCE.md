@@ -252,6 +252,12 @@ El ejemplo inicial del editor validaba estructura, pero no preparaba el modelo n
 - **Validación.** Pasaron 28 pruebas PostgreSQL de cuota, pin, API y worker. Con Chromium y proveedores locales, Alfa vinculó la revisión, recibió un mensaje firmado y vio una sola notificación Socket.IO sin texto. La sugerencia se recuperó después de recargar y se copió al borrador sin enviar a Graph. Bravo recibió un mensaje con el mismo identificador externo y no recibió esa sugerencia ni notificación. Un cambio administrativo concurrente protegió la vinculación de un retiro obsoleto.
 - **Alcance.** El perfil admite una llamada de texto. Los perfiles de router y herramientas conservan sus propios requisitos de evaluación y recuperación. [Contrato, migración y reproducción](STRICT_WHATSAPP_RUNTIME.md).
 
+## IA-11. Evaluar el router de catálogo desde Agent Studio
+
+- **Antes.** El perfil de texto rechazaba un grafo con router y herramienta. El primer ensayo de catálogo podía registrar el consumo del router y perder el resultado necesario para continuar tras reiniciar el proceso.
+- **Después.** `catalog-router-v1` fija cada ronda y la lectura autorizada en PostgreSQL. Studio guarda suites con expectativas de texto y de herramientas. La evaluación contrasta las expectativas con el registro de la herramienta y los dos ledgers de cada caso. Reintentar el mismo run recupera lo confirmado y un resultado incompleto no aprueba la suite.
+- **Validación.** La instalación limpia y la actualización desde 064 pasaron. Ochenta y cuatro pruebas combinadas cubrieron catálogo, Studio, cuotas y runtime estricto de texto. Chromium usó la aplicación y PostgreSQL con Alfa y Bravo, el mismo identificador de grafo y productos distintos. Cada empresa aprobó un caso con búsqueda y otro sin ella, recuperó el resultado al recargar y comprobó cuatro ledgers propios. El API rechaza publicar esta evaluación y la interfaz omite esa acción. [Arquitectura, contrato y reproducción](../architecture/CATALOG_STUDIO_EVALUATIONS.md) · [Prueba de navegador](../../Frontend_py_whatsaapweb/e2e/agent-studio-catalog.integration.spec.ts).
+
 ## WF-01. Ingreso mientras se revierte una revisión publicada
 
 - **Antes.** CI devolvió `WORKFLOW_NOT_PUBLISHED` durante una reversión válida. La regresión local mantuvo la reversión abierta hasta observar en PostgreSQL que un webhook esperaba su bloqueo. El ingreso falló al intentar fijar la revisión mediante una consulta que también bloqueaba la definición.
@@ -269,5 +275,5 @@ El ejemplo inicial del editor validaba estructura, pero no preparaba el modelo n
 | --- | --- |
 | Bandeja en tiempo real | Filtro por etiqueta, reconexión, reorden de webhooks e historial paginado cubiertos en MSG-04 y MSG-05. |
 | Envío y recepción | MSG-06 a MSG-08 cubren envíos humanos y automáticos, adjuntos, entrega incierta, recuperación tras reinicio y recibos en la bandeja con Graph local. Falta el recorrido en navegador con dos líneas Meta reales. |
-| Harness IA | IA-03 a IA-10 cubren Studio, cuota, autorización de derivaciones, reclamo de efectos y el perfil de texto del runtime estricto de WhatsApp. Faltan el piloto con proveedor real, los perfiles estrictos de router y herramientas y la conciliación de efectos por proveedor. |
+| Harness IA | IA-03 a IA-11 cubren Studio, cuota, autorización de derivaciones, reclamo de efectos, el perfil de texto y la evaluación del router de catálogo. Faltan publicación y ejecución canónica de catálogo en WhatsApp, perfiles con herramientas de efectos, conciliación por proveedor y piloto con proveedor real. |
 | Flujo operativo y navegación | UX-07 a UX-13 cubren conversación, pedido, pago y regreso, aprobación, conexión, conciliación con el proveedor local, pausa del agente publicado y regreso al listado de Studio. Falta el ensayo con una cuenta autorizada de Mercado Pago y la validación independiente del candidato completo. |
