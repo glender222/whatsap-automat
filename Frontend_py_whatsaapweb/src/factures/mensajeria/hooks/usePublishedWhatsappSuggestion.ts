@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { readSession } from '../../../shared/auth/session';
+import { isCatalogPublicationIdentity } from '../../../shared/types/catalogPublication';
 import SocketService from '../../../utils/socket';
 import {
   readPublishedWhatsappSuggestion, type CanonicalConversation, type PublishedWhatsappSuggestion,
@@ -23,9 +24,12 @@ export function usePublishedWhatsappSuggestion(conversation: CanonicalConversati
     if (!conversationId || !chatId) return;
     const socket = SocketService.getInstance().connect();
     const reload = () => setRefresh((value) => value + 1);
-    const signal = (event: { chatId?: unknown; conversationId?: unknown; origin?: { kind?: unknown } }) => {
-      if (event?.origin?.kind === 'published_graph' && event.chatId === chatId &&
-          event.conversationId === conversationId) reload();
+    const signal = (event: { chatId?: unknown; conversationId?: unknown;
+      origin?: { kind?: unknown; profile?: unknown; evidenceVersion?: unknown; evidenceHash?: unknown } }) => {
+      const origin = event?.origin;
+      if (origin?.kind !== 'published_graph' || event.chatId !== chatId || event.conversationId !== conversationId) return;
+      const hasEvidence = origin.profile !== undefined || origin.evidenceVersion !== undefined || origin.evidenceHash !== undefined;
+      if (!hasEvidence || isCatalogPublicationIdentity(origin)) reload();
     };
     socket.on('agent:suggestion', signal);
     socket.on('connect', reload);

@@ -1,16 +1,20 @@
 import { expect, test } from '@playwright/test';
-import { provisionCompanies } from './fixtures/provisionCompanies';
+import { postWebhook } from './fixtures/metaWebhook';
+import { provisionCompanies, type Company } from './fixtures/provisionCompanies';
 
 const backend = process.env.PRODUCT_SMOKE_URL;
 
 if (process.env.STUDIO_PROVIDER_FIXTURE === '1') {
-  test('provider mode evaluates catalog evidence from Studio for each company', async ({ browser, request }) => {
-    test.setTimeout(60_000);
-    test.skip(!backend || !process.env.STUDIO_FIXTURE_URL, 'Requires the local provider and isolated PostgreSQL');
-    const companies = provisionCompanies('--studio', '--catalog-studio');
+  test('provider mode publishes and links catalog revisions for each company', async ({ browser, request }) => {
+    test.setTimeout(90_000);
+    test.skip(!backend || !process.env.STUDIO_FIXTURE_URL || !process.env.PRODUCT_GRAPH_FIXTURE_URL,
+      'Requires the local provider, Graph and isolated PostgreSQL');
+    const companies = provisionCompanies('--studio', '--catalog-studio', '--published-whatsapp', '--outbound');
     const contexts = await Promise.all(companies.map(() => browser.newContext({ viewport: { width: 390, height: 720 } })));
     try {
       const evaluations = [];
+      const studioPages = [];
+      const publications = [];
       for (const [index, company] of companies.entries()) {
         const name = index === 0 ? 'Alfa' : 'Bravo';
         const context = contexts[index];
@@ -97,15 +101,22 @@ if (process.env.STUDIO_PROVIDER_FIXTURE === '1') {
         await publish.press('Enter');
         const publication = await published;
         expect(publication.status()).toBe(200);
-        expect(await publication.json()).toMatchObject({ profile: 'catalog-router-v1', evidenceVersion: 'catalog-publication-v1',
-          evaluationId: evidence.runId, executionAllowed: false, whatsappBindingAllowed: false });
-        await expect(panel.getByRole('button', { name: 'Vincular a WhatsApp' })).toHaveCount(0);
+        const receipt = await publication.json();
+        expect(receipt).toMatchObject({ profile: 'catalog-router-v1', evidenceVersion: 'catalog-publication-v1',
+          evaluationId: evidence.runId, executionAllowed: false, whatsappBindingAllowed: true });
+        const binding = panel.getByRole('region', { name: 'Revisión para WhatsApp' });
+        const bind = binding.getByRole('button', { name: 'Vincular a WhatsApp' });
+        await expect(bind).toBeEnabled();
+        await bind.press('Enter');
+        await expect(binding.getByRole('status').filter({ hasText: `${company.catalogGraphId} · 1 · Sugerencias · Catálogo` })).toBeVisible();
         await expect(panel.getByRole('button', { name: 'Ejecutar revisión publicada' })).toHaveCount(0);
         await page.reload();
         await expect(panel.getByText('Revisión activa para proveedor · 1 · Catálogo', { exact: true })).toBeVisible();
         await panel.getByRole('button', { name: 'Consultar evaluación guardada' }).press('Enter');
         await expect(panel.getByText('Evaluación aprobada', { exact: true })).toBeVisible();
         evaluations.push(evidence);
+        studioPages.push(page);
+        publications.push(receipt);
       }
 
       const [alpha, bravo] = companies;
@@ -115,14 +126,115 @@ if (process.env.STUDIO_PROVIDER_FIXTURE === '1') {
         headers, data: { attemptId: crypto.randomUUID(), input: 'Consulta de catálogo', timeoutMs: 4000 },
       });
       expect(denied.status()).toBe(409);
-      const binding = await request.put(`${backend}/api/v1/ai/whatsapp-binding`, { headers, data: {
-        graphId: alpha.catalogGraphId, version: 1, specHash: evaluations[0].specHash, mode: 'suggest', expectedRevision: null,
-      } });
-      expect(binding.status()).toBe(409);
       const foreign = await request.get(`${graphUrl}/evaluations/${evaluations[0].runId}?version=1`, {
         headers: { authorization: `Bearer ${bravo.auth.accessToken}` },
       });
       expect(foreign.status()).toBe(404);
+
+      const contact = '12025550145';
+      const notifications: Record<string, unknown>[][] = [[], []];
+      const inboxes = await Promise.all(contexts.map(async (context, index) => {
+        const page = await context.newPage();
+        let joined = false;
+        page.on('websocket', (socket) => socket.on('framereceived', ({ payload }) => {
+          if (typeof payload !== 'string') return;
+          if (payload.startsWith('42["conversation_joined",')) {
+            const [, reply] = JSON.parse(payload.slice(2));
+            if (reply.success && reply.room.endsWith(`:${contact}`)) joined = true;
+          }
+          if (payload.startsWith('42["agent:suggestion",')) {
+            const [, notification] = JSON.parse(payload.slice(2));
+            notifications[index].push(notification);
+          }
+        }));
+        await page.goto('/gestion-web/inicio?chat=' + contact);
+        await expect(page.getByRole('region', { name: 'Historial de mensajes' })).toBeVisible();
+        await expect.poll(() => joined).toBe(true);
+        return page;
+      }));
+      const inbound = (id: string, body: string) => ({ messages: [{ id, from: contact, type: 'text',
+        timestamp: String(Math.floor(Date.now() / 1000)), text: { body } }] });
+      const sharedId = 'wamid.' + crypto.randomUUID();
+      for (const [index, company] of companies.entries()) {
+        await postWebhook(request, company, inbound(sharedId, `Consultar catálogo ${index === 0 ? 'Alfa' : 'Bravo'}`));
+      }
+      const expected = ['Producto de catálogo: Visible Alfa', 'Producto de catálogo: Visible Bravo'];
+      async function graphAttempts(company: Company): Promise<{ id: string; callback: string; to: string; type: string }[]> {
+        const response = await request.get(`${process.env.PRODUCT_GRAPH_FIXTURE_URL}/attempts?line=${company.phoneNumberId}`);
+        expect(response.status()).toBe(200);
+        return response.json();
+      }
+      for (const [index, inbox] of inboxes.entries()) {
+        await expect(inbox.getByText('Sugerencia de catálogo · revisión 1', { exact: true })).toBeVisible();
+        await expect(inbox.getByText(expected[index], { exact: true })).toBeVisible();
+        await expect(inbox.getByText(expected[1 - index], { exact: true })).toHaveCount(0);
+        await expect.poll(() => notifications[index].length).toBe(1);
+        expect(notifications[index][0]).toMatchObject({ origin: { kind: 'published_graph', graphId: companies[index].catalogGraphId,
+          profile: 'catalog-router-v1', evidenceVersion: 'catalog-publication-v1', evidenceHash: publications[index].evidenceHash } });
+        expect(notifications[index][0]).not.toHaveProperty('reply');
+        expect(await graphAttempts(companies[index])).toEqual([]);
+      }
+
+      await inboxes[0].reload();
+      await expect(inboxes[0].getByText(expected[0], { exact: true })).toBeVisible();
+      const pause = inboxes[0].getByRole('button', { name: 'Pausar IA', exact: true });
+      await pause.press('Enter');
+      const resume = inboxes[0].getByRole('button', { name: 'Reanudar IA', exact: true });
+      await expect(resume).toBeEnabled();
+      await expect(inboxes[0].getByText(expected[0], { exact: true })).toHaveCount(0);
+      const afterResume = inboxes[0].waitForResponse((response) =>
+        response.url().includes('/whatsapp-suggestions?conversationId=') && response.ok());
+      await resume.press('Enter');
+      await expect(pause).toBeEnabled();
+      expect(await (await afterResume).json()).toEqual({ suggestion: null });
+
+      const alphaBinding = studioPages[0].getByRole('region', { name: 'Revisión para WhatsApp' });
+      await alphaBinding.getByRole('combobox', { name: 'Modo de respuesta en WhatsApp' }).selectOption('auto');
+      await alphaBinding.getByRole('button', { name: 'Actualizar modo de WhatsApp' }).press('Enter');
+      await expect(alphaBinding.getByRole('status').filter({ hasText: 'Respuestas automáticas · Catálogo' })).toBeVisible();
+      expect((await request.put(`${backend}/api/agents/company-mode`, { headers, data: { mode: 'automator' } })).status()).toBe(200);
+      const automatic = inbound('wamid.' + crypto.randomUUID(), 'Consultar catálogo en modo automático');
+      await postWebhook(request, alpha, automatic);
+      await postWebhook(request, alpha, automatic);
+      const history = inboxes[0].getByRole('region', { name: 'Historial de mensajes' });
+      const reply = history.locator('[data-history-message]').filter({ hasText: expected[0] });
+      await expect(reply).toHaveCount(1);
+      const delivery = reply.getByTestId('message-delivery-status');
+      await expect(delivery).toHaveText('Aceptado por WhatsApp');
+      const sent = await graphAttempts(alpha);
+      expect(sent).toEqual([expect.objectContaining({ to: contact, type: 'text', callback: expect.stringMatching(/^automat:/) })]);
+      expect(await graphAttempts(bravo)).toEqual([]);
+      await postWebhook(request, alpha, { statuses: [{ id: sent[0].id, status: 'read', recipient_id: contact,
+        timestamp: String(Math.floor(Date.now() / 1000)), biz_opaque_callback_data: sent[0].callback }] });
+      await expect(delivery).toHaveText('Leído');
+      await inboxes[0].reload();
+      await expect(delivery).toHaveText('Leído');
+      expect(await graphAttempts(alpha)).toEqual(sent);
+
+      // Simulate provider unavailability without replacing the real stored binding.
+      let providerMode = true;
+      await studioPages[0].route('**/execution?version=1', async (route) => {
+        const response = await route.fetch();
+        const status = await response.json();
+        const unavailable = { ...status.profile, whatsappBindingAllowed: false };
+        await route.fulfill({ response, json: providerMode
+          ? { ...status, profile: unavailable }
+          : { mode: null, suites: [], active: null, profile: { ...unavailable, compatible: false, issue: 'CATALOG_PROVIDER_REQUIRED' } },
+        });
+      });
+      const unbind = alphaBinding.getByRole('button', { name: 'Desvincular de WhatsApp' });
+      for (const mode of [true, false]) {
+        providerMode = mode;
+        await studioPages[0].reload();
+        await expect(unbind).toBeEnabled();
+        await expect(alphaBinding.getByRole('combobox', { name: 'Modo de respuesta en WhatsApp' })).toHaveCount(0);
+      }
+      const removed = studioPages[0].waitForResponse((response) =>
+        response.url().endsWith('/whatsapp-binding') && response.request().method() === 'DELETE');
+      await unbind.press('Enter');
+      expect((await removed).status()).toBe(204);
+      await expect(alphaBinding.getByRole('status').filter({ hasText: 'Sin revisión vinculada.' })).toBeVisible();
+      await expect(alphaBinding.getByRole('heading', { name: 'Revisión para WhatsApp' })).toBeFocused();
     } finally {
       await Promise.all(contexts.map((context) => context.close()));
     }

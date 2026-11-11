@@ -1,5 +1,6 @@
 import { isAxiosError } from 'axios';
 import { api, type AuthRequestConfig } from '../../../shared/axios/http';
+import { isCatalogPublicationIdentity, type CatalogPublicationIdentity } from '../../../shared/types/catalogPublication';
 
 export interface InboxActor { id: string; tenantId: string }
 
@@ -27,7 +28,7 @@ export interface CanonicalMessage {
   causedBy?: { type: string };
 }
 
-export interface PublishedWhatsappSuggestion {
+export interface PublishedWhatsappSuggestion extends Partial<CatalogPublicationIdentity> {
   runId: string;
   graphId: string;
   version: number;
@@ -47,7 +48,9 @@ export async function readPublishedWhatsappSuggestion(conversationId: string, si
       !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(suggestion.runId) ||
       !/^[1-9][0-9]{0,18}$/.test(suggestion.inboundMessageId) || !/^[A-Za-z0-9_-]{1,128}$/.test(suggestion.graphId) ||
       !Number.isSafeInteger(suggestion.version) || suggestion.version < 1 || !/^[0-9a-f]{64}$/.test(suggestion.specHash) ||
-      typeof suggestion.reply !== 'string' || !suggestion.reply.trim() || !Number.isFinite(Date.parse(suggestion.expiresAt))) {
+      typeof suggestion.reply !== 'string' || !suggestion.reply.trim() || !Number.isFinite(Date.parse(suggestion.expiresAt)) ||
+      ((suggestion.profile !== undefined || suggestion.evidenceVersion !== undefined || suggestion.evidenceHash !== undefined) &&
+        !isCatalogPublicationIdentity(suggestion))) {
     throw new Error('El servidor no confirmó la sugerencia para esta conversación.');
   }
   return Date.parse(suggestion.expiresAt) > Date.now() ? suggestion : null;

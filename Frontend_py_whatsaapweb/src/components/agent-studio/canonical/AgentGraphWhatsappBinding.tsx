@@ -14,10 +14,11 @@ const modeNames = { suggest: 'Sugerencias', auto: 'Respuestas automáticas' };
 interface Props {
   draft: GraphDraft;
   active: StudioPublication | null;
+  available: boolean;
   sessionGeneration: number;
 }
 
-export default function AgentGraphWhatsappBinding({ draft, active, sessionGeneration }: Props) {
+export default function AgentGraphWhatsappBinding({ draft, active, available, sessionGeneration }: Props) {
   const [params] = useSearchParams();
   const [snapshot, setSnapshot] = useState<StudioWhatsappBindingSnapshot>();
   const [mode, setMode] = useState<StudioWhatsappBindingMode>('suggest');
@@ -53,7 +54,8 @@ export default function AgentGraphWhatsappBinding({ draft, active, sessionGenera
 
   const current = snapshot?.binding;
   const bound = current?.graphId === draft.graphId && current.version === draft.version && current.specHash === draft.specHash;
-  const published = active?.graphId === draft.graphId && active.version === draft.version && active.specHash === draft.specHash;
+  const published = available && active?.graphId === draft.graphId && active.version === draft.version && active.specHash === draft.specHash &&
+    (active.profile !== 'catalog-router-v1' || active.whatsappBindingAllowed === true);
 
   function refresh() {
     setError(undefined);
@@ -69,7 +71,7 @@ export default function AgentGraphWhatsappBinding({ draft, active, sessionGenera
     const request = { signal: controller.signal, sessionGeneration };
     try {
       const next = action === 'bind'
-        ? await bindStudioWhatsapp(draft, mode, snapshot, request)
+        ? await bindStudioWhatsapp(draft, mode, snapshot, request, active ?? undefined)
         : await unbindStudioWhatsapp(snapshot, request);
       if (!controller.signal.aborted) {
         focusAfterChange.current = true;
@@ -99,7 +101,7 @@ export default function AgentGraphWhatsappBinding({ draft, active, sessionGenera
             ? <>Revisión vinculada · <Link className="font-medium underline"
               to={studioLocation(graphPath(current.graphId), { after: params.get('after'), version: current.version })}>
               {current.graphId} · {current.version}
-            </Link> · {modeNames[current.mode]}</>
+            </Link> · {modeNames[current.mode]}{current.profile === 'catalog-router-v1' && ' · Catálogo'}</>
             : 'Sin revisión vinculada.'}
         </p>
       )}

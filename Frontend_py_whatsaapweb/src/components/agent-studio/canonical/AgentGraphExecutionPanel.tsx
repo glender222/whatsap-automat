@@ -172,6 +172,7 @@ export default function AgentGraphExecutionPanel({ draft }: { draft: GraphDraft 
   const verification = mode === 'verification';
   const profile = status?.profile?.name ?? 'linear-text-v1';
   const catalogProfile = status?.profile?.name === 'catalog-router-v1' ? status.profile : undefined;
+  const whatsappBindingAvailable = mode === 'provider' && (!catalogProfile || catalogProfile.whatsappBindingAllowed === true);
   const publicationSupported = !catalogProfile || catalogProfile.publicationSupported === true;
   const publicationAllowed = catalogProfile
     ? publicationSupported && result?.profile === profile && result.publicationAllowed === true && result.publicationEvidence === true
@@ -317,7 +318,7 @@ export default function AgentGraphExecutionPanel({ draft }: { draft: GraphDraft 
             : `Esta revisión requiere un grafo de texto compatible con el modelo ${status.profile?.model} y un presupuesto suficiente.`} <code>{status.profile?.issue}</code>
         </p>}
         {catalogProfile && <p className="text-sm text-secondary">{publicationSupported
-          ? 'Para publicar, la suite debe aprobar un caso con búsqueda de catálogo y otro sin ella. La ejecución directa y la vinculación a WhatsApp aún no están disponibles.'
+          ? 'Para publicar, la suite debe aprobar un caso con búsqueda de catálogo y otro sin ella.'
           : 'La evaluación comprueba el texto y el uso de la búsqueda de catálogo. La publicación de este perfil aún no está disponible.'}</p>}
         {(!catalogProfile || catalogProfile.compatible) && <details>
           <summary className="cursor-pointer text-sm font-semibold">{catalogProfile ? 'Crear suite de catálogo' : 'Crear suite de texto'}</summary>
@@ -396,7 +397,6 @@ export default function AgentGraphExecutionPanel({ draft }: { draft: GraphDraft 
           </button>}
         </div>}
         {active && <p role="status" className="text-sm font-medium">{verification ? 'Revisión activa en verificación' : 'Revisión activa para proveedor'} · {active.version}{active.profile === 'catalog-router-v1' && ' · Catálogo'}</p>}
-        {mode === 'provider' && !catalogProfile && <AgentGraphWhatsappBinding draft={draft} active={active ?? null} sessionGeneration={sessionGeneration} />}
         {!catalogProfile && active?.executionAllowed !== false && active?.version === draft.version && <form className="space-y-2" onSubmit={execute}>
           {pendingExecution && !controlsBusy && <div id="published-execution-recovery" className="space-y-1 text-sm text-secondary">
             <p role="status">Hay una ejecución sin confirmar.</p>
@@ -421,6 +421,8 @@ export default function AgentGraphExecutionPanel({ draft }: { draft: GraphDraft 
         </form>}
         {busy && !(busy === evaluating && result?.status === 'cancelled') && <p role="status" className="text-sm text-secondary">{busy}</p>}
       </>}
+      {(mode === 'provider' || catalogProfile) && <AgentGraphWhatsappBinding draft={draft} active={active ?? null}
+        available={whatsappBindingAvailable} sessionGeneration={sessionGeneration} />}
     </section>
   );
 }

@@ -3,7 +3,7 @@ import { test, type TestContext } from 'node:test';
 import { AxiosError, type InternalAxiosRequestConfig } from 'axios';
 import { api } from '../shared/axios/http';
 import {
-  deliveryLabel, inboxActor, messageProblem, readCanonicalHistory, resolveCanonicalChat, sendCanonicalAttachment,
+  deliveryLabel, inboxActor, messageProblem, readCanonicalHistory, readPublishedWhatsappSuggestion, resolveCanonicalChat, sendCanonicalAttachment,
   sendCanonicalText, takeConversationControl,
 } from '../factures/mensajeria/services/canonicalConversationApi';
 
@@ -36,6 +36,31 @@ test('the Inbox resolves external chat identity before verifying its tenant-owne
   assert.deepEqual(await resolveCanonicalChat('51999999999', undefined, actor, signal), conversation);
   tenantId = '28';
   await assert.rejects(resolveCanonicalChat('51999999999', '321', actor, signal), /esta empresa/);
+});
+
+test('published suggestions accept catalog evidence only when it belongs to the requested conversation', async (context) => {
+  const evidence = { profile: 'catalog-router-v1', evidenceVersion: 'catalog-publication-v1', evidenceHash: 'b'.repeat(64) };
+  const linear = { runId: '42424242-4242-4242-8242-424242424242', graphId: 'fixture', version: 2, specHash: 'a'.repeat(64),
+    inboundMessageId: '12', conversationId: conversation.id, reply: 'Catálogo', expiresAt: new Date(Date.now() + 60_000).toISOString() };
+  const catalog = { ...linear, ...evidence };
+  const signal = new AbortController().signal;
+  let suggestion: unknown = catalog;
+  mockResponse(context, (request) => {
+    assert.equal(request.url, '/v1/ai/whatsapp-suggestions');
+    assert.deepEqual(request.params, { conversationId: conversation.id });
+    assert.equal(request.signal, signal);
+    return { status: 200, data: { suggestion } };
+  });
+  const read = () => readPublishedWhatsappSuggestion(conversation.id, signal, 0);
+  assert.deepEqual(await read(), catalog);
+  suggestion = linear;
+  assert.deepEqual(await read(), linear);
+  for (const invalid of [{ evidenceHash: 'b' }, { evidenceVersion: 'catalog-evaluation-v1' }, { profile: undefined }, { conversationId: '322' }]) {
+    suggestion = { ...catalog, ...invalid };
+    await assert.rejects(read(), /no confirmó la sugerencia/);
+  }
+  suggestion = { ...catalog, expiresAt: '2000-01-01T00:00:00Z' };
+  assert.equal(await read(), null);
 });
 
 test('the legacy file route requires an explicitly identified Web.js chat', async (context) => {

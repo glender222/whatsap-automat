@@ -1,5 +1,6 @@
 import { isAxiosError } from 'axios';
 import { api, type AuthRequestConfig } from '../../../shared/axios/http';
+import { isCatalogPublicationIdentity } from '../../../shared/types/catalogPublication';
 
 export const studioPath = '/dashboard/ia/estudio';
 export const legacyAgentsPath = '/dashboard/ia/agentes';
@@ -249,6 +250,7 @@ export type StudioExecutionMode = 'verification' | 'provider';
 export interface CatalogExecutionProfile {
   name: 'catalog-router-v1'; compatible: boolean; issue: string | null; model: string;
   publicationAllowed: false; publicationSupported?: boolean; minScenarioTimeoutMs: number; maxScenarioTimeoutMs: number;
+  whatsappBindingAllowed?: boolean;
   maxScenarios: number; maxInputLength: number; maxSerializedInputLength: number;
 }
 type ExecutionProfile = CatalogExecutionProfile | {
@@ -281,11 +283,10 @@ function verifiedPublication(publication: StudioPublication | undefined, draft: 
   return publication?.graphId === draft.graphId && publication.mode === mode &&
     Number.isSafeInteger(publication.version) && publication.version > 0 && /^[a-f0-9]{64}$/.test(publication.specHash) &&
     (publication.version !== draft.version || publication.specHash === draft.specHash) &&
-    (publication.profile === undefined || publication.profile === 'linear-text-v1' || (publication.profile === 'catalog-router-v1' &&
-      publication.evidenceVersion === 'catalog-publication-v1' && typeof publication.evidenceHash === 'string' &&
-      /^[a-f0-9]{64}$/.test(publication.evidenceHash) && typeof publication.authorizationHash === 'string' &&
+    (publication.profile === undefined || publication.profile === 'linear-text-v1' || (isCatalogPublicationIdentity(publication) &&
+      typeof publication.authorizationHash === 'string' &&
       /^[a-f0-9]{64}$/.test(publication.authorizationHash) && publication.executionAllowed === false &&
-      publication.whatsappBindingAllowed === false));
+      typeof publication.whatsappBindingAllowed === 'boolean'));
 }
 
 function positiveInteger(value: number) {
@@ -295,6 +296,7 @@ function positiveInteger(value: number) {
 function verifiedCatalogProfile(profile: CatalogExecutionProfile) {
   return profile.publicationAllowed === false &&
     (profile.publicationSupported === undefined || typeof profile.publicationSupported === 'boolean') && Number.isSafeInteger(profile.maxScenarios) &&
+    (profile.whatsappBindingAllowed === undefined || typeof profile.whatsappBindingAllowed === 'boolean') &&
     profile.maxScenarios >= 0 && profile.maxScenarios <= 20 && positiveInteger(profile.maxInputLength) &&
     positiveInteger(profile.maxSerializedInputLength) && positiveInteger(profile.minScenarioTimeoutMs) &&
     positiveInteger(profile.maxScenarioTimeoutMs) && (!profile.compatible || (profile.maxScenarios > 0 &&
@@ -425,6 +427,9 @@ interface StudioWhatsappBinding {
   revision: string;
   boundBy: number;
   boundAt: string;
+  profile?: StudioExecutionProfileName;
+  evidenceVersion?: string;
+  evidenceHash?: string;
 }
 
 export interface StudioWhatsappBindingSnapshot {
@@ -439,7 +444,10 @@ function confirmBinding(snapshot: StudioWhatsappBindingSnapshot | undefined): St
   if (!binding || typeof binding.graphId !== 'string' || !new RegExp('^' + graphIdPattern + '$').test(binding.graphId) ||
       !Number.isSafeInteger(binding.version) || binding.version < 1 || !/^[0-9a-f]{64}$/.test(binding.specHash) ||
       !['suggest', 'auto'].includes(binding.mode) || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(binding.revision) ||
-      !Number.isSafeInteger(binding.boundBy) || binding.boundBy < 1 || !Number.isFinite(Date.parse(binding.boundAt))) {
+      !Number.isSafeInteger(binding.boundBy) || binding.boundBy < 1 || !Number.isFinite(Date.parse(binding.boundAt)) ||
+      ((binding.profile ?? 'linear-text-v1') === 'linear-text-v1'
+        ? binding.evidenceVersion !== undefined || binding.evidenceHash !== undefined
+        : !isCatalogPublicationIdentity(binding))) {
     throw new Error('El servidor no confirmó la revisión vinculada a WhatsApp.');
   }
   return { binding };
@@ -452,15 +460,25 @@ export async function readStudioWhatsappBinding(request: StudioRequest) {
 }
 
 export async function bindStudioWhatsapp(draft: GraphDraft, mode: StudioWhatsappBindingMode,
-  current: StudioWhatsappBindingSnapshot, request: StudioRequest) {
+  current: StudioWhatsappBindingSnapshot, request: StudioRequest, publication?: StudioPublication) {
   const config: AuthRequestConfig = request;
   const { graphId, version, specHash } = draft;
+  const profile = publication?.profile ?? 'linear-text-v1';
+  const evidence = isCatalogPublicationIdentity(publication) ? {
+    profile: publication.profile, evidenceVersion: publication.evidenceVersion, evidenceHash: publication.evidenceHash,
+  } : undefined;
+  if (profile === 'catalog-router-v1' && (!evidence || !verifiedPublication(publication, draft, 'provider') ||
+      publication?.version !== version || publication.whatsappBindingAllowed !== true)) {
+    throw new Error('La publicación de catálogo no admite la vinculación a WhatsApp.');
+  }
   const { data } = await api.put<StudioWhatsappBindingSnapshot>(whatsappBindingEndpoint, {
     graphId, version, specHash, mode, expectedRevision: current.binding?.revision ?? null,
+    ...evidence,
   }, config);
   const snapshot = confirmBinding(data);
   if (snapshot.binding?.graphId !== graphId || snapshot.binding.version !== version ||
-      snapshot.binding.specHash !== specHash || snapshot.binding.mode !== mode) {
+      snapshot.binding.specHash !== specHash || snapshot.binding.mode !== mode ||
+      (snapshot.binding.profile ?? 'linear-text-v1') !== profile || (evidence && snapshot.binding.evidenceHash !== evidence.evidenceHash)) {
     throw new Error('El servidor no confirmó la vinculación seleccionada.');
   }
   return snapshot;

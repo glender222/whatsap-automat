@@ -5,9 +5,9 @@ import { api } from '../shared/axios/http';
 import { readBrowserSessionId, saveRenewedAccess, saveSession } from '../shared/auth/session';
 import { readStudioListPosition, rememberStudioListPosition } from '../components/agent-studio/canonical/studioListHistory';
 import {
-  cancelStudioEvaluation, compareGraphSpecs, draftSpec, exampleGraph, getGraphDraft, graphFixtureProblem, graphPath,
-  graphProblem, listGraphDrafts, publishStudioRevision, readStudioExecution, saveGraphDraft, saveStudioSuite, simulateGraphDraft, studioEvaluation,
-  validateGraphDraft, type GraphDraft, type GraphFixtureResult, type GraphValidation,
+  bindStudioWhatsapp, cancelStudioEvaluation, compareGraphSpecs, draftSpec, exampleGraph, getGraphDraft, graphFixtureProblem, graphPath,
+  graphProblem, listGraphDrafts, publishStudioRevision, readStudioExecution, readStudioWhatsappBinding, saveGraphDraft, saveStudioSuite, simulateGraphDraft, studioEvaluation,
+  validateGraphDraft, type GraphDraft, type GraphFixtureResult, type GraphValidation, type StudioPublication,
 } from '../components/agent-studio/canonical/agentGraphApi';
 
 Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: () => null } });
@@ -80,6 +80,38 @@ test('catalog publication confirms its profile, evidence version and disabled ru
   assert.deepEqual(await studioEvaluation(draft, attempt, 'provider', request, undefined, profile), evaluation);
   assert.deepEqual(await publishStudioRevision(draft, attempt.runId, 'provider', request, profile), publication);
   await assert.rejects(publishStudioRevision(draft, attempt.runId, 'provider', request), /no confirmó la publicación/);
+});
+
+test('WhatsApp binding pins catalog publication evidence and keeps the linear request shape', async (context) => {
+  const evidence = { profile: 'catalog-router-v1', evidenceVersion: 'catalog-publication-v1',
+    evidenceHash: '1'.repeat(64) } as const;
+  const identity = { graphId: draft.graphId, version: draft.version, specHash: draft.specHash };
+  const publication: StudioPublication = { ...identity, ...evidence, mode: 'provider',
+    evaluationId: 'run', authorizationHash: '2'.repeat(64), executionAllowed: false, whatsappBindingAllowed: true };
+  const revision = '42424242-4242-4242-8242-424242424242';
+  const binding = { ...identity, mode: 'suggest' as const, revision, boundBy: 15, boundAt: '2026-12-01T12:00:00.000Z' };
+  const current = { binding };
+  const catalog = { binding: { ...binding, ...evidence } };
+  const request = { signal: new AbortController().signal, sessionGeneration: 0 };
+  let response: unknown = catalog;
+  const writes: unknown[] = [];
+  mockResponse(context, (incoming) => {
+    assert.equal(incoming.url, '/v1/ai/whatsapp-binding');
+    if (incoming.method === 'put') writes.push(JSON.parse(incoming.data));
+    return response;
+  });
+  assert.deepEqual(await readStudioWhatsappBinding(request), catalog);
+  assert.deepEqual(await bindStudioWhatsapp(draft, 'suggest', current, request, publication), catalog);
+  const intended = { ...identity, mode: 'suggest', expectedRevision: revision };
+  assert.deepEqual(writes, [{ ...intended, ...evidence }]);
+  await assert.rejects(bindStudioWhatsapp(draft, 'suggest', current, request, { ...publication, whatsappBindingAllowed: false }),
+    /no admite la vinculación/);
+  assert.equal(writes.length, 1);
+  response = { binding: { ...catalog.binding, evidenceHash: '3'.repeat(64) } };
+  await assert.rejects(bindStudioWhatsapp(draft, 'suggest', current, request, publication), /no confirmó la vinculación/);
+  response = current;
+  assert.deepEqual(await bindStudioWhatsapp(draft, 'suggest', current, request), current);
+  assert.deepEqual(writes[2], intended);
 });
 
 test('revision comparison ignores object key order and detects ordered graph changes', () => {

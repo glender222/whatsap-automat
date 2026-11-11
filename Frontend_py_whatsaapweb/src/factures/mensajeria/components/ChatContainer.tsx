@@ -457,7 +457,8 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
               <div className="flex-1 min-w-0">
                 <div role="status" className="mb-1 flex items-center gap-2 text-xs font-semibold text-emerald-800 dark:text-emerald-300">
                   <Sparkles className="h-4 w-4" aria-hidden="true" />
-                  {publishedSuggestion ? `Sugerencia de la revisión publicada ${publishedSuggestion.version}`
+                  {publishedSuggestion ? (publishedSuggestion.profile === 'catalog-router-v1'
+                    ? `Sugerencia de catálogo · revisión ${publishedSuggestion.version}` : `Sugerencia de la revisión publicada ${publishedSuggestion.version}`)
                     : `Sugerencia IA · ${Math.round(suggestion.confidence * 100)}% · ${suggestion.action}`}
                 </div>
                 <p className="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap">
