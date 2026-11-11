@@ -1,6 +1,6 @@
 # Guía de inicio de Whatsap-Automat
 
-Esta guía describe el candidato v0.4 probado en QA. Su publicación en GitHub está pendiente. Los pasos de instalación se aplican a la revisión que contiene los contratos adjuntos.
+Esta guía describe el candidato v0.4 disponible en la rama `integration/v0.4-consolidated` del repositorio. Los pasos de instalación se aplican a la revisión que contiene los contratos adjuntos.
 
 ## Requisitos
 
