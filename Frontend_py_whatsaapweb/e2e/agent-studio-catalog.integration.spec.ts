@@ -56,15 +56,36 @@ if (process.env.STUDIO_PROVIDER_FIXTURE === '1') {
         await expect(panel.getByRole('button', { name: 'Agregar caso' })).toBeDisabled();
         await panel.getByRole('button', { name: 'Guardar suite' }).press('Enter');
 
-        await expect(evaluate).toBeEnabled();
-        const evaluated = page.waitForResponse((response) => response.url().endsWith('/evaluations?version=1') &&
-          response.request().method() === 'POST');
-        await evaluate.press('Enter');
-        const response = await evaluated;
-        expect(response.status()).toBe(200);
-        const evidence = await response.json();
-        expect(evidence).toMatchObject({ profile: 'catalog-router-v1', mode: 'provider', status: 'completed', passed: true,
-          evidenceVersion: 'catalog-evaluation-v1', publicationAllowed: true, publicationEvidence: true });
+        async function evaluateSelectedSuite() {
+          await expect(evaluate).toBeEnabled();
+          const evaluated = page.waitForResponse((response) => response.url().endsWith('/evaluations?version=1') &&
+            response.request().method() === 'POST');
+          await evaluate.press('Enter');
+          const response = await evaluated;
+          expect(response.status()).toBe(200);
+          const evidence = await response.json();
+          expect(evidence).toMatchObject({ profile: 'catalog-router-v1', mode: 'provider', status: 'completed', passed: true,
+            evidenceVersion: 'catalog-evaluation-v1', publicationAllowed: true, publicationEvidence: true });
+          return evidence;
+        }
+        let evidence = await evaluateSelectedSuite();
+        if (index === 0) {
+          const companyMode = (mode: string) => request.put(`${backend}/api/agents/company-mode`, {
+            headers: { authorization: `Bearer ${company.auth.accessToken}` }, data: { mode },
+          });
+          await expect(publish).toBeEnabled();
+          expect((await companyMode('normal')).status()).toBe(200);
+          const rejected = page.waitForResponse((reply) => reply.url().endsWith('/publish?version=1') && reply.request().method() === 'POST');
+          await publish.press('Enter');
+          expect((await rejected).status()).toBe(409);
+          await expect(publish).toBeDisabled();
+          await expect(publish).toHaveAccessibleDescription(/Cambió la autorización de la empresa/);
+          await expect(panel.getByText(/Cambió la autorización de la empresa/)).toBeFocused();
+          expect((await companyMode('mixed')).status()).toBe(200);
+          const revokedRunId = evidence.runId;
+          evidence = await evaluateSelectedSuite();
+          expect(evidence.runId).not.toBe(revokedRunId);
+        }
         expect(evidence.scenarios.map((scenario: { executedTools: string[] }) => scenario.executedTools)).toEqual([['catalog.search'], []]);
         expect(new Set(evidence.scenarios.flatMap((scenario: { ledgerIds: number[] }) => scenario.ledgerIds)).size).toBe(4);
         expect(JSON.stringify(evidence)).not.toContain(`Producto de catálogo: Visible ${name}`);

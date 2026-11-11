@@ -1,3 +1,4 @@
+import { isAxiosError } from 'axios';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { readSession } from '../../../shared/auth/session';
 import GraphProblemNotice from './GraphProblemNotice';
@@ -20,7 +21,7 @@ const catalogPublicationProblems: Record<string, string> = {
   CATALOG_PUBLICATION_EVIDENCE: 'La evidencia ya no está disponible. Vuelve a evaluar la revisión.',
   CATALOG_PUBLICATION_VERSION: 'Vuelve a evaluar esta revisión con el perfil vigente.',
   CATALOG_PUBLICATION_COVERAGE: 'La suite debe aprobar un caso que use la búsqueda de catálogo y otro que la prohíba.',
-  CATALOG_PUBLICATION_AUTHORIZATION: 'Cambió el permiso del agente o el catálogo. Revisa el acceso y vuelve a evaluar.',
+  CATALOG_PUBLICATION_AUTHORIZATION: 'Cambió la autorización de la empresa, el agente o el catálogo. Revisa el acceso y vuelve a evaluar.',
   CATALOG_PUBLICATION_SUPERSEDED: 'Ya hay una revisión posterior publicada.',
 };
 
@@ -82,6 +83,9 @@ export default function AgentGraphExecutionPanel({ draft }: { draft: GraphDraft 
   const executionField = useRef<HTMLTextAreaElement>(null);
   const lastCaseInput = useRef<HTMLTextAreaElement>(null);
   const focusNewCase = useRef(false);
+  const publicationNotice = useRef<HTMLParagraphElement>(null);
+  const savedEvaluationButton = useRef<HTMLButtonElement>(null);
+  const focusPublicationConflict = useRef(false);
 
   useEffect(() => {
     const request = new AbortController();
@@ -183,6 +187,14 @@ export default function AgentGraphExecutionPanel({ draft }: { draft: GraphDraft 
   const suite = status?.suites.find(({ id }) => id === suiteId);
   const controlsBusy = Boolean(busy) || cancelling;
   const canCancel = attempt && (result ? result.status === 'running' : busy === evaluating);
+
+  useEffect(() => {
+    if (!controlsBusy && focusPublicationConflict.current) {
+      focusPublicationConflict.current = false;
+      (publicationNotice.current ?? savedEvaluationButton.current)?.focus();
+    }
+  }, [controlsBusy, publicationProblem]);
+
   function evaluate() {
     if (!mode || !suite || !status.profile?.compatible || !canDispatch || action.current || cancellation.current) return;
     const reusable = attempt?.suiteId === suiteId && (!result || result.status === 'running');
@@ -223,8 +235,26 @@ export default function AgentGraphExecutionPanel({ draft }: { draft: GraphDraft 
   function publish() {
     if (!mode || !publicationAllowed || !canDispatch || !result || result.mode !== mode || result.status !== 'completed' || !result.passed) return;
     void perform('Publicando revisión…', async (signal) => {
-      const publication = await publishStudioRevision(draft, result.runId, mode, forSession(signal), profile);
-      if (!signal.aborted) setStatus((value) => value && { ...value, active: publication });
+      try {
+        const publication = await publishStudioRevision(draft, result.runId, mode, forSession(signal), profile);
+        if (!signal.aborted) setStatus((value) => value && { ...value, active: publication });
+      } catch (cause: unknown) {
+        if (!catalogProfile || signal.aborted || !isAxiosError(cause) || cause.response?.status !== 409) throw cause;
+        focusPublicationConflict.current = true;
+        setResult({ ...result, publicationAllowed: false, publicationEvidence: false });
+        const evaluation = { runId: result.runId, suiteId: result.suiteId };
+        try {
+          const [latest, readiness] = await Promise.all([
+            readStudioExecution(draft, forSession(signal)),
+            studioEvaluation(draft, evaluation, mode, forSession(signal), undefined, profile),
+          ]);
+          if (signal.aborted) return;
+          setStatus(latest);
+          setResult(readiness);
+          if (!readiness.publicationAllowed || (latest.active?.version ?? 0) >= draft.version) return;
+        } catch { /* Keep the publication conflict if availability cannot be refreshed. */ }
+        throw cause;
+      }
     });
   }
 
@@ -332,7 +362,7 @@ export default function AgentGraphExecutionPanel({ draft }: { draft: GraphDraft 
         </select></label>
         <div className="flex flex-wrap gap-2">
           <button className={button} type="button" disabled={controlsBusy || !canDispatch || !status.profile?.compatible || !suite} onClick={evaluate}>Evaluar revisión</button>
-          {attempt && <button className={button} type="button" disabled={controlsBusy} onClick={() => void perform('Consultando evaluación…', async (signal) => {
+          {attempt && <button ref={savedEvaluationButton} className={button} type="button" disabled={controlsBusy} onClick={() => void perform('Consultando evaluación…', async (signal) => {
             const evaluation = await studioEvaluation(draft, attempt, mode, forSession(signal), undefined, profile);
             if (!signal.aborted) {
               setSelected(evaluation.suiteId);
@@ -359,7 +389,7 @@ export default function AgentGraphExecutionPanel({ draft }: { draft: GraphDraft 
               ? 'Usó la búsqueda de catálogo.' : 'Sin herramientas ejecutadas.'}</p>}
           </li>)}</ul>
           {result.failureCode === 'CATALOG_EVIDENCE_INCOMPLETE' && <p className="text-secondary">No se confirmó la evidencia necesaria de una ronda.</p>}
-          {publicationProblem && <p id="studio-catalog-publication-problem" className="text-secondary">{publicationProblem}</p>}
+          {publicationProblem && <p ref={publicationNotice} id="studio-catalog-publication-problem" tabIndex={-1} className="text-secondary">{publicationProblem}</p>}
           {publicationSupported && <button className={button} type="button" aria-describedby={publicationProblem ? 'studio-catalog-publication-problem' : undefined}
             disabled={controlsBusy || !publicationAllowed || !canDispatch || result.status !== 'completed' || !result.passed || (active?.version ?? 0) >= draft.version} onClick={publish}>
             {verification ? 'Publicar en verificación' : 'Publicar para proveedor'}
