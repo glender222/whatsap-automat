@@ -245,6 +245,12 @@ El ejemplo inicial del editor validaba estructura, pero no preparaba el modelo n
 - **Antes.** CI devolvió `WORKFLOW_NOT_PUBLISHED` durante una reversión válida. La regresión local mantuvo la reversión abierta hasta observar en PostgreSQL que un webhook esperaba su bloqueo. El ingreso falló al intentar fijar la revisión mediante una consulta que también bloqueaba la definición.
 - **Después.** El ingreso bloquea la definición primero y lee la revisión publicada en una consulta posterior. La prueba con Temporal y PostgreSQL aceptó 40 webhooks durante la reversión y los fijó a la revisión restaurada. La ejecución previa conservó su revisión original y siguió inaccesible para la otra empresa.
 
+## REL-01. Migraciones en compilaciones consecutivas
+
+- **Antes.** Al compilar después de sustituir una migración local, el script copiaba la nueva y dejaba la descartada en `dist/db/migrations`. La API de código compilado devolvió 503 en `/ready` aunque PostgreSQL tenía aplicadas todas las migraciones del checkout.
+- **Después.** El build copia las migraciones vigentes y retira del directorio generado los SQL ausentes del checkout. La comprobación de disponibilidad sigue exigiendo todas las migraciones de la aplicación.
+- **Validación.** La prueba unitaria prepara un directorio de salida con un SQL descartado. Falla con el copiador anterior y pasa con el nuevo. `diff -qr src/db/migrations dist/db/migrations` confirmó que ambos directorios contienen los mismos archivos después de compilar. La API compilada respondió 200 en `/ready` sobre la misma base de conciliación. [Prueba del empaquetado](../../WhatsaapWeb-JS/scripts/copy-runtime-assets.test.cjs).
+
 ## Recorridos por cerrar
 
 | Recorrido | Evidencia pendiente |

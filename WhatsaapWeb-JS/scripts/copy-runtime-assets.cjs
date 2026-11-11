@@ -1,7 +1,14 @@
-const { cpSync } = require('node:fs');
+const { cpSync, readdirSync, rmSync } = require('node:fs');
 const { resolve } = require('node:path');
 
 const backend = resolve(__dirname, '..');
-cpSync(resolve(backend, 'src/db/migrations'), resolve(backend, 'dist/db/migrations'), {
-  recursive: true,
-});
+const source = resolve(backend, 'src/db/migrations');
+const output = resolve(backend, 'dist/db/migrations');
+const migrationFiles = new Set(readdirSync(source));
+
+cpSync(source, output, { recursive: true });
+for (const filename of readdirSync(output)) {
+  if (filename.endsWith('.sql') && !migrationFiles.has(filename)) {
+    rmSync(resolve(output, filename), { force: true });
+  }
+}

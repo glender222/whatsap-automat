@@ -14,7 +14,7 @@
     "typecheck:scripts": "tsc --noEmit -p tsconfig.scripts.json",
     "db:migrate": "tsx scripts/db-migrate.ts",
     "db:status": "tsx scripts/db-migrate.ts status",
-    "test": "node --import tsx --test src/test/tools-reales-ia.test.ts src/test/meta-webhook-p0.test.ts src/test/multiagent-routing-p0.test.ts src/test/openai-provider-p0.test.ts src/test/p0-handoff-idempotency.test.ts src/test/p0-safe-runtime.test.ts src/test/p0-jwt-auth.test.ts src/test/security-mitigations.test.ts src/test/socket-security.test.ts src/test/rls-isolation.test.ts src/test/tenancy-domain.test.ts src/test/outbox-idempotency.test.ts src/test/cas-concurrency.test.ts",
+    "test": "node --import tsx --test scripts/copy-runtime-assets.test.cjs src/test/tools-reales-ia.test.ts src/test/meta-webhook-p0.test.ts src/test/multiagent-routing-p0.test.ts src/test/openai-provider-p0.test.ts src/test/p0-handoff-idempotency.test.ts src/test/p0-safe-runtime.test.ts src/test/p0-jwt-auth.test.ts src/test/security-mitigations.test.ts src/test/socket-security.test.ts src/test/rls-isolation.test.ts src/test/tenancy-domain.test.ts src/test/outbox-idempotency.test.ts src/test/cas-concurrency.test.ts",
     "test:cas": "node --import tsx --test src/test/cas-concurrency.test.ts",
     "test:outbox": "node --import tsx --test src/test/outbox-idempotency.test.ts",
     "test:p0": "node --import tsx --test src/test/meta-webhook-p0.test.ts src/test/multiagent-routing-p0.test.ts src/test/openai-provider-p0.test.ts src/test/p0-handoff-idempotency.test.ts src/test/p0-safe-runtime.test.ts src/test/p0-jwt-auth.test.ts src/test/security-mitigations.test.ts src/test/socket-security.test.ts",
