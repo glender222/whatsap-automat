@@ -1,0 +1,89 @@
+name: Product website
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs-site/**"
+      - "docs/api/openapi.v1.*"
+      - "LICENSE"
+      - ".github/workflows/pages.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "docs-site/**"
+      - "docs/api/openapi.v1.*"
+      - "LICENSE"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build and verify website
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: Frontend_py_whatsaapweb/package-lock.json
+      - name: Check links regression cases
+        run: python3 -m unittest discover -s docs-site -p 'test_*.py'
+      - name: Fetch the published development kit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release download v0.4.0
+          --repo "$GITHUB_REPOSITORY"
+          --pattern 'whatsap-automat-developer-kit-v0.4.0.zip'
+          --dir "$RUNNER_TEMP"
+      - name: Build static website and validate downloads
+        run: |
+          python3 docs-site/build.py --developer-kit "$RUNNER_TEMP/whatsap-automat-developer-kit-v0.4.0.zip"
+          python3 -m zipfile -t docs-site/dist/downloads/whatsap-automat-docs.zip
+          node --check docs-site/site/showcase.js
+      - name: Install browser QA tools
+        run: |
+          npm --prefix Frontend_py_whatsaapweb ci
+          cd Frontend_py_whatsaapweb
+          npx playwright install --with-deps chromium
+      - name: Check responsive layout and interactions
+        env:
+          UI_QA_OUTPUT_DIR: ${{ runner.temp }}/website-qa
+        run: node docs-site/test_ui.cjs
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: website-qa-failure
+          path: ${{ runner.temp }}/website-qa
+          retention-days: 7
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: docs-site/dist
+
+  deploy:
+    name: Publish on GitHub Pages
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/configure-pages@v5
+      - name: Deploy website
+        id: deployment
+        uses: actions/deploy-pages@v4
