@@ -1,6 +1,6 @@
 # Revisión UX de publicación y sugerencias de WhatsApp
 
-Candidato revisado: `62f5b58`. Alcance: Studio → Revisión para WhatsApp y Bandeja → sugerencia publicada. Se reutilizaron App, PostgreSQL, OpenAI local y Graph local del harness existente. Sin cambios de backend, CI ni registro global de evidencia.
+La revisión independiente partió de `62f5b58` y recorrió Studio → Revisión para WhatsApp y Bandeja → sugerencia publicada. Usó la aplicación, PostgreSQL y los transportes locales del modelo y Graph. La revisión de integración amplió ese recorrido para comprobar la vigencia de la sugerencia en el backend.
 
 ## Reproducciones y correcciones
 
@@ -8,6 +8,7 @@ Candidato revisado: `62f5b58`. Alcance: Studio → Revisión para WhatsApp y Ban
 | --- | --- | --- |
 | Vincular una revisión publicada, cambiar de Sugerencias a Respuestas automáticas y volver a Sugerencias; abrir la conversación sin agente legacy | Pausar IA queda deshabilitado hasta que existe una sugerencia visible. También vuelve a deshabilitarse tras aceptarla. | La conversación canónica puede pausarse antes de una sugerencia y después de aceptarla. El mensaje de pausa no depende del agente legacy. |
 | Con teclado móvil, desvincular la revisión de WhatsApp | Desaparece el botón enfocado y el selector queda inactivo, sin destino de foco. | Las mutaciones confirmadas devuelven el foco al selector de modo o al encabezado cuando ese selector no está disponible. |
+| Pausar y reanudar después de recibir una sugerencia | La respuesta del turno previo podía reaparecer cuando la Bandeja volvía a consultar el servidor. | La lectura autorizada devuelve `suggestion: null` después de reanudar. Un mensaje nuevo puede generar otra sugerencia sin perder el borrador manual. |
 
 La primera prueba roja falló en `toBeEnabled()` de Pausar IA; después de corregirlo, la segunda reproducción falló en `toBeFocused()` del selector tras desvincular. Las restricciones y comprobaciones de permisos de la API permanecen intactas.
 
@@ -27,7 +28,7 @@ La prueba existente `provider mode requires a company credential and runs its pu
 
 ## Ejecución
 
-Usar las variables sintéticas del harness de navegador y una base migrada `_smoke` propiedad del rol de aplicación. El entorno de esta revisión fue:
+Usar las variables sintéticas del harness de navegador y una base `_smoke` propiedad del rol de aplicación con migraciones hasta 063. El entorno de la revisión independiente fue:
 
 ```bash
 export DB_NAME=whatsap_published_ux_smoke
@@ -52,4 +53,4 @@ npm run build
 
 Las trazas y capturas de las reproducciones se generan en `Frontend_py_whatsaapweb/test-results`. Los proveedores de estas pruebas son locales; la consulta a sus intentos de envío permanece vacía después de aceptar la sugerencia.
 
-Resultado final: **1/1 recorrido Chromium, sin omitidos, 12,0 s**; **7/7 pruebas de Agent Studio** y **8/8 de Bandeja canónica**; ESLint de los tres archivos TypeScript modificados, build frontend y `git diff --check` correctos.
+La revisión independiente registró **1/1 recorrido Chromium**, **7/7 pruebas de Agent Studio** y **8/8 de Bandeja canónica**. La revisión de integración reprodujo además el envío después de pausar y reanudar durante una llamada al modelo. La prueba falló en `93d4518`. Con 063, el recorrido en Chromium y las 29 pruebas conjuntas de PostgreSQL y HTTP pasaron. Una base con 16 ejecuciones previas conservó las filas al aplicar 063 y pasó las 18 pruebas de persistencia y runtime. [Contrato y reproducción](STRICT_WHATSAPP_RUNTIME.md).

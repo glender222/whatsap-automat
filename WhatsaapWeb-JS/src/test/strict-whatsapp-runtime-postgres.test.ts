@@ -124,6 +124,7 @@ test('strict WhatsApp executes pinned publications, recovers confirmed output an
   t.after(() => pool.end());
   const { TenantScopedUoW } = await import('../db/TenantScopedUoW');
   const { AgentRepositoryPg } = await import('../modules/ai/infra/db/AgentRepositoryPg');
+  const { IaPauseOverrideRepositoryPg } = await import('../modules/ai/infra/db/IaPauseOverrideRepositoryPg');
   const { MetaInboxStore } = await import('../services/whatsapp/meta/MetaInboxStore');
   const { MetaInboundWorkRepository } = await import('../services/whatsapp/meta/MetaInboundWorkRepository');
   const { MetaInboundWorker } = await import('../services/whatsapp/meta/MetaInboundWorker');
@@ -138,6 +139,7 @@ test('strict WhatsApp executes pinned publications, recovers confirmed output an
   const { rows: [role] } = await pool.query('SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user');
   assert.deepEqual(role, { rolsuper: false, rolbypassrls: false });
   const repo = new AgentRepositoryPg(pool);
+  const pauses = new IaPauseOverrideRepositoryPg(pool);
   const alpha = randomInt(500_000_000, 600_000_000);
   const bravo = alpha + 1;
   for (const [companyId, name] of [[alpha, 'Alfa'], [bravo, 'Bravo']] as const) {
@@ -354,23 +356,30 @@ test('strict WhatsApp executes pinned publications, recovers confirmed output an
     assert.equal(graphSends.length, 1);
   });
 
-  for (const intervention of ['pause', 'human'] as const) {
+  for (const [intervention, sender] of [['pause', '12025550126'], ['human', '12025550127'],
+    ['pause and resume', '12025550131']] as const) {
     await t.test(`${intervention} during the provider request prevents automatic delivery`, async () => {
-      const id = `${shared}-${intervention}`;
-      const job = await seed(alpha, 'Alfa', id, intervention === 'pause' ? '12025550126' : '12025550127');
+      const id = `${shared}-${sender}`;
+      const job = await seed(alpha, 'Alfa', id, sender);
       const before = requests.length;
-      beforeStrictReply = () => uow.run(alpha, async (db) => {
-        await db.query(intervention === 'pause'
-          ? `UPDATE conversations SET ia_paused = true, ia_resume_at = NULL WHERE company_id = $1 AND id = $2`
-          : `UPDATE conversations SET owner_type = 'human', owner_id = 'fixture-operator', ownership_epoch = ownership_epoch + 1
-             WHERE company_id = $1 AND id = $2`, [alpha, job.conversation_id]);
-      });
+      const sendsBefore = graphSends.length;
+      beforeStrictReply = async () => {
+        if (intervention === 'human') {
+          await uow.run(alpha, (db) => db.query(`UPDATE conversations SET owner_type = 'human',
+            owner_id = 'fixture-operator', ownership_epoch = ownership_epoch + 1
+            WHERE company_id = $1 AND id = $2`, [alpha, job.conversation_id]));
+          return;
+        }
+        const conversationId = Number(job.conversation_id);
+        await pauses.pause({ companyId: alpha, conversationId });
+        if (intervention === 'pause and resume') await pauses.resume(alpha, conversationId);
+      };
       assert.equal(await worker.processBatch(alpha), 1);
       const result = await workState(alpha, id);
       assert.equal(result.status, 'completed');
       assert.equal(result.outcome.status, 'skipped');
       assert.equal(requests.length, before + 1);
-      assert.equal(graphSends.length, 1);
+      assert.equal(graphSends.length, sendsBefore);
       assert.equal(await strictStore.getSuggestion(alpha, job.conversation_id), null);
       assert.equal(await worker.processBatch(alpha), 0);
     });
@@ -379,6 +388,7 @@ test('strict WhatsApp executes pinned publications, recovers confirmed output an
   await t.test('an unconfirmed provider response is terminal and never falls back or repeats the POST', async () => {
     const id = `${shared}-unknown`;
     const before = requests.length;
+    const sendsBefore = graphSends.length;
     dropStrictReply = true;
     const job = await inbound(alpha, 'Alfa', id, '12025550128');
     assert.equal(job.status, 'delivery_unknown');
@@ -390,7 +400,7 @@ test('strict WhatsApp executes pinned publications, recovers confirmed output an
     assert.equal(requests.length, before + 1);
     assert.equal(await worker.processBatch(alpha), 0);
     assert.equal(requests.length, before + 1);
-    assert.equal(graphSends.length, 1);
+    assert.equal(graphSends.length, sendsBefore);
   });
 
   const { rows: [accounting] } = await uow.run(alpha, (db) => db.query(`
@@ -404,7 +414,7 @@ test('strict WhatsApp executes pinned publications, recovers confirmed output an
   assert.equal(accounting.quota_tokens, accounting.ledger_tokens);
   assert.equal(accounting.quota_cost, accounting.ledger_cost);
   assert.equal(accounting.evaluations, 2);
-  assert.equal(accounting.completions, 6);
+  assert.equal(accounting.completions, 7);
   await t.test('a recovered older checkpoint cannot overtake a later active or completed turn', async () => {
     const from = '12025550129';
     const earlierId = `${shared}-earlier-recovery`;

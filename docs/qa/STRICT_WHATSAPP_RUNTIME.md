@@ -25,13 +25,15 @@ PUT puede preparar el vínculo antes de activar strict. DELETE también funciona
 ## Identidad, presupuesto y continuidad
 
 1. El trabajo de entrada ya identifica tenant, UUID de outbox, mensaje interno y conversación. `prepare` valida esa fuente contra el texto original persistido y crea un único run/intento por inbound. Las mismas claves con otro texto, conversación o timeout no reutilizan el intento.
-2. El run guarda versión, huella, revisión administrativa, modo y hash de petición. El timeout efectivo es el mínimo entre 30 segundos y el límite publicado. La reserva pertenece al intento durable y se vuelve a autorizar antes del modelo.
+2. El run guarda versión, huella, revisión administrativa, modo y hash de petición. Desde la migración 063 también fija `ownership_epoch` y `ia_paused_at` de la conversación. El timeout efectivo es el mínimo entre 30 segundos y el límite publicado. La reserva pertenece al intento durable y se vuelve a autorizar antes del modelo.
 3. Liquidar cuota, crear el registro de consumo y guardar la salida cifrada del run ocurre en una sola transacción. Una escritura fallida no deja un consumo confirmado sin su checkpoint. El libro no recibe prompts ni texto de respuesta.
 4. `ready` permite continuar sólo la entrega o sugerencia. El worker recupera trabajos interrumpidos que tienen ese checkpoint confirmado; el modelo no vuelve a ejecutarse. Los permisos y el vínculo se releen antes de usar el resultado. Una recuperación espera al turno activo de su conversación; si un mensaje posterior ya empezó a ejecutarse, se descarta la salida antigua. Los leases de preparación vencidos se liberan antes de reclamar trabajo, sin habilitar a su propietario anterior.
 5. La respuesta automática usa la reclamación existente de `ConversationSendService`, anclada al inbound y efecto `reply`. Un acuse ya guardado se reutiliza. Un envío incierto no se repite. La salida temporal se elimina al terminar la entrega.
 6. Si el modelo fue reclamado pero falta un resultado confirmado, el estado queda incierto. Un proceso nuevo no roba ese permiso ni vuelve a consultar al modelo. Una liquidación tardía confirmada puede habilitar la continuación en un tick posterior.
 
 Los límites publicados gobiernan la llamada completa. El contenido de entrada y salida se limita a 4096 caracteres; sólo se admiten mensajes Meta `text`. Las comprobaciones de pausa, propietario humano, conversación cerrada/archivada, modo de empresa y vínculo se repiten antes de la salida. `normal` no ejecuta este agente; `mixed` produce sugerencia incluso si el vínculo permite auto; sólo `automator` más vínculo `auto` admite envío.
+
+Pausar cambia la marca de pausa. Tomar el control o reanudar cambia la generación de propiedad. Ambas condiciones invalidan la autorización guardada aunque la conversación vuelva a estar disponible antes de que responda el modelo. La versión general de la conversación puede cambiar al reservar un envío; por eso queda fuera de esta comprobación. Las ejecuciones iniciadas antes de 063 conservan su auditoría y caducidad, pero quedan inhabilitadas para volver a sugerir, llamar al modelo o iniciar un envío, porque carecen de una generación de propiedad comprobada. Aplicar 063 y actualizar todas las réplicas y workers antes de reabrir el piloto.
 
 ## Sugerencias y retención
 
@@ -47,7 +49,7 @@ Investigar en una transacción con `SET LOCAL app.current_tenant_id` y el rol de
 
 ```sql
 SELECT r.id, r.job_id, r.inbound_message_id, r.conversation_id,
-       r.attempt_id, r.graph_id, r.graph_version, r.spec_hash, r.state,
+       r.attempt_id, r.graph_id, r.graph_version, r.spec_hash, r.state, r.ownership_epoch, r.ia_paused_at,
        r.ledger_id, r.output_expires_at, w.status AS work_status, w.last_error
 FROM strict_whatsapp_runs r
 JOIN processing_outbox w ON w.tenant_id = r.tenant_id AND w.id = r.job_id
@@ -62,7 +64,7 @@ Un intento reclamado sin acuse exige conciliación por proveedor y revisión ope
 
 ## Reproducción local
 
-Usar PostgreSQL local, una base dedicada terminada en `_smoke`, rol sin superusuario ni bypass RLS y migraciones hasta 062. Configurar `STRICT_AGENT_RUNTIME_TEST_DATABASE_URL` mediante el entorno privado, sin imprimirla. Las pruebas reemplazan credenciales por valores sintéticos y restringen sus proveedores a transporte local.
+Usar PostgreSQL local, una base dedicada terminada en `_smoke`, rol sin superusuario ni bypass RLS y migraciones hasta 063. Configurar `STRICT_AGENT_RUNTIME_TEST_DATABASE_URL` mediante el entorno privado, sin imprimirla. Las pruebas reemplazan credenciales por valores sintéticos y restringen sus proveedores a transporte local.
 
 Desde `WhatsaapWeb-JS`:
 

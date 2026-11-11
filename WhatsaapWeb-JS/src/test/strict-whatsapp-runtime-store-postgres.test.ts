@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import { Pool } from 'pg';
 import type { AgentGraphVersionV1 } from '@whatsap-automat/contracts';
 import { TenantScopedUoW } from '../db/TenantScopedUoW';
+import { IaPauseOverrideRepositoryPg } from '../modules/ai/infra/db/IaPauseOverrideRepositoryPg';
 import { AgentRepositoryPg } from '../modules/ai/infra/db/AgentRepositoryPg';
 import { AiQuotaReservationStore, type AiQuotaSettlement } from '../services/ai/gateway/AiQuotaReservationStore';
 import { boundedTextCapability } from '../services/ai/gateway/BoundedTextCompletion';
@@ -344,6 +345,18 @@ test('strict WhatsApp persistence pins published revisions and atomically retain
     assert.equal(await store.getSuggestion(alpha, source.conversationId), null);
     await policy.transition(alpha, 'strict');
     assert.equal((await store.getSuggestion(alpha, source.conversationId))?.runId, run.id);
+    await uow.run(alpha, (db) => db.query(`UPDATE conversations SET version = version + 1
+      WHERE company_id = $1 AND id = $2`, [alpha, source.conversationId]));
+    assert.equal((await store.getSuggestion(alpha, source.conversationId))?.runId, run.id,
+      'An unrelated conversation version change does not invalidate the suggestion');
+    const pauses = new IaPauseOverrideRepositoryPg(pool);
+    const conversationId = Number(source.conversationId);
+    await pauses.pause({ companyId: alpha, conversationId, expiresAt: new Date(0) });
+    assert.equal(await store.getSuggestion(alpha, source.conversationId), null,
+      'The suggestion does not return after a timed pause expires');
+    await pauses.resume(alpha, conversationId);
+    assert.equal(await store.getSuggestion(alpha, source.conversationId), null,
+      'Resuming the same conversation does not restore the previous suggestion');
     await bind(graph);
     assert.equal(await store.getSuggestion(alpha, source.conversationId), null);
     await store.finish(alpha, run.id, 'completed');

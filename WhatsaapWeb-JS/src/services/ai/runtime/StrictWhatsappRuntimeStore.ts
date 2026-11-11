@@ -128,8 +128,11 @@ export class StrictWhatsappRuntimeStore {
     return this.uow.run(tenantId, async (db) => {
       // Lock the durable source to serialize duplicate prepares, including callers with different job IDs.
       const { rows: [source] } = await db.query(`
-        SELECT m.occurred_at, m.raw_payload_json #>> '{text,body}' AS input_text
-        FROM messages m JOIN processing_outbox work ON work.tenant_id = m.company_id
+        SELECT m.occurred_at, m.raw_payload_json #>> '{text,body}' AS input_text,
+          conversation.ownership_epoch, conversation.ia_paused_at::text AS ia_paused_at
+        FROM messages m JOIN conversations conversation ON conversation.company_id = m.company_id
+          AND conversation.id = m.conversation_id
+        JOIN processing_outbox work ON work.tenant_id = m.company_id
           AND work.id = $4 AND work.event_type = 'whatsapp.inbound.received'
           AND work.payload->>'messageId' = m.id::text AND work.payload->>'conversationId' = m.conversation_id::text
         WHERE m.company_id = $1 AND m.id = $2 AND m.conversation_id = $3
@@ -158,13 +161,13 @@ export class StrictWhatsappRuntimeStore {
       const { rows: [row] } = await db.query(`
         INSERT INTO strict_whatsapp_runs (tenant_id, id, job_id, inbound_message_id, conversation_id, attempt_id,
           graph_id, graph_version, spec_hash, binding_mode, bound_by, bound_at, input_hash, request_hash, timeout_ms,
-          output_expires_at, created_at, binding_revision)
+          output_expires_at, created_at, binding_revision, ownership_epoch, ia_paused_at)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-          LEAST($16::timestamptz + interval '24 hours', statement_timestamp() + interval '1 hour'), statement_timestamp(), $17)
+          LEAST($16::timestamptz + interval '24 hours', statement_timestamp() + interval '1 hour'), statement_timestamp(), $17, $18, $19)
         RETURNING *
       `, [tenantId, randomUUID(), command.jobId, command.messageId, command.conversationId, randomUUID(),
         pin.graphId, pin.version, pin.specHash, pin.mode, pin.boundBy, pin.boundAt, hash(command.inputText),
-        plan.requestHash, timeoutMs, source.occurred_at, pin.revision]);
+        plan.requestHash, timeoutMs, source.occurred_at, pin.revision, source.ownership_epoch, source.ia_paused_at]);
       return this.asRun(db, tenantId, row);
     });
   }
@@ -189,6 +192,8 @@ export class StrictWhatsappRuntimeStore {
         JOIN tenant_ai_dispatch_policies policy ON policy.tenant_id = run.tenant_id AND policy.mode = 'strict'
         JOIN company_settings settings ON settings.company_id = run.tenant_id AND settings.automator_mode IN ('mixed', 'automator')
         JOIN conversations conversation ON conversation.company_id = run.tenant_id AND conversation.id = run.conversation_id
+          AND conversation.ownership_epoch = run.ownership_epoch
+          AND conversation.ia_paused_at IS NOT DISTINCT FROM run.ia_paused_at
           AND conversation.owner_type = 'ai_agent' AND conversation.status <> 'closed' AND conversation.archived_at IS NULL
           AND NOT (conversation.ia_paused AND (conversation.ia_resume_at IS NULL OR conversation.ia_resume_at > clock_timestamp()))
         JOIN processing_outbox work ON work.tenant_id = run.tenant_id AND work.id = run.job_id

@@ -92,9 +92,17 @@ export class StrictWhatsappRuntime {
         WHERE tenant_id = $1 FOR SHARE`, [input.companyId]);
       const { rows: [settings] } = await db.query(`SELECT automator_mode FROM company_settings
         WHERE company_id = $1 FOR SHARE`, [input.companyId]);
-      const { rows: [conversation] } = await db.query(`SELECT owner_type, status, archived_at,
-        ia_paused AND (ia_resume_at IS NULL OR ia_resume_at > clock_timestamp()) AS paused
-        FROM conversations WHERE company_id = $1 AND id = $2 FOR SHARE`, [input.companyId, input.conversationId]);
+      const { rows: [conversation] } = await db.query(`
+        SELECT owner_type, status, archived_at,
+          ia_paused AND (ia_resume_at IS NULL OR ia_resume_at > clock_timestamp()) AS paused
+        FROM conversations conversation WHERE company_id = $1 AND id = $2
+          AND ($3::uuid IS NULL OR EXISTS (
+            SELECT 1 FROM strict_whatsapp_runs run
+            WHERE run.tenant_id = conversation.company_id AND run.conversation_id = conversation.id
+              AND run.id = $3 AND run.ownership_epoch = conversation.ownership_epoch
+              AND run.ia_paused_at IS NOT DISTINCT FROM conversation.ia_paused_at
+          ))
+        FOR SHARE`, [input.companyId, input.conversationId, run?.id ?? null]);
       const { rows: newerWork } = await db.query(`
         SELECT later.id FROM processing_outbox source JOIN processing_outbox later
           ON later.tenant_id = source.tenant_id AND later.event_type = source.event_type

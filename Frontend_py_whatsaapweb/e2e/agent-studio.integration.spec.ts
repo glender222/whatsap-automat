@@ -268,8 +268,11 @@ if (process.env.STUDIO_PROVIDER_FIXTURE === '1') {
       await expect(inboxes[0].getByRole('button', { name: 'Reanudar IA', exact: true })).toBeEnabled();
       await expect(inboxes[0].getByText('Sugerencia de la revisión publicada 1', { exact: true })).toHaveCount(0);
       await expect(composer).toHaveValue('Borrador manual que todavía no se envió');
+      const suggestionAfterResume = inboxes[0].waitForResponse((response) =>
+        response.url().includes('/whatsapp-suggestions?conversationId=') && response.ok());
       await inboxes[0].getByRole('button', { name: 'Reanudar IA', exact: true }).press('Enter');
       await expect(pause).toBeEnabled();
+      expect(await (await suggestionAfterResume).json()).toEqual({ suggestion: null });
       await expect(inboxes[0].getByText('Sugerencia de la revisión publicada 1', { exact: true })).toHaveCount(0);
       const freshText = 'Consulta después de reanudar Alfa';
       const freshPayload = JSON.stringify({ entry: [{ changes: [{ field: 'messages', value: {

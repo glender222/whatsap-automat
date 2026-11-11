@@ -2,7 +2,7 @@
 
 Este registro separa los recorridos verificados y los pendientes. Para cerrar un defecto se registra la reproducción, el cambio y el resultado de la regresión. Cuando el recorrido cruza empresas, la evidencia identifica los roles y la separación comprobada.
 
-El job `product-smoke` ejecuta la prueba de sesión Socket.IO y la suite de Chromium con una base independiente, migraciones desde cero y proveedores locales para Graph y Studio. El paso del navegador falla si se omite un recorrido y conserva el informe y las trazas cuando hay fallos. La ejecución local del paso con Chromium de Playwright pasó los 13 recorridos sin omisiones. La suite de sesión pasó 9 pruebas. [Workflow de CI](../../.github/workflows/ci.yml).
+El job `product-smoke` ejecuta la prueba de sesión Socket.IO y tres pasos de Chromium con bases aisladas y proveedores locales. Los pasos de navegador fallan si omiten algún recorrido y conservan informes y trazas ante fallos. En `62f5b58` pasaron localmente 37 recorridos generales, el recorrido de Studio y WhatsApp con política de proveedor y cuatro recorridos de Mercado Pago. La prueba de sesión Socket.IO tiene nueve casos. [Workflow de CI](../../.github/workflows/ci.yml).
 
 ## UX-01. El tema cambia al navegar
 
@@ -72,6 +72,12 @@ Para reproducir UX-02 y UX-03, ejecutar `npm run test:e2e -- e2e/orders-navigati
 - **Antes.** Al abrir la identificación manual en móvil se perdía el foco. Recuperar una liquidación guardada después de perder el acuse dejaba visible el error anterior.
 - **Después.** El foco llega al campo de ID y vuelve al control de conciliación al cancelar o completar. La alerta del intento anterior desaparece cuando llega una observación nueva.
 - **Validación.** Cuatro recorridos Chromium con API, PostgreSQL y Mercado Pago local comprueban pago parcial sin confirmar el pedido, liquidación única, devolución a revisión, recuperación del acuse y aislamiento de dos empresas. [Evidencia y reproducción](MERCADOPAGO_BROWSER_RECONCILIATION.md).
+
+## UX-11. Pausa y foco con una revisión publicada de WhatsApp
+
+- **Antes.** Bandeja deshabilitaba «Pausar IA» antes de la primera sugerencia. Desvincular con teclado dejaba el foco sin destino. Al reanudar podía aparecer de nuevo la sugerencia que existía antes de pausar.
+- **Después.** La conversación canónica permite pausar y reanudar en cada etapa. Las mutaciones de vinculación devuelven el foco al selector de modo o al encabezado de la sección. El runtime fija la generación de propiedad y la marca de pausa para que el resultado viejo quede invalidado, incluso si la pausa vence.
+- **Validación.** Chromium recorrió cambios de modo por teclado, pausa, conservación del borrador, reemplazo explícito, aislamiento y recuperación de un conflicto administrativo. PostgreSQL comprobó que pausar y reanudar durante la llamada al modelo bloquea la salida y que una respuesta automática autorizada genera un único envío. [Reproducción y pruebas](PUBLISHED_WHATSAPP_UX_REVIEW.md) · [Contrato de ejecución](STRICT_WHATSAPP_RUNTIME.md).
 
 ## MSG-01. Conversaciones nuevas y recuperación de la bandeja
 
@@ -240,4 +246,4 @@ El ejemplo inicial del editor validaba estructura, pero no preparaba el modelo n
 | Bandeja en tiempo real | Filtro por etiqueta, reconexión, reorden de webhooks e historial paginado cubiertos en MSG-04 y MSG-05. |
 | Envío y recepción | MSG-06 y MSG-07 cubren envíos humanos y automáticos, adjuntos, entrega incierta y recuperación tras reinicio con Graph local. Falta el recorrido en navegador con dos líneas Meta reales. |
 | Harness IA | IA-03 a IA-10 cubren Studio, cuota, autorización de derivaciones, reclamo de efectos y el perfil de texto del runtime estricto de WhatsApp. Faltan el piloto con proveedor real, los perfiles estrictos de router y herramientas y la conciliación de efectos por proveedor. |
-| Flujo operativo y navegación | UX-07 a UX-10 cubren conversación, pedido, pago y regreso, aprobación, conexión y conciliación desde navegador con el proveedor local. Falta el ensayo con una cuenta autorizada de Mercado Pago y la validación independiente del candidato completo. |
+| Flujo operativo y navegación | UX-07 a UX-11 cubren conversación, pedido, pago y regreso, aprobación, conexión, conciliación con el proveedor local y pausa del agente publicado. Falta el ensayo con una cuenta autorizada de Mercado Pago y la validación independiente del candidato completo. |
