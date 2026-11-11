@@ -2,7 +2,7 @@
 
 Este registro separa los recorridos verificados y los pendientes. Para cerrar un defecto se registra la reproducción, el cambio y el resultado de la regresión. Cuando el recorrido cruza empresas, la evidencia identifica los roles y la separación comprobada.
 
-El job `product-smoke` ejecuta la prueba de sesión Socket.IO y tres pasos de Chromium con bases aisladas y proveedores locales. Los pasos de navegador fallan si omiten algún recorrido y conservan informes y trazas ante fallos. La línea base `eb0424b` tiene los 11 trabajos de CI aprobados. El candidato 067 compone el catálogo publicado con WhatsApp y conserva los recorridos generales y de Mercado Pago. La prueba de sesión Socket.IO tiene nueve casos. [Workflow de CI](../../.github/workflows/ci.yml).
+El job `product-smoke` ejecuta la prueba de sesión Socket.IO y tres pasos de Chromium con bases aisladas y proveedores locales. Los pasos de navegador fallan si omiten algún recorrido y conservan informes y trazas ante fallos. La línea base `19a41a5` tiene los 11 trabajos de CI aprobados. La composición `dda6b86` añadió las fechas de los mensajes y la unicidad de aprobaciones. Pasaron localmente 53 recorridos de Chromium, 156 pruebas de API/PostgreSQL, 252 pruebas generales de backend, 107 del broker y rutas, 81 de frontend, 205 de contratos y 42 del cliente móvil. Los builds de backend/web y los tipos del cliente móvil terminaron correctamente. La prueba de sesión Socket.IO tiene nueve casos. [Workflow de CI](../../.github/workflows/ci.yml).
 
 ## UX-01. El tema cambia al navegar
 
@@ -182,6 +182,12 @@ La bandeja de Alfa muestra un mensaje entrante y una respuesta automática. Grap
 - **Cambio.** El timeline utiliza el normalizador compartido y la fecha visible consume el valor ya normalizado.
 - **Evidencia.** Chromium a 1280 y 390 px compara la fecha y hora completas en America/Lima. Dos empresas reciben webhooks firmados, recuperan su historial por HTTP y conservan las fechas tras recargar. Una respuesta HTTP controlada comprueba también milisegundos. [Reproducción y contrato temporal](INBOX_MESSAGE_DATES.md).
 
+## UX-16. Vencimiento y revisión de aprobaciones duplicadas
+
+- **Vencimiento.** Una repetición en Chromium perdió el foco al cerrarse automáticamente el diálogo vencido. La restauración nativa competía con el foco del título. La corrección programa el foco con un frame cancelable y pasó cinco repeticiones del caso.
+- **Duplicados históricos.** En móvil y tema Oscuro, el detalle muestra la causa del bloqueo y la descripción accesible de Aprobar. El administrador puede revisar y rechazar la solicitud. La recuperación tras perder un acuse consulta el estado y descarta la intención de aprobación que quedó bloqueada.
+- **Evidencia.** La suite de Aprobaciones usa App y PostgreSQL con sesiones aisladas. Comprueba recarga, teclado, API canónica y legacy, decisiones conservadas y acceso denegado desde otra empresa. [Identidad de aprobación y despliegue](APPROVAL_EFFECT_IDENTITY.md).
+
 ## IA-01. Evaluación de ejecución por revisión y empresa
 
 - El evaluador interno carga una revisión inmutable y una suite guardada bajo RLS. Verifica las afirmaciones y el presupuesto del conjunto antes de llamar al proveedor. La ejecución reclama un UUID persistido y guarda las huellas de la revisión y de la suite, los resultados de las afirmaciones y las referencias de consumo. El resumen omite el texto de entrada y salida.
@@ -296,6 +302,13 @@ El ejemplo inicial del editor validaba estructura, pero no preparaba el modelo n
 - **Pruebas.** Dos empresas publican y vinculan mediante la API, conservan su revisión fijada ante otra publicación y ofrecen sugerencias aisladas. Los casos detienen procesos después del router, del snapshot y antes y después de ready. Comprueban acuses perdidos del modelo y Graph, revocación, restauración de permisos, toma humana y pausa/reanudación.
 - **Navegador.** Los tres recorridos proveedor de Studio pasaron sobre el candidato integrado. Incluyen texto, catálogo y cambio de perfil entre revisiones. Las llamadas al modelo y Graph usan servicios HTTP locales. [Contrato y recuperación](../architecture/CATALOG_WHATSAPP_RUNTIME.md).
 
+## IA-16. Una solicitud de aprobación por efecto
+
+- **Antes.** Dos procesos observaban la ausencia de aprobación y creaban IDs distintos para el mismo paso. El resultado quedó reproducido con una barrera antes de ambos INSERT en PostgreSQL.
+- **Corrección.** La migración 068 conserva y marca los grupos históricos ambiguos. Un índice único parcial y la reserva transaccional hacen que las altas concurrentes compartan la misma aprobación. ToolBroker comprueba el run, la acción, la herramienta y el riesgo.
+- **Históricos.** Las decisiones conservan su auditoría. Los grupos ambiguos devuelven APPROVAL_EFFECT_CONFLICT y la interfaz ofrece revisión y rechazo. La API comprueba también el bloqueo al decidir. La migración se probó desde un propietario sin superusuario ni BYPASSRLS, con duplicados previos y dos aplicaciones del archivo.
+- **Continuación.** El siguiente perfil comercial requiere propuesta durable, aprobación y efecto de dominio transaccionales. [Plan del perfil de prepedidos](../architecture/STRICT_PREORDER_APPROVAL_PROFILE.md).
+
 ## WF-01. Ingreso mientras se revierte una revisión publicada
 
 - **Antes.** CI devolvió `WORKFLOW_NOT_PUBLISHED` durante una reversión válida. La regresión local mantuvo la reversión abierta hasta observar en PostgreSQL que un webhook esperaba su bloqueo. El ingreso falló al intentar fijar la revisión mediante una consulta que también bloqueaba la definición.
@@ -313,5 +326,5 @@ El ejemplo inicial del editor validaba estructura, pero no preparaba el modelo n
 | --- | --- |
 | Bandeja en tiempo real | Filtro por etiqueta, reconexión, reorden de webhooks e historial paginado cubiertos en MSG-04 y MSG-05. |
 | Envío y recepción | MSG-06 a MSG-08 cubren envíos humanos y automáticos, adjuntos, entrega incierta, recuperación tras reinicio y recibos en la bandeja con Graph local. Falta el recorrido en navegador con dos líneas Meta reales. |
-| Harness IA | IA-03 a IA-15 cubren Studio, cuota, derivaciones, reclamo de efectos, texto y el recorrido canónico del catálogo publicado. Faltan perfiles con herramientas de efectos, conciliación por proveedor y piloto con proveedor real. |
-| Flujo operativo y navegación | UX-07 a UX-15 cubren conversación, pedido, pago y regreso, aprobación, conexión, conciliación con el proveedor local, pausa del agente publicado y regreso al listado de Studio. Falta el ensayo con una cuenta autorizada de Mercado Pago y la validación independiente del candidato completo. |
+| Harness IA | IA-03 a IA-16 cubren Studio, cuota, derivaciones, reclamo de efectos, texto y el recorrido canónico del catálogo publicado. Faltan perfiles con herramientas de efectos, conciliación por proveedor y piloto con proveedor real. |
+| Flujo operativo y navegación | UX-07 a UX-16 cubren conversación, pedido, pago y regreso, aprobación, conexión, conciliación con el proveedor local, pausa del agente publicado y regreso al listado de Studio. Falta el ensayo con una cuenta autorizada de Mercado Pago y la validación independiente del candidato completo. |

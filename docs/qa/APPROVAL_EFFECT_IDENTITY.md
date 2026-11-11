@@ -68,3 +68,5 @@ Las fixtures usan credenciales sintéticas y transporte local. Este corte conser
 La comprobación final pasó 14/14 casos PostgreSQL, 10/10 recorridos Chromium y 5/5 repeticiones del vencimiento. Pasaron 107/107 pruebas de broker, rutas y OpenAPI, 252/252 pruebas del backend, 205/205 de contratos, 5/5 de la API web y 42/42 del cliente móvil. Typecheck, build de backend y web, TypeScript estricto de las fixtures y ESLint de los archivos web modificados terminaron correctamente.
 
 La captura revisada corresponde a la web a 390 px en tema oscuro. La pantalla Expo conserva verificación de tipos y pruebas del cliente. La comprobación en un dispositivo nativo queda pendiente para la validación móvil del candidato.
+
+La composición con catálogo 067 y fechas de Bandeja pasó 156 pruebas PostgreSQL y los 53 recorridos de Chromium, con proveedores locales. Los 46 casos generales incluyen los diez de Aprobaciones. El cliente móvil pasó 42 pruebas y typecheck. La comprobación en un dispositivo Expo queda pendiente.
