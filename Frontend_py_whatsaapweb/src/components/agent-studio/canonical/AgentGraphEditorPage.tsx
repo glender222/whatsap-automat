@@ -4,7 +4,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import GraphProblemNotice from './GraphProblemNotice';
 import {
   draftSpec, exampleGraph, getGraphDraft, graphIdPattern, graphPath, graphProblem, loadStudioTextTemplate, readVersion,
-  saveGraphDraft, studioPath, type GraphProblem,
+  saveGraphDraft, studioLocation, studioPath, type GraphProblem,
 } from './agentGraphApi';
 
 const inputClass = 'w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800';
@@ -25,12 +25,13 @@ function readSpec(raw: string): Record<string, unknown> {
 
 function GraphEditor({ graphId }: { graphId?: string }) {
   const [params] = useSearchParams();
+  const after = params.get('after');
   const rawFrom = params.get('from');
   const from = readVersion(rawFrom);
   const invalidSource = Boolean(graphId && rawFrom !== null && from === undefined);
   const navigate = useNavigate();
   const base = graphId ? graphPath(graphId) : studioPath;
-  const back = graphId && from ? `${base}?version=${from}` : base;
+  const back = studioLocation(base, { after, version: graphId ? from : undefined });
   const [spec, setSpec] = useState(initialSpec);
   const [loaded, setLoaded] = useState(false);
   const [loadAttempt, setLoadAttempt] = useState(0);
@@ -95,7 +96,7 @@ function GraphEditor({ graphId }: { graphId?: string }) {
     setProblem(undefined);
     try {
       const draft = await saveGraphDraft(id, readSpec(spec), graphId ? 'revision' : 'create');
-      navigate(`${graphPath(draft.graphId)}?version=${draft.version}`, {
+      navigate(studioLocation(graphPath(draft.graphId), { after, version: draft.version }), {
         replace: true, state: { savedVersion: draft.version },
       });
     } catch (cause) {
@@ -108,7 +109,8 @@ function GraphEditor({ graphId }: { graphId?: string }) {
 
   return (
     <section className="mx-auto max-w-4xl space-y-4 p-4 sm:p-6" aria-labelledby="graph-editor-title">
-      <Link to={back} className="inline-flex min-h-11 items-center gap-2 text-sm font-medium text-emerald-700 dark:text-emerald-300">
+      <Link to={back} state={graphId ? undefined : { focusNewGraph: true }}
+        className="inline-flex min-h-11 items-center gap-2 text-sm font-medium text-emerald-700 dark:text-emerald-300">
         <ArrowLeft size={16} aria-hidden="true" /> {graphId ? 'Volver al grafo' : 'Volver a Agent Studio'}
       </Link>
       <header>

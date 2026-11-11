@@ -79,6 +79,12 @@ Para reproducir UX-02 y UX-03, ejecutar `npm run test:e2e -- e2e/orders-navigati
 - **Después.** La conversación canónica permite pausar y reanudar en cada etapa. Las mutaciones de vinculación devuelven el foco al selector de modo o al encabezado de la sección. El runtime fija la generación de propiedad y la marca de pausa para que el resultado viejo quede invalidado, incluso si la pausa vence.
 - **Validación.** Chromium recorrió cambios de modo por teclado, pausa, conservación del borrador, reemplazo explícito, aislamiento y recuperación de un conflicto administrativo. PostgreSQL comprobó que pausar y reanudar durante la llamada al modelo bloquea la salida y que una respuesta automática autorizada genera un único envío. [Reproducción y pruebas](PUBLISHED_WHATSAPP_UX_REVIEW.md) · [Contrato de ejecución](STRICT_WHATSAPP_RUNTIME.md).
 
+## UX-12. Volver al listado de Agent Studio desde una revisión
+
+- **Antes.** En `3eb55ff`, desde la segunda página un administrador abría un grafo, recargaba, consultaba una revisión anterior y guardaba otra. «Volver a Agent Studio» enviaba a la primera página y el grafo quedaba fuera de vista. Chromium falló al comprobar la URL de regreso.
+- **Después.** El cursor del listado viaja en la URL al consultar o editar una revisión y al abrir un grafo nuevo. Volver a la lista enfoca el grafo revisado. Cancelar la creación enfoca «Nuevo grafo» en la misma página.
+- **Validación.** Chromium con API y PostgreSQL recorrió el caso desde Bandeja con teclado y un viewport de 390 px. Verificó la segunda página después de recargar, cambiar de revisión, cancelar o guardar, recuperar el foco y conservar Oscuro con el sistema en Claro. [Prueba de navegador](../../Frontend_py_whatsaapweb/e2e/agent-studio.integration.spec.ts).
+
 ## MSG-01. Conversaciones nuevas y recuperación de la bandeja
 
 La traza de GitHub Actions mostró que el corte de red podía coincidir con la carga inicial de la conversación. La regresión ahora espera que aparezca el mensaje inicial en el historial antes de cortar la red. Así comprueba la recuperación después de una desconexión establecida.
@@ -246,4 +252,4 @@ El ejemplo inicial del editor validaba estructura, pero no preparaba el modelo n
 | Bandeja en tiempo real | Filtro por etiqueta, reconexión, reorden de webhooks e historial paginado cubiertos en MSG-04 y MSG-05. |
 | Envío y recepción | MSG-06 y MSG-07 cubren envíos humanos y automáticos, adjuntos, entrega incierta y recuperación tras reinicio con Graph local. Falta el recorrido en navegador con dos líneas Meta reales. |
 | Harness IA | IA-03 a IA-10 cubren Studio, cuota, autorización de derivaciones, reclamo de efectos y el perfil de texto del runtime estricto de WhatsApp. Faltan el piloto con proveedor real, los perfiles estrictos de router y herramientas y la conciliación de efectos por proveedor. |
-| Flujo operativo y navegación | UX-07 a UX-11 cubren conversación, pedido, pago y regreso, aprobación, conexión, conciliación con el proveedor local y pausa del agente publicado. Falta el ensayo con una cuenta autorizada de Mercado Pago y la validación independiente del candidato completo. |
+| Flujo operativo y navegación | UX-07 a UX-12 cubren conversación, pedido, pago y regreso, aprobación, conexión, conciliación con el proveedor local, pausa del agente publicado y regreso al listado de Studio. Falta el ensayo con una cuenta autorizada de Mercado Pago y la validación independiente del candidato completo. |

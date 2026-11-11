@@ -123,6 +123,63 @@ test('two workspaces evaluate, publish and execute only their verified revision'
   }
 });
 
+test('Studio restores the draft list page and focus after reviewing a graph on mobile', async ({ page, request }) => {
+  const [company] = provisionCompanies('--studio');
+  const headers = { authorization: `Bearer ${company.auth.accessToken}` };
+  const apiPath = `${backend}/api/v1/agent-graphs`;
+  const studio = '/dashboard/ia/estudio';
+  const target = 'qa-navigation-12';
+  await Promise.all(Array.from({ length: 13 }, async (_, index) => {
+    const graphId = `qa-navigation-${String(index).padStart(2, '0')}`;
+    const created = await request.post(apiPath, { headers, data: { ...graph, graphId } });
+    expect(created.status()).toBe(201);
+  }));
+  const revised = await request.post(`${apiPath}/${target}/revisions`, { headers, data: { ...graph, policyRef: 'qa-v2' } });
+  expect(revised.status()).toBe(201);
+
+  await page.setViewportSize({ width: 390, height: 680 });
+  await page.emulateMedia({ colorScheme: 'light' });
+  await page.addInitScript((auth) => {
+    localStorage.setItem('auth', JSON.stringify(auth));
+    if (!localStorage.getItem('app:theme')) localStorage.setItem('app:theme', 'Oscuro');
+  }, company.auth);
+  await page.goto('/gestion-web/inicio');
+  const theme = page.locator('html');
+  await expect(theme).toHaveClass(/\bdark\b/);
+  await page.getByRole('button', { name: 'Abrir navegación' }).press('Enter');
+  await page.getByRole('navigation', { name: 'Espacio de trabajo' }).getByRole('link', { name: 'Agent Studio' }).press('Enter');
+  await page.getByRole('button', { name: 'Siguiente página' }).press('Enter');
+  await expect(theme).toHaveClass(/\bdark\b/);
+  const pageTwo = `${studio}?after=qa-navigation-11`;
+  await expect(page).toHaveURL(pageTwo);
+  const card = page.getByRole('link', { name: new RegExp(target) });
+  await card.press('Enter');
+  const title = page.getByRole('heading', { name: target, exact: true });
+  await expect(title).toBeFocused();
+  await page.reload();
+  await expect(title).toBeFocused();
+  await expect(theme).toHaveClass(/\bdark\b/);
+  await page.getByRole('link', { name: 'Anterior', exact: true }).press('Enter');
+  await expect(page.getByText('Revisión 1 de 2', { exact: true })).toBeVisible();
+  const edit = page.getByRole('link', { name: 'Crear revisión desde este borrador' });
+  await edit.press('Enter');
+  await page.getByRole('link', { name: 'Volver al grafo' }).press('Enter');
+  await expect(page.getByText('Revisión 1 de 2', { exact: true })).toBeVisible();
+  await edit.press('Enter');
+  await page.getByRole('button', { name: 'Guardar borrador' }).press('Enter');
+  await expect(page.getByRole('status').filter({ hasText: 'El servidor guardó esta revisión.' })).toBeVisible();
+  await page.getByRole('link', { name: 'Volver a Agent Studio' }).press('Enter');
+  await expect(page).toHaveURL(pageTwo);
+  await expect(card).toBeFocused();
+  await expect(theme).toHaveClass(/\bdark\b/);
+  const create = page.getByRole('link', { name: 'Nuevo grafo' });
+  await create.press('Enter');
+  await page.getByRole('link', { name: 'Volver a Agent Studio' }).press('Enter');
+  await expect(page).toHaveURL(pageTwo);
+  await expect(card).toBeVisible();
+  await expect(create).toBeFocused();
+});
+
 if (process.env.STUDIO_PROVIDER_FIXTURE === '1') {
   test('provider mode requires a company credential and runs its published revision from Studio', async ({ browser, request }) => {
     test.setTimeout(60_000);

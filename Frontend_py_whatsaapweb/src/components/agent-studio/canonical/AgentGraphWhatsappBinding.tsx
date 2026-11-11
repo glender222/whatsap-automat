@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import GraphProblemNotice from './GraphProblemNotice';
 import {
-  bindStudioWhatsapp, graphPath, graphProblem, readStudioWhatsappBinding, unbindStudioWhatsapp,
+  bindStudioWhatsapp, graphPath, graphProblem, readStudioWhatsappBinding, studioLocation, unbindStudioWhatsapp,
   type GraphDraft, type GraphProblem, type StudioPublication, type StudioWhatsappBindingMode,
   type StudioWhatsappBindingSnapshot,
 } from './agentGraphApi';
@@ -18,6 +18,7 @@ interface Props {
 }
 
 export default function AgentGraphWhatsappBinding({ draft, active, sessionGeneration }: Props) {
+  const [params] = useSearchParams();
   const [snapshot, setSnapshot] = useState<StudioWhatsappBindingSnapshot>();
   const [mode, setMode] = useState<StudioWhatsappBindingMode>('suggest');
   const [refreshCount, setRefreshCount] = useState(0);
@@ -95,7 +96,8 @@ export default function AgentGraphWhatsappBinding({ draft, active, sessionGenera
       {snapshot && (
         <p role="status" className="break-words text-sm text-secondary">
           {current
-            ? <>Revisión vinculada · <Link className="font-medium underline" to={`${graphPath(current.graphId)}?version=${current.version}`}>
+            ? <>Revisión vinculada · <Link className="font-medium underline"
+              to={studioLocation(graphPath(current.graphId), { after: params.get('after'), version: current.version })}>
               {current.graphId} · {current.version}
             </Link> · {modeNames[current.mode]}</>
             : 'Sin revisión vinculada.'}

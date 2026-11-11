@@ -4,6 +4,20 @@ import { api, type AuthRequestConfig } from '../../../shared/axios/http';
 export const studioPath = '/dashboard/ia/estudio';
 export const legacyAgentsPath = '/dashboard/ia/agentes';
 export const graphPath = (id: string) => `${studioPath}/grafos/${encodeURIComponent(id)}`;
+
+export function studioLocation(path: string, { after, version, from }: {
+  after: string | null;
+  version?: number;
+  from?: number;
+}) {
+  const params = new URLSearchParams();
+  if (version !== undefined) params.set('version', String(version));
+  if (from !== undefined) params.set('from', String(from));
+  if (after) params.set('after', after);
+  const search = params.toString();
+  return search ? `${path}?${search}` : path;
+}
+
 const base = '/v1/agent-graphs';
 const pageSize = 12;
 const graphEndpoint = (id: string) => `${base}/${encodeURIComponent(id)}`;

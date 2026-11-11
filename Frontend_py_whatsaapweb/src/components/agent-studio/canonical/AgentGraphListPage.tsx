@@ -1,17 +1,21 @@
 import { useEffect, useRef, useState } from 'react';
 import { GitBranch, Plus, Settings2 } from 'lucide-react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import GraphProblemNotice from './GraphProblemNotice';
-import { graphPath, graphProblem, legacyAgentsPath, listGraphDrafts, studioPath, type GraphProblem } from './agentGraphApi';
+import { graphPath, graphProblem, legacyAgentsPath, listGraphDrafts, studioLocation, studioPath, type GraphProblem } from './agentGraphApi';
 
 export default function AgentGraphListPage() {
   const [params, setParams] = useSearchParams();
   const after = params.get('after');
+  const { state } = useLocation();
+  const returnGraphId = typeof state?.focusGraphId === 'string' ? state.focusGraphId : null;
+  const returnToNewGraph = state?.focusNewGraph === true;
   const [attempt, setAttempt] = useState(0);
   const [result, setResult] = useState<{ key: string; page?: Awaited<ReturnType<typeof listGraphDrafts>>; error?: GraphProblem }>();
   const key = (after ?? '') + '/' + attempt;
   const current = result?.key === key ? result : undefined;
   const nextPage = useRef<HTMLParagraphElement>(null);
+  const returnLink = useRef<HTMLAnchorElement>(null);
   const focusResults = useRef(false);
 
   useEffect(() => {
@@ -25,11 +29,11 @@ export default function AgentGraphListPage() {
   }, [after, key]);
 
   useEffect(() => {
-    if (current?.page && focusResults.current) {
+    if (current?.page && (focusResults.current || returnGraphId || returnToNewGraph)) {
       focusResults.current = false;
-      nextPage.current?.focus();
+      (returnLink.current ?? nextPage.current)?.focus();
     }
-  }, [current]);
+  }, [current, returnGraphId, returnToNewGraph]);
 
   function go(afterId?: string) {
     focusResults.current = true;
@@ -45,7 +49,8 @@ export default function AgentGraphListPage() {
             <h1 id="agent-studio-title" className="text-2xl font-semibold">Agent Studio</h1>
             <p className="mt-1 text-sm text-gray-700 dark:text-gray-200">Guarda grafos por revisión, consulta el historial y comprueba su estructura.</p>
           </div>
-          <Link to={studioPath + '/nuevo'} className="inline-flex min-h-11 items-center gap-2 rounded-md bg-emerald-700 px-4 text-sm font-semibold text-white hover:bg-emerald-800">
+          <Link ref={returnToNewGraph ? returnLink : undefined} to={studioLocation(studioPath + '/nuevo', { after })}
+            className="inline-flex min-h-11 items-center gap-2 rounded-md bg-emerald-700 px-4 text-sm font-semibold text-white hover:bg-emerald-800">
             <Plus size={16} aria-hidden="true" /> Nuevo grafo
           </Link>
         </div>
@@ -65,7 +70,7 @@ export default function AgentGraphListPage() {
             <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
               {current.page.items.map((draft) => (
                 <li key={draft.graphId} className="min-w-0">
-                  <Link to={graphPath(draft.graphId)}
+                  <Link ref={draft.graphId === returnGraphId ? returnLink : undefined} to={studioLocation(graphPath(draft.graphId), { after })}
                     className="flex h-full flex-col gap-3 rounded-xl border border-gray-200 bg-white p-4 hover:border-emerald-700 dark:border-gray-700 dark:bg-gray-900 dark:hover:border-emerald-300">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <GitBranch size={20} className="text-emerald-700 dark:text-emerald-300" aria-hidden="true" />

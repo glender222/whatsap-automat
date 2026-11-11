@@ -6,7 +6,7 @@ import AgentGraphFixturePanel from './AgentGraphFixturePanel';
 import AgentGraphExecutionPanel from './AgentGraphExecutionPanel';
 import GraphProblemNotice from './GraphProblemNotice';
 import {
-  draftSpec, getGraphDraft, graphPath, graphProblem, nodeKinds, readVersion, studioPath,
+  draftSpec, getGraphDraft, graphPath, graphProblem, nodeKinds, readVersion, studioLocation, studioPath,
   validateGraphDraft, type GraphDraft, type GraphProblem, type GraphValidation,
 } from './agentGraphApi';
 
@@ -132,10 +132,12 @@ function RevisionChecks({ draft }: { draft: GraphDraft }) {
 function GraphDetails({ graphId }: { graphId: string }) {
   const [params] = useSearchParams();
   const { state } = useLocation();
+  const after = params.get('after');
   const rawVersion = params.get('version');
   const version = readVersion(rawVersion);
   const invalidVersion = rawVersion !== null && version === undefined;
   const path = graphPath(graphId);
+  const latestPath = studioLocation(path, { after });
   const [attempt, setAttempt] = useState(0);
   const [response, setResponse] = useState<{ key: string; draft?: GraphDraft; latest?: number; error?: GraphProblem }>();
   const title = useRef<HTMLHeadingElement>(null);
@@ -164,12 +166,13 @@ function GraphDetails({ graphId }: { graphId: string }) {
 
   return (
     <section className="mx-auto max-w-6xl space-y-4 p-4 sm:p-6">
-      <Link to={studioPath} className="inline-flex min-h-11 items-center gap-2 text-sm font-medium text-emerald-700 dark:text-emerald-300">
+      <Link to={studioLocation(studioPath, { after })} state={{ focusGraphId: graphId }}
+        className="inline-flex min-h-11 items-center gap-2 text-sm font-medium text-emerald-700 dark:text-emerald-300">
         <ArrowLeft size={16} aria-hidden="true" /> Volver a Agent Studio
       </Link>
       {invalidVersion && <GraphProblemNotice problem={{ message: 'La versión debe ser un número entero positivo.', fields: [] }} />}
       {current?.error && <GraphProblemNotice problem={current.error} retry={() => setAttempt((value) => value + 1)} />}
-      {(invalidVersion || current?.error) && rawVersion !== null && <Link to={path} className={secondary}>Abrir última revisión</Link>}
+      {(invalidVersion || current?.error) && rawVersion !== null && <Link to={latestPath} className={secondary}>Abrir última revisión</Link>}
       {!current && !invalidVersion && <p role="status" className="text-sm">Cargando revisión…</p>}
       {draft && (
         <>
@@ -179,7 +182,7 @@ function GraphDetails({ graphId }: { graphId: string }) {
               <h1 ref={title} tabIndex={-1} className="break-all text-2xl font-semibold">{draft.graphId}</h1>
               <p className="mt-1 break-all text-sm text-gray-600 dark:text-gray-300">Política {draft.policyRef}</p>
             </div>
-            <Link to={`${path}/revisiones/nueva?from=${draft.version}`}
+            <Link to={studioLocation(`${path}/revisiones/nueva`, { after, from: draft.version })}
               className="inline-flex min-h-11 items-center rounded-md bg-emerald-700 px-4 text-sm font-semibold text-white hover:bg-emerald-800">
               Crear revisión desde este borrador
             </Link>
@@ -192,9 +195,9 @@ function GraphDetails({ graphId }: { graphId: string }) {
                 <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">Revisión {draft.version} de {latest}</p>
               </div>
               <nav aria-label="Revisiones del grafo" className="flex flex-wrap gap-2">
-                {draft.version > 1 && <Link to={`${path}?version=${draft.version - 1}`} className={secondary}>Anterior</Link>}
-                {draft.version < latest && <Link to={`${path}?version=${draft.version + 1}`} className={secondary}>Siguiente</Link>}
-                {draft.version < latest && <Link to={path} className={secondary}>Última revisión</Link>}
+                {draft.version > 1 && <Link to={studioLocation(path, { after, version: draft.version - 1 })} className={secondary}>Anterior</Link>}
+                {draft.version < latest && <Link to={studioLocation(path, { after, version: draft.version + 1 })} className={secondary}>Siguiente</Link>}
+                {draft.version < latest && <Link to={latestPath} className={secondary}>Última revisión</Link>}
               </nav>
             </div>
             <p className="break-all text-xs text-gray-600 dark:text-gray-300">Huella de la revisión <code>{draft.specHash}</code></p>
