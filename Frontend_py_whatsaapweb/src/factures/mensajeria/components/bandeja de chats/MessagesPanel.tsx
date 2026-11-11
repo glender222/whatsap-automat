@@ -4,6 +4,7 @@ import { CheckCheck, ChevronDown, ChevronRight, TerminalSquare } from 'lucide-re
 import ChatFilePreview from './ChatFilePreview';
 import AudioMessage from '../extras/AudioMessage';
 import type { WhatsAppMessage } from '../../../../shared/types/wsp';
+import { normalizeMessageTimestamp } from '../../../../shared/types/wsp';
 import FilePreview from '../../../../shared/components/FilePreview'; 
 import PdfDocumentDialog from '../../../../shared/components/PdfDocumentDialog';
 import { isPdfFile } from '../../../../shared/components/pdfMedia';
@@ -300,8 +301,7 @@ type TimelineItem =
   | { type: 'activity'; timestamp: number; turn: AgentActivityTurn };
 
 function messageTimestampMs(message: WhatsAppMessage): number {
-  const timestamp = Number(message.timestamp || 0);
-  return timestamp > 1_000_000_000_000 ? timestamp : timestamp * 1000;
+  return normalizeMessageTimestamp(Number(message.timestamp || 0));
 }
 
 function activityTimestampMs(turn: AgentActivityTurn): number {
@@ -609,7 +609,7 @@ const MessagesPanel: React.FC<MessagesPanelProps> = ({
                         {item.messageItem.fromMe && deliveryLabel(item.messageItem.status) && (
                           <span data-testid="message-delivery-status">{deliveryLabel(item.messageItem.status)}</span>
                         )}
-                        <span>{new Date(item.messageItem.timestamp * 1000).toLocaleString()}</span>
+                        <span>{new Date(item.timestamp).toLocaleString()}</span>
                       </div>
                     </div>
                   </div>
