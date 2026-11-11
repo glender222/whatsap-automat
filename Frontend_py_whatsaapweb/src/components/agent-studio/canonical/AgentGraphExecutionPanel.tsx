@@ -16,6 +16,13 @@ type Case = { id: string; input: string; pattern: string; toolUse?: 'required' |
 const firstCase: Case = { id: 'case-1', input: '', pattern: '' };
 const outcomes = { passed: 'Aprobado', assertion_failed: 'Aserción incumplida', uncertain: 'Resultado incierto', blocked: 'Bloqueado' };
 const evaluating = 'Evaluando revisión…';
+const catalogPublicationProblems: Record<string, string> = {
+  CATALOG_PUBLICATION_EVIDENCE: 'La evidencia ya no está disponible. Vuelve a evaluar la revisión.',
+  CATALOG_PUBLICATION_VERSION: 'Vuelve a evaluar esta revisión con el perfil vigente.',
+  CATALOG_PUBLICATION_COVERAGE: 'La suite debe aprobar un caso que use la búsqueda de catálogo y otro que la prohíba.',
+  CATALOG_PUBLICATION_AUTHORIZATION: 'Cambió el permiso del agente o el catálogo. Revisa el acceso y vuelve a evaluar.',
+  CATALOG_PUBLICATION_SUPERSEDED: 'Ya hay una revisión posterior publicada.',
+};
 
 function readAttempt(key: string): Attempt | null {
   try {
@@ -161,7 +168,12 @@ export default function AgentGraphExecutionPanel({ draft }: { draft: GraphDraft 
   const verification = mode === 'verification';
   const profile = status?.profile?.name ?? 'linear-text-v1';
   const catalogProfile = status?.profile?.name === 'catalog-router-v1' ? status.profile : undefined;
-  const publicationAllowed = !catalogProfile && status?.profile?.publicationAllowed !== false && result?.publicationAllowed !== false;
+  const publicationSupported = !catalogProfile || catalogProfile.publicationSupported === true;
+  const publicationAllowed = catalogProfile
+    ? publicationSupported && result?.profile === profile && result.publicationAllowed === true && result.publicationEvidence === true
+    : status?.profile?.publicationAllowed !== false && result?.publicationAllowed !== false;
+  const publicationProblem = catalogProfile && publicationSupported && result?.status === 'completed' && result.passed && result.publicationBlocker
+    ? catalogPublicationProblems[result.publicationBlocker] ?? 'La evaluación todavía no habilita la publicación.' : undefined;
   const maxScenarios = catalogProfile?.maxScenarios ?? 20;
   const maxInputLength = catalogProfile?.maxInputLength ?? 4096;
   const catalogSuiteValid = !catalogProfile || (catalogProfile.compatible && cases.length <= maxScenarios &&
@@ -211,7 +223,7 @@ export default function AgentGraphExecutionPanel({ draft }: { draft: GraphDraft 
   function publish() {
     if (!mode || !publicationAllowed || !canDispatch || !result || result.mode !== mode || result.status !== 'completed' || !result.passed) return;
     void perform('Publicando revisión…', async (signal) => {
-      const publication = await publishStudioRevision(draft, result.runId, mode, forSession(signal));
+      const publication = await publishStudioRevision(draft, result.runId, mode, forSession(signal), profile);
       if (!signal.aborted) setStatus((value) => value && { ...value, active: publication });
     });
   }
@@ -274,7 +286,9 @@ export default function AgentGraphExecutionPanel({ draft }: { draft: GraphDraft 
           {catalogProfile ? 'La evaluación de catálogo requiere el modo proveedor y presupuesto suficiente para cada caso.'
             : `Esta revisión requiere un grafo de texto compatible con el modelo ${status.profile?.model} y un presupuesto suficiente.`} <code>{status.profile?.issue}</code>
         </p>}
-        {catalogProfile && <p className="text-sm text-secondary">La evaluación comprueba el texto y el uso de la búsqueda de catálogo. La publicación de este perfil aún no está disponible.</p>}
+        {catalogProfile && <p className="text-sm text-secondary">{publicationSupported
+          ? 'Para publicar, la suite debe aprobar un caso con búsqueda de catálogo y otro sin ella. La ejecución directa y la vinculación a WhatsApp aún no están disponibles.'
+          : 'La evaluación comprueba el texto y el uso de la búsqueda de catálogo. La publicación de este perfil aún no está disponible.'}</p>}
         {(!catalogProfile || catalogProfile.compatible) && <details>
           <summary className="cursor-pointer text-sm font-semibold">{catalogProfile ? 'Crear suite de catálogo' : 'Crear suite de texto'}</summary>
           <form className="mt-3 space-y-3" onSubmit={saveSuite}>
@@ -345,13 +359,15 @@ export default function AgentGraphExecutionPanel({ draft }: { draft: GraphDraft 
               ? 'Usó la búsqueda de catálogo.' : 'Sin herramientas ejecutadas.'}</p>}
           </li>)}</ul>
           {result.failureCode === 'CATALOG_EVIDENCE_INCOMPLETE' && <p className="text-secondary">No se confirmó la evidencia necesaria de una ronda.</p>}
-          {publicationAllowed && <button className={button} type="button" disabled={controlsBusy || !canDispatch || result.status !== 'completed' || !result.passed || (active?.version ?? 0) >= draft.version} onClick={publish}>
+          {publicationProblem && <p id="studio-catalog-publication-problem" className="text-secondary">{publicationProblem}</p>}
+          {publicationSupported && <button className={button} type="button" aria-describedby={publicationProblem ? 'studio-catalog-publication-problem' : undefined}
+            disabled={controlsBusy || !publicationAllowed || !canDispatch || result.status !== 'completed' || !result.passed || (active?.version ?? 0) >= draft.version} onClick={publish}>
             {verification ? 'Publicar en verificación' : 'Publicar para proveedor'}
           </button>}
         </div>}
-        {active && <p role="status" className="text-sm font-medium">{verification ? 'Revisión activa en verificación' : 'Revisión activa para proveedor'} · {active.version}</p>}
+        {active && <p role="status" className="text-sm font-medium">{verification ? 'Revisión activa en verificación' : 'Revisión activa para proveedor'} · {active.version}{active.profile === 'catalog-router-v1' && ' · Catálogo'}</p>}
         {mode === 'provider' && !catalogProfile && <AgentGraphWhatsappBinding draft={draft} active={active ?? null} sessionGeneration={sessionGeneration} />}
-        {!catalogProfile && active?.version === draft.version && <form className="space-y-2" onSubmit={execute}>
+        {!catalogProfile && active?.executionAllowed !== false && active?.version === draft.version && <form className="space-y-2" onSubmit={execute}>
           {pendingExecution && !controlsBusy && <div id="published-execution-recovery" className="space-y-1 text-sm text-secondary">
             <p role="status">Hay una ejecución sin confirmar.</p>
             <p>Vuelve a introducir el mismo texto para reintentar con el identificador anterior. Preparar una ejecución nueva puede generar otro consumo.</p>

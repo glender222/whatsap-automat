@@ -248,7 +248,7 @@ export interface ExecutionSuite { id: string; name: string; scenarioCount: numbe
 export type StudioExecutionMode = 'verification' | 'provider';
 export interface CatalogExecutionProfile {
   name: 'catalog-router-v1'; compatible: boolean; issue: string | null; model: string;
-  publicationAllowed: false; minScenarioTimeoutMs: number; maxScenarioTimeoutMs: number;
+  publicationAllowed: false; publicationSupported?: boolean; minScenarioTimeoutMs: number; maxScenarioTimeoutMs: number;
   maxScenarios: number; maxInputLength: number; maxSerializedInputLength: number;
 }
 type ExecutionProfile = CatalogExecutionProfile | {
@@ -256,12 +256,15 @@ type ExecutionProfile = CatalogExecutionProfile | {
 };
 export interface StudioPublication {
   graphId: string; version: number; specHash: string; evaluationId: string; mode: StudioExecutionMode;
+  profile?: StudioExecutionProfileName; evidenceVersion?: string; evidenceHash?: string; authorizationHash?: string;
+  executionAllowed?: boolean; whatsappBindingAllowed?: boolean;
 }
 export interface ExecutionEvaluation {
   runId: string; suiteId: string; graphId: string; version: number; specHash: string;
   mode: StudioExecutionMode; status: 'running' | 'completed' | 'failed' | 'cancelled'; passed: boolean;
   admittedScenarioId: string | null;
   profile?: StudioExecutionProfileName; publicationAllowed?: boolean; publicationEvidence?: boolean;
+  evidenceVersion?: string | null; publicationBlocker?: string | null;
   totalTokensUsed?: number; totalCostMicroUsd?: number; failureCode?: string;
   scenarios: {
     scenarioId: string; outcome: 'passed' | 'assertion_failed' | 'uncertain' | 'blocked'; executedTools?: string[];
@@ -277,7 +280,12 @@ function executionConfig(draft: GraphDraft, request: StudioRequest): AuthRequest
 function verifiedPublication(publication: StudioPublication | undefined, draft: GraphDraft, mode: StudioExecutionMode | null) {
   return publication?.graphId === draft.graphId && publication.mode === mode &&
     Number.isSafeInteger(publication.version) && publication.version > 0 && /^[a-f0-9]{64}$/.test(publication.specHash) &&
-    (publication.version !== draft.version || publication.specHash === draft.specHash);
+    (publication.version !== draft.version || publication.specHash === draft.specHash) &&
+    (publication.profile === undefined || publication.profile === 'linear-text-v1' || (publication.profile === 'catalog-router-v1' &&
+      publication.evidenceVersion === 'catalog-publication-v1' && typeof publication.evidenceHash === 'string' &&
+      /^[a-f0-9]{64}$/.test(publication.evidenceHash) && typeof publication.authorizationHash === 'string' &&
+      /^[a-f0-9]{64}$/.test(publication.authorizationHash) && publication.executionAllowed === false &&
+      publication.whatsappBindingAllowed === false));
 }
 
 function positiveInteger(value: number) {
@@ -285,7 +293,8 @@ function positiveInteger(value: number) {
 }
 
 function verifiedCatalogProfile(profile: CatalogExecutionProfile) {
-  return profile.publicationAllowed === false && Number.isSafeInteger(profile.maxScenarios) &&
+  return profile.publicationAllowed === false &&
+    (profile.publicationSupported === undefined || typeof profile.publicationSupported === 'boolean') && Number.isSafeInteger(profile.maxScenarios) &&
     profile.maxScenarios >= 0 && profile.maxScenarios <= 20 && positiveInteger(profile.maxInputLength) &&
     positiveInteger(profile.maxSerializedInputLength) && positiveInteger(profile.minScenarioTimeoutMs) &&
     positiveInteger(profile.maxScenarioTimeoutMs) && (!profile.compatible || (profile.maxScenarios > 0 &&
@@ -361,7 +370,9 @@ function confirmEvaluation(data: ExecutionEvaluation, draft: GraphDraft, attempt
       typeof data.passed !== 'boolean' || !['running', 'completed', 'failed', 'cancelled'].includes(data.status) || !Array.isArray(data.scenarios)) {
     throw new Error('El servidor no confirmó una evaluación para esta revisión.');
   }
-  if (profile === 'catalog-router-v1' && (data.publicationAllowed !== false || data.publicationEvidence !== false ||
+  if (profile === 'catalog-router-v1' && (typeof data.publicationAllowed !== 'boolean' || typeof data.publicationEvidence !== 'boolean' ||
+      (data.publicationAllowed && (!data.publicationEvidence || data.status !== 'completed' || !data.passed ||
+        data.evidenceVersion !== 'catalog-evaluation-v1' || data.publicationBlocker != null)) ||
       !data.scenarios.every((scenario) => typeof scenario?.scenarioId === 'string' &&
         ['passed', 'assertion_failed', 'uncertain', 'blocked'].includes(scenario.outcome) &&
         (scenario.executedTools === undefined || (Array.isArray(scenario.executedTools) &&
@@ -371,11 +382,13 @@ function confirmEvaluation(data: ExecutionEvaluation, draft: GraphDraft, attempt
   return data;
 }
 
-export async function publishStudioRevision(draft: GraphDraft, evaluationId: string, mode: StudioExecutionMode, request: StudioRequest) {
+export async function publishStudioRevision(draft: GraphDraft, evaluationId: string, mode: StudioExecutionMode, request: StudioRequest,
+  profile: StudioExecutionProfileName = 'linear-text-v1') {
   const { data } = await api.post<StudioPublication>(
     graphEndpoint(draft.graphId) + '/publish', { evaluationId }, executionConfig(draft, request),
   );
-  if (!verifiedPublication(data, draft, mode) || data.version !== draft.version || data.evaluationId !== evaluationId) {
+  if (!verifiedPublication(data, draft, mode) || data.version !== draft.version || data.evaluationId !== evaluationId ||
+      (data.profile ?? 'linear-text-v1') !== profile) {
     throw new Error('El servidor no confirmó la publicación de esta revisión.');
   }
   return data;
@@ -386,7 +399,8 @@ export async function executeStudioRevision(draft: GraphDraft, attempt: { attemp
   const { data } = await api.post<{ publication: StudioPublication; execution: { status: string; output?: { text: string } } }>(
     graphEndpoint(draft.graphId) + '/execute', attempt, { ...executionConfig(draft, request), timeout: attempt.timeoutMs + 5000 },
   );
-  if (!verifiedPublication(data?.publication, draft, mode) || data.publication.version !== draft.version || typeof data.execution?.status !== 'string') {
+  if (!verifiedPublication(data?.publication, draft, mode) || data.publication.version !== draft.version ||
+      data.publication.executionAllowed === false || typeof data.execution?.status !== 'string') {
     throw new Error('El servidor no confirmó la ejecución de esta revisión.');
   }
   if (data.execution.status !== 'completed' || typeof data.execution.output?.text !== 'string') {

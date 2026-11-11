@@ -6,7 +6,7 @@ import { readBrowserSessionId, saveRenewedAccess, saveSession } from '../shared/
 import { readStudioListPosition, rememberStudioListPosition } from '../components/agent-studio/canonical/studioListHistory';
 import {
   cancelStudioEvaluation, compareGraphSpecs, draftSpec, exampleGraph, getGraphDraft, graphFixtureProblem, graphPath,
-  graphProblem, listGraphDrafts, readStudioExecution, saveGraphDraft, saveStudioSuite, simulateGraphDraft, studioEvaluation,
+  graphProblem, listGraphDrafts, publishStudioRevision, readStudioExecution, saveGraphDraft, saveStudioSuite, simulateGraphDraft, studioEvaluation,
   validateGraphDraft, type GraphDraft, type GraphFixtureResult, type GraphValidation,
 } from '../components/agent-studio/canonical/agentGraphApi';
 
@@ -59,6 +59,27 @@ test('catalog verification rejects an evaluation without the publication restric
     profile: 'catalog-router-v1', publicationAllowed: true, publicationEvidence: false, status: 'completed', passed: true, scenarios: [] }));
   await assert.rejects(studioEvaluation(draft, attempt, 'provider', { signal: new AbortController().signal, sessionGeneration: 0 },
     undefined, 'catalog-router-v1'), /no confirmó la evidencia/);
+});
+
+test('catalog publication confirms its profile, evidence version and disabled runtime', async (context) => {
+  const profile = 'catalog-router-v1';
+  const attempt = { runId: 'run', suiteId: 'suite' };
+  const identity = { graphId: draft.graphId, version: draft.version, specHash: draft.specHash, mode: 'provider', profile };
+  const evaluation = { ...identity, ...attempt, evidenceVersion: 'catalog-evaluation-v1', publicationAllowed: true,
+    publicationEvidence: true, publicationBlocker: null, status: 'completed', passed: true, scenarios: [] };
+  const publication = { ...identity, evaluationId: attempt.runId, evidenceVersion: 'catalog-publication-v1',
+    evidenceHash: '1'.repeat(64), authorizationHash: '2'.repeat(64), executionAllowed: false, whatsappBindingAllowed: false };
+  mockResponse(context, (request) => {
+    if (request.url?.endsWith('/publish')) {
+      assert.deepEqual(JSON.parse(request.data), { evaluationId: attempt.runId });
+      return publication;
+    }
+    return evaluation;
+  });
+  const request = { signal: new AbortController().signal, sessionGeneration: 0 };
+  assert.deepEqual(await studioEvaluation(draft, attempt, 'provider', request, undefined, profile), evaluation);
+  assert.deepEqual(await publishStudioRevision(draft, attempt.runId, 'provider', request, profile), publication);
+  await assert.rejects(publishStudioRevision(draft, attempt.runId, 'provider', request), /no confirmó la publicación/);
 });
 
 test('revision comparison ignores object key order and detects ordered graph changes', () => {
