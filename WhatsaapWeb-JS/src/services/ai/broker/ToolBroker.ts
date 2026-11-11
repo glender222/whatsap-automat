@@ -146,47 +146,42 @@ export class ToolBroker {
     // STEP 5: HITL Approvals for 'financial' or 'destructive' Risk
     // =========================================================================
     if (riskLevel === 'financial' || riskLevel === 'destructive' || tool.definition.requiresApproval) {
-      const existingApproval = await this.hitlService.findApprovalByEffectKey(tenantIdNum, effectKey);
+      const reservation = await this.hitlService.reserveEffectApproval({
+        tenantId: tenantIdNum,
+        runId: request.runId,
+        agentGraphId: request.agentGraphId,
+        nodeId: 'nodeId' in request && typeof request.nodeId === 'string' ? request.nodeId : 'tool_call',
+        toolName: request.toolName,
+        effectKey,
+        proposedActionHash,
+        risk: riskLevel,
+        inputPayload: request.input,
+        conversationId: request.conversationId ? Number(request.conversationId) : undefined,
+        expectedConversationVersion: request.expectedConversationVersion,
+      });
 
-      if (!existingApproval) {
-        // Pause execution and register durable approval request
-        const approval = await this.hitlService.createApprovalRequest({
-          tenantId: tenantIdNum,
-          runId: request.runId,
-          agentGraphId: request.agentGraphId,
-          nodeId: (request as any).nodeId || 'tool_call',
-          toolName: request.toolName,
-          effectKey,
-          proposedActionHash,
-          risk: riskLevel,
-          inputPayload: request.input,
-          conversationId: request.conversationId ? Number(request.conversationId) : undefined,
-          expectedConversationVersion: request.expectedConversationVersion,
-          expiresInSeconds: 86400, // 24 hours
-        });
-
-        return {
-          success: false,
-          status: 'awaiting_approval',
-          output: null,
-          error: {
-            code: 'HITL_REQUIRED',
-            message: `Execution paused awaiting human supervisor approval (Approval ID: ${approval.id})`,
-          },
-          durationMs: Date.now() - startTime,
-          riskLevel,
-          hitlRequired: true,
-          approvalId: approval.id,
-          effectKey,
-        };
-      }
-
-      if (existingApproval.proposedActionHash !== proposedActionHash || existingApproval.runId !== request.runId) {
+      if (reservation.kind === 'conflict') {
         return {
           success: false,
           status: 'unauthorized',
           output: null,
-          error: { code: 'APPROVAL_ACTION_MISMATCH', message: 'Approval is bound to a different action or run' },
+          error: { code: 'APPROVAL_EFFECT_CONFLICT', message: 'Historical approvals for this effect require review' },
+          durationMs: Date.now() - startTime,
+          riskLevel,
+          hitlRequired: true,
+          approvalId: null,
+          effectKey,
+        };
+      }
+
+      const { approval: existingApproval } = reservation;
+      if (existingApproval.proposedActionHash !== proposedActionHash || existingApproval.runId !== request.runId ||
+          existingApproval.details?.toolName !== request.toolName || existingApproval.risk !== riskLevel) {
+        return {
+          success: false,
+          status: 'unauthorized',
+          output: null,
+          error: { code: 'APPROVAL_ACTION_MISMATCH', message: 'Approval is bound to a different action, run or risk' },
           durationMs: Date.now() - startTime,
           riskLevel,
           hitlRequired: true,
@@ -210,13 +205,14 @@ export class ToolBroker {
       }
 
       if (existingApproval.status === 'pending') {
+        const created = reservation.kind === 'created';
         return {
           success: false,
           status: 'awaiting_approval',
           output: null,
           error: {
-            code: 'HITL_PENDING',
-            message: `Execution remains paused awaiting approval (Approval ID: ${existingApproval.id})`,
+            code: created ? 'HITL_REQUIRED' : 'HITL_PENDING',
+            message: `Execution awaits supervisor approval (Approval ID: ${existingApproval.id})`,
           },
           durationMs: Date.now() - startTime,
           riskLevel,

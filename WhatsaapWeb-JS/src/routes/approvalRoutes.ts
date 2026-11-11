@@ -78,7 +78,8 @@ export default function createApprovalRoutes(): Router {
       return res.json(result);
     } catch (error) {
       if (error instanceof ApprovalReviewError) {
-        const code = error.statusCode === 429 ? StandardErrorCode.RATE_LIMITED
+        const code = error.statusCode === 409 ? StandardErrorCode.CONFLICT
+          : error.statusCode === 429 ? StandardErrorCode.RATE_LIMITED
           : error.statusCode === 422 ? StandardErrorCode.VALIDATION_ERROR : StandardErrorCode.POLICY_DENIED;
         return problem(req, res, code, error.message, error.statusCode, error.code);
       }

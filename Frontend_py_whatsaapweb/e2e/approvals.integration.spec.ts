@@ -9,7 +9,7 @@ test.skip(!backend, 'PRODUCT_SMOKE_URL points to the local approvals test applic
 type Actor = { auth: { accessToken: string; user: { id: string } }; tenantId: string; password: string };
 type Fixture = {
   admin: Actor; employee: Actor; other: Actor;
-  ids: { queue: Array<{ id: string; toolName: string }>; pageTwo: string; responseLoss: string; sensitive: string; expiring: string; expired: string; foreign: string };
+  ids: { queue: Array<{ id: string; toolName: string }>; pageTwo: string; responseLoss: string; sensitive: string; expiring: string; expired: string; foreign: string; historical: string; historicalApproved: string };
 };
 
 function provision(...args: string[]) {
@@ -211,4 +211,72 @@ test('a revoked review permission is enforced at confirmation and can recover af
     headers: { authorization: `Bearer ${fixture.admin.auth.accessToken}` },
   });
   expect(await persisted.json()).toMatchObject({ status: 'pending', policyVersion: 1 });
+});
+
+test('historical duplicate approvals explain the block and allow review and rejection on mobile', async ({ page, context, request }) => {
+  const fixture = provision() as Fixture;
+  await signIn(context, fixture.admin);
+  await page.setViewportSize({ width: 390, height: 680 });
+  const endpoint = `${backend}/api/v1/approvals/${fixture.ids.historical}`;
+  const headers = { authorization: `Bearer ${fixture.admin.auth.accessToken}`, 'Idempotency-Key': crypto.randomUUID() };
+  const read = () => request.get(endpoint, { headers });
+  const before = await (await read()).json();
+  expect(before).toMatchObject({ status: 'pending', policyVersion: 1, executionBlocker: 'APPROVAL_EFFECT_CONFLICT' });
+  const historicalUrl = `${backend}/api/v1/approvals/${fixture.ids.historicalApproved}`;
+  const originalDecision = await (await request.get(historicalUrl, { headers })).json();
+
+  await page.goto(`/dashboard/aprobaciones/${fixture.ids.historical}`);
+  const approve = page.getByRole('button', { name: 'Aprobar solicitud', exact: true });
+  await expect(approve).toBeDisabled();
+  await expect(approve).toHaveAccessibleDescription(/solicitudes históricas duplicadas/);
+  await expect(page.getByText(/Revisa las solicitudes y el resultado de la acción/)).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath('historical-approval.png'), fullPage: true });
+  await page.reload();
+  await expect(approve).toBeDisabled();
+
+  // An older snapshot can have an unconfirmed approval when the conflict is discovered.
+  let staleRead = true;
+  await page.route(endpoint, async (route) => {
+    const response = await route.fetch();
+    const current = await response.json();
+    if (staleRead) {
+      staleRead = false;
+      delete current.executionBlocker;
+    }
+    await route.fulfill({ response, json: current });
+  });
+  let lostDecision = true;
+  await page.route(endpoint + '/decision', (route) => {
+    if (!lostDecision) return route.continue();
+    lostDecision = false;
+    return route.abort('failed');
+  });
+  await page.reload();
+  await expect(approve).toBeEnabled();
+  await approve.press('Enter');
+  await page.getByRole('dialog', { name: 'Confirmar aprobación', exact: true })
+    .getByRole('button', { name: 'Confirmar aprobación', exact: true }).press('Enter');
+  await expect(approve).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Reintentar la misma decisión', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Rechazar solicitud', exact: true })).toBeEnabled();
+
+  const denied = await request.post(endpoint + '/decision', { headers, data: { decision: 'approved', expectedVersion: 1 } });
+  expect(denied.status()).toBe(409);
+  expect(await denied.json()).toMatchObject({ code: 'CONFLICT', metadata: { reason: 'APPROVAL_EFFECT_CONFLICT' } });
+  expect(await (await read()).json()).toEqual(before);
+  const legacyDenied = await request.post(`${backend}/api/v1/ai/approvals/${fixture.ids.historical}/decision`, {
+    headers, data: { decision: 'approved', expectedVersion: 1 },
+  });
+  expect(legacyDenied.status()).toBe(409);
+
+  await page.getByRole('button', { name: 'Rechazar solicitud', exact: true }).press('Enter');
+  const dialog = page.getByRole('dialog', { name: 'Confirmar rechazo', exact: true });
+  await dialog.getByRole('textbox', { name: 'Motivo de la decisión', exact: true }).fill('Cierro la solicitud duplicada para revisar la acción original.');
+  await dialog.getByRole('button', { name: 'Confirmar rechazo', exact: true }).press('Enter');
+  await expect(page.getByText('Rechazada', { exact: true })).toBeVisible();
+  expect(await (await read()).json()).toMatchObject({ status: 'rejected', policyVersion: 2, executionBlocker: 'APPROVAL_EFFECT_CONFLICT' });
+  expect(await (await request.get(historicalUrl, { headers })).json()).toEqual(originalDecision);
+  const foreign = await request.get(endpoint, { headers: { authorization: `Bearer ${fixture.other.auth.accessToken}` } });
+  expect(foreign.status()).toBe(404);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });

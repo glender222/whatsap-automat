@@ -118,6 +118,7 @@ export default function ApprovalDetail({ id, tenantId, session, canReauthenticat
   const mounted = useRef(false);
   const heading = useRef<HTMLHeadingElement>(null);
   const sensitive = approval ? isSensitiveApproval(approval.risk) : false;
+  const executionBlocked = approval?.executionBlocker === 'APPROVAL_EFFECT_CONFLICT';
   const canReview = approval?.status === 'pending' && !deadlineReached && !loading && !loadError && !working && (!sensitive || canReauthenticate);
 
   const forget = useCallback((intent: DecisionIntent) => {
@@ -141,6 +142,9 @@ export default function ApprovalDetail({ id, tenantId, session, canReauthenticat
       if (current.status !== 'pending') {
         forget(unresolved);
         setNotice({ tone: 'success', message: 'Estado consultado en el servidor · ' + approvalStatuses[current.status] });
+      } else if (current.executionBlocker && unresolved.decision === 'approved') {
+        forget(unresolved);
+        setNotice({ tone: 'error', message: 'La acción tiene solicitudes duplicadas. Puedes revisar y rechazar esta solicitud.' });
       } else if (current.policyVersion > unresolved.expectedVersion) {
         forget(unresolved);
         setNotice({ tone: 'error', message: 'La solicitud tiene una versión más reciente. Revisa el detalle antes de tomar una decisión.' });
@@ -196,11 +200,14 @@ export default function ApprovalDetail({ id, tenantId, session, canReauthenticat
   }, [expiresAt, status, refresh]);
 
   useEffect(() => {
-    if (deadlineReached) heading.current?.focus();
+    if (!deadlineReached) return;
+    const frame = requestAnimationFrame(() => heading.current?.focus());
+    return () => cancelAnimationFrame(frame);
   }, [deadlineReached]);
 
   async function submit(intent: DecisionIntent, password?: string) {
     if (!canReview || !approval || lock.current || currentApprovalSession() !== session ||
+        (intent.decision === 'approved' && executionBlocked) ||
         intent.expectedVersion !== approval.policyVersion || (sensitive && !password)) return;
     if (Date.parse(approval.expiresAt) <= Date.now()) {
       setDeadlineReached(true);
@@ -263,6 +270,10 @@ export default function ApprovalDetail({ id, tenantId, session, canReauthenticat
             <h2 ref={heading} tabIndex={-1} className="break-words text-2xl font-semibold">{approval.details?.toolName || 'Solicitud de aprobación'}</h2>
             <p className={subtext + ' break-all'}>Solicitud {approval.id}</p>
           </header>
+          {executionBlocked && <p role="status" id="approval-execution-blocker" className={panel + ' text-sm text-amber-900 dark:text-amber-200'}>
+            Esta acción tiene solicitudes históricas duplicadas. Revisa las solicitudes y el resultado de la acción antes de crear otra propuesta.
+            {approval.status === 'pending' && ' Puedes rechazar esta solicitud para cerrar su revisión.'}
+          </p>}
           <dl className={panel + ' grid grid-cols-2 gap-3 text-sm sm:grid-cols-4'}>
             <div><dt className={subtext}>Estado</dt><dd className="font-semibold">{approvalStatuses[approval.status]}</dd></div>
             <div><dt className={subtext}>Riesgo</dt><dd className="font-semibold">{riskLabels[approval.risk]}</dd></div>
@@ -284,13 +295,14 @@ export default function ApprovalDetail({ id, tenantId, session, canReauthenticat
           <RefreshCw size={16} aria-hidden="true" /> Actualizar estado
         </button>
         {approval && canReview && !attempt && (['approved', 'rejected'] as const).map((decision) => (
-          <button key={decision} type="button" onClick={() => setConfirmation({ decision, expectedVersion: approval.policyVersion })}
+          <button key={decision} type="button" disabled={decision === 'approved' && executionBlocked}
+            aria-describedby={executionBlocked ? 'approval-execution-blocker' : undefined} onClick={() => setConfirmation({ decision, expectedVersion: approval.policyVersion })}
             className={decision === 'approved' ? primary : secondary}>{decisions[decision].label}</button>
         ))}
         {canReview && attempt && attempt.expectedVersion === approval?.policyVersion && (
           <button type="button" onClick={() => sensitive
             ? setConfirmation({ decision: attempt.decision, expectedVersion: attempt.expectedVersion, retry: attempt })
-            : void submit(attempt)} className={primary}>Reintentar la misma decisión</button>
+            : void submit(attempt)} disabled={attempt.decision === 'approved' && executionBlocked} className={primary}>Reintentar la misma decisión</button>
         )}
       </div>
       {approval?.status === 'pending' && sensitive && !canReauthenticate && (
@@ -298,7 +310,7 @@ export default function ApprovalDetail({ id, tenantId, session, canReauthenticat
       )}
       {attempt && canReview && <p className={subtext}>El reintento conserva la decisión, el motivo y la versión revisada.</p>}
       {working && <p role="status" className={subtext}>Comprobando la decisión en el servidor…</p>}
-      {approval && confirmation && canReview && <DecisionDialog approval={approval} confirmation={confirmation}
+      {approval && confirmation && canReview && !(executionBlocked && confirmation.decision === 'approved') && <DecisionDialog approval={approval} confirmation={confirmation}
         onCancel={() => setConfirmation(undefined)} onConfirm={confirm} />}
     </div>
   );

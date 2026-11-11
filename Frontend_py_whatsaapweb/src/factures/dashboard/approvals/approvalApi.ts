@@ -28,6 +28,7 @@ export interface Approval {
   expiresAt: string;
   createdAt: string;
   decidedAt?: string;
+  executionBlocker?: 'APPROVAL_EFFECT_CONFLICT';
   details?: { toolName: string; summary: string; parametersRedacted: Record<string, unknown> };
 }
 
@@ -67,6 +68,7 @@ function isApproval(value: Approval, tenantId: string) {
     typeof value.runId === 'string' && typeof value.nodeId === 'string' &&
     Number.isSafeInteger(value.policyVersion) && value.policyVersion > 0 &&
     Object.hasOwn(riskLabels, value.risk) && Object.hasOwn(approvalStatuses, value.status) &&
+    (value.executionBlocker === undefined || value.executionBlocker === 'APPROVAL_EFFECT_CONFLICT') &&
     isDate(value.createdAt) && isDate(value.expiresAt) && (value.decidedAt === undefined || isDate(value.decidedAt)) &&
     (!value.details || (typeof value.details.toolName === 'string' && typeof value.details.summary === 'string' &&
       value.details.parametersRedacted && typeof value.details.parametersRedacted === 'object' &&
@@ -79,6 +81,7 @@ export function approvalHttpStatus(error: unknown) {
 
 export function approvalProblem(error: unknown, fallback: string) {
   const reason = isAxiosError(error) ? error.response?.data?.metadata?.reason : undefined;
+  if (reason === 'APPROVAL_EFFECT_CONFLICT') return 'Revisa las solicitudes duplicadas y el resultado de la acción antes de crear otra propuesta. Puedes rechazar esta solicitud para cerrar su revisión.';
   if (reason === 'APPROVAL_REAUTH_REQUIRED') return 'Ingresa tu contraseña actual para registrar la decisión.';
   if (reason === 'APPROVAL_REAUTH_INVALID') return 'No pudimos verificar tu contraseña. Revísala e inténtalo de nuevo.';
   if (reason === 'APPROVAL_REAUTH_LIMITED') return 'Se alcanzó el límite de intentos. Espera unos minutos antes de continuar.';

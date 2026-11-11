@@ -81,6 +81,7 @@ export interface MobileApproval {
   status: 'pending' | 'approved' | 'rejected' | 'expired' | 'revoked';
   expiresAt: string;
   createdAt: string;
+  executionBlocker?: 'APPROVAL_EFFECT_CONFLICT';
   details?: {
     toolName: string;
     summary: string;
@@ -332,6 +333,7 @@ function isMobileApproval(value: unknown): value is MobileApproval {
   return typeof approval.id === 'string' && !!approval.id &&
     typeof approval.risk === 'string' && typeof approval.expiresAt === 'string' &&
     Number.isSafeInteger(approval.policyVersion) &&
+    (approval.executionBlocker === undefined || approval.executionBlocker === 'APPROVAL_EFFECT_CONFLICT') &&
     ['pending', 'approved', 'rejected', 'expired', 'revoked'].includes(approval.status ?? '');
 }
 

@@ -238,6 +238,9 @@ export function ApprovalDetailScreen({ route, navigation }: NativeStackScreenPro
     if (approval.status !== 'pending') {
       clearAttempt(attempt);
       setNotice(`Estado actualizado. La solicitud figura como ${statusLabels[approval.status].toLowerCase()}.`);
+    } else if (approval.executionBlocker && attempt.decision === 'approved') {
+      clearAttempt(attempt);
+      setNotice('La acción tiene solicitudes duplicadas. Puedes revisar y rechazar esta solicitud.');
     } else if (approval.policyVersion > attempt.expectedVersion) {
       clearAttempt(attempt);
       setNotice('La solicitud cambió. Revisa los datos actualizados y confirma una nueva decisión.');
@@ -245,14 +248,16 @@ export function ApprovalDetailScreen({ route, navigation }: NativeStackScreenPro
   }, [approval, attempt, clearAttempt, submitting]);
 
   const canDecide = Boolean(approval && !loadError && canDecideMobileApproval(approval, Date.now(), reauthenticationSupported));
+  const executionBlocked = approval?.executionBlocker === 'APPROVAL_EFFECT_CONFLICT';
   const reauthLimited = sensitive && retryAllowedAt > Date.now();
 
   useEffect(() => {
-    if (!confirmation || (canDecide && approval?.policyVersion === confirmation.expectedVersion)) return;
+    if (!confirmation || (canDecide && approval?.policyVersion === confirmation.expectedVersion &&
+        !(executionBlocked && confirmation.decision === 'approved'))) return;
     setConfirmation(undefined);
     setPassword('');
     setReason('');
-  }, [approval?.policyVersion, canDecide, confirmation]);
+  }, [approval?.policyVersion, canDecide, confirmation, executionBlocked]);
 
   function review(command: MobileApprovalCommand) {
     setPassword('');
@@ -262,6 +267,7 @@ export function ApprovalDetailScreen({ route, navigation }: NativeStackScreenPro
 
   async function submit(command: MobileApprovalCommand, credential?: string) {
     if (submittingRef.current || !isSessionActive() || !canDecide || !approval || reauthLimited ||
+        (command.decision === 'approved' && executionBlocked) ||
         (sensitive && (!credential || !command.reason)) ||
         command.expectedVersion !== approval.policyVersion) return;
     submittingRef.current = true;
@@ -285,7 +291,7 @@ export function ApprovalDetailScreen({ route, navigation }: NativeStackScreenPro
           return;
         }
         const current = lastRead.current;
-        if (!current || current.policyVersion !== command.expectedVersion ||
+        if (!current || (current.executionBlocker && command.decision === 'approved') || current.policyVersion !== command.expectedVersion ||
             !requiresApprovalReauthentication(current.risk) || !canDecideMobileApproval(current, Date.now(), true)) {
           setNotice('Revisa el estado actual de la solicitud antes de confirmar.');
           return;
@@ -317,7 +323,9 @@ export function ApprovalDetailScreen({ route, navigation }: NativeStackScreenPro
         setNotice('No se pudo verificar el acceso para registrar la decisión.');
       } else if (cause instanceof MobileApiError && cause.status >= 400 && cause.status < 500 && cause.status !== 408) {
         clearAttempt(command);
-        if (cause.status === 409) {
+        if (cause.metadata?.reason === 'APPROVAL_EFFECT_CONFLICT') {
+          setNotice('Revisa las solicitudes duplicadas y el resultado de la acción antes de crear otra propuesta. Puedes rechazar esta solicitud para cerrar su revisión.');
+        } else if (cause.status === 409) {
           setNotice('La solicitud cambió. Revisa el estado actualizado antes de volver a decidir.');
         } else if (cause.status === 410) {
           setApproval((current) => current && { ...current, status: 'expired' });
@@ -333,6 +341,7 @@ export function ApprovalDetailScreen({ route, navigation }: NativeStackScreenPro
       const current = lastRead.current;
       if (restoreConfirmation && isSessionActive() && generation === formGeneration.current && current &&
           current.policyVersion === command.expectedVersion &&
+          !(current.executionBlocker && command.decision === 'approved') &&
           canDecideMobileApproval(current, Date.now(), reauthenticationSupported)) {
         review(command);
       }
@@ -380,6 +389,7 @@ export function ApprovalDetailScreen({ route, navigation }: NativeStackScreenPro
           approvalAttempts.get(approvalId)?.key !== command.key) return;
       const current = lastRead.current;
       if (current && current.policyVersion === command.expectedVersion &&
+          !(current.executionBlocker && command.decision === 'approved') &&
           canDecideMobileApproval(current, Date.now(), reauthenticationSupported) && command.reason) {
         review(command);
       }
@@ -406,6 +416,10 @@ export function ApprovalDetailScreen({ route, navigation }: NativeStackScreenPro
               <Text style={styles.secondary}>{statusLabels[expired ? 'expired' : approval.status]} · Vence {dateLabel(approval.expiresAt)}</Text>
               {approval.details?.summary ? <Text style={styles.secondary}>{approval.details.summary}</Text> : null}
             </View>
+            {executionBlocked ? <Text accessibilityRole="alert" style={styles.alert}>
+              Esta acción tiene solicitudes históricas duplicadas. Revisa las solicitudes y el resultado de la acción antes de crear otra propuesta.
+              {approval.status === 'pending' ? ' Puedes rechazar esta solicitud para cerrar su revisión.' : ''}
+            </Text> : null}
             {approval.details?.parametersRedacted && Object.keys(approval.details.parametersRedacted).length ? (
               <View style={styles.card}>
                 <Text accessibilityRole="header" style={styles.heading}>Datos de la acción</Text>
@@ -426,7 +440,8 @@ export function ApprovalDetailScreen({ route, navigation }: NativeStackScreenPro
               <View style={styles.card}>
                 <Text accessibilityRole="alert" style={styles.alert}>Hay una decisión sin confirmar en esta sesión.</Text>
                 <Action label={checking ? 'Comprobando estado…' : 'Reintentar la misma decisión'}
-                  disabled={!canDecide || checking || reauthLimited || approval.policyVersion !== attempt.expectedVersion}
+                  disabled={!canDecide || checking || reauthLimited || approval.policyVersion !== attempt.expectedVersion ||
+                    (executionBlocked && attempt.decision === 'approved')}
                   onPress={() => void retry(attempt)} />
               </View>
             ) : null}
@@ -457,7 +472,7 @@ export function ApprovalDetailScreen({ route, navigation }: NativeStackScreenPro
             ) : null}
             {canDecide && !confirmation && !attempt && !submitting ? (
               <View style={styles.actions}>
-                <Action label="Aprobar" onPress={() => review({ approvalId, decision: 'approved', expectedVersion: approval.policyVersion, key: uuid.v4() })} />
+                <Action label="Aprobar" disabled={executionBlocked} onPress={() => review({ approvalId, decision: 'approved', expectedVersion: approval.policyVersion, key: uuid.v4() })} />
                 <Action label="Rechazar" onPress={() => review({ approvalId, decision: 'rejected', expectedVersion: approval.policyVersion, key: uuid.v4() })} />
               </View>
             ) : null}

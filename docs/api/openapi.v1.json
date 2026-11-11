@@ -3687,6 +3687,11 @@
           },
           "decidedBy": {
             "type": "string"
+          },
+          "executionBlocker": {
+            "type": "string",
+            "enum": ["APPROVAL_EFFECT_CONFLICT"],
+            "description": "Solicitudes históricas duplicadas de la misma acción. La aprobación está bloqueada y se conserva la revisión y el rechazo."
           }
         }
       },

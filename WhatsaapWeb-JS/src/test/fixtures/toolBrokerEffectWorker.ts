@@ -2,7 +2,8 @@ import './testEnv';
 import assert from 'node:assert/strict';
 import { appendFile } from 'node:fs/promises';
 import { Pool } from 'pg';
-import { TenantScopedUoW } from '../../db/TenantScopedUoW';
+import { TenantScopedUoW, type TenantScopedOptions } from '../../db/TenantScopedUoW';
+import type { Queryable } from '../../shared/UnitOfWorkPort';
 import { ToolBroker } from '../../services/ai/broker/ToolBroker';
 import { ToolRegistry } from '../../services/ai/broker/ToolRegistry';
 import { EffectCache } from '../../services/ai/broker/EffectCache';
@@ -10,7 +11,7 @@ import { EffectCache } from '../../services/ai/broker/EffectCache';
 type Input = {
   tenantId: number; effectKey: string; runId: string; log: string;
   mode: 'hold' | 'crash' | 'complete' | 'completion_ack_lost' | 'completion_not_saved' | 'late';
-  toolInput?: Record<string, unknown>; timeoutMs?: number;
+  toolInput?: Record<string, unknown>; timeoutMs?: number; approvalRequired?: boolean; holdApprovalInsert?: boolean; risk?: 'write' | 'financial';
 };
 const input = JSON.parse(process.argv[2]) as Input;
 const connection = new URL(process.env.TOOL_BROKER_TEST_DATABASE_URL!);
@@ -18,15 +19,28 @@ assert.equal(connection.hostname, '127.0.0.1');
 assert.ok(connection.pathname.endsWith('_smoke'));
 assert.ok(input.log.startsWith('/tmp/tool-broker-effects-'));
 const db = new Pool({ connectionString: connection.toString() });
-const uow = new TenantScopedUoW(db);
-const registry = new ToolRegistry(uow);
 const released = new Promise<void>((resolve) => process.once('message', () => resolve()));
+class ApprovalInsertBarrier extends TenantScopedUoW {
+  override run<T>(tenantId: unknown, work: (client: Queryable) => Promise<T>, options?: TenantScopedOptions): Promise<T> {
+    return super.run(tenantId, (client) => work({
+      query: async (sql, values) => {
+        if (sql.includes('INSERT INTO approval_requests')) {
+          process.send?.({ event: 'approval_insert' });
+          await released;
+        }
+        return client.query(sql, values);
+      },
+    }), options);
+  }
+}
+const uow = input.holdApprovalInsert ? new ApprovalInsertBarrier(db) : new TenantScopedUoW(db);
+const registry = new ToolRegistry(uow);
 let physicalEffectSettled!: () => void;
 const physicalEffect = new Promise<void>((resolve) => { physicalEffectSettled = resolve; });
 registry.registerTool({
   definition: {
     schemaVersion: 1, name: 'fixture_local_effect', description: 'Append one local synthetic receipt',
-    riskLevel: 'write', requiredRoles: ['admin'], parameters: { type: 'object' },
+    riskLevel: input.risk ?? 'write', requiresApproval: input.approvalRequired, requiredRoles: ['admin'], parameters: { type: 'object' },
     timeoutMs: input.timeoutMs ?? 60_000, isEgressNetworkTool: false,
   },
   validateInput: () => ({ valid: true }),

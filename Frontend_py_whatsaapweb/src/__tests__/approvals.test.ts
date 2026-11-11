@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { test, type TestContext } from 'node:test';
-import { type InternalAxiosRequestConfig } from 'axios';
+import { AxiosError, type InternalAxiosRequestConfig } from 'axios';
 import { api } from '../shared/axios/http';
 import {
-  currentApprovalSession, decideApproval, isSensitiveApproval, listApprovals, readApproval, type Approval, type DecisionIntent,
+  approvalProblem, currentApprovalSession, decideApproval, isSensitiveApproval, listApprovals, readApproval, type Approval, type DecisionIntent,
 } from '../factures/dashboard/approvals/approvalApi';
 
 let session = 'approval-session-a';
@@ -77,4 +77,16 @@ test('a retry preserves its exact decision intent and stops when the session cha
   context.after(() => { session = 'approval-session-a'; });
   await assert.rejects(decideApproval(intent, originalGeneration), /La sesión cambió/);
   assert.equal(requests, 3);
+});
+
+test('historical approval conflicts survive reads and explain the required review', async (context) => {
+  let item: unknown = { ...approval, executionBlocker: 'APPROVAL_EFFECT_CONFLICT' };
+  respond(context, () => item);
+  assert.deepEqual(await readApproval(approval.id, '4', new AbortController().signal), item);
+  item = { ...approval, executionBlocker: 'unrecognized' };
+  await assert.rejects(readApproval(approval.id, '4', new AbortController().signal), /no confirmó esta solicitud/);
+  const response = { status: 409, statusText: 'Conflict', headers: {}, config: {} as InternalAxiosRequestConfig,
+    data: { metadata: { reason: 'APPROVAL_EFFECT_CONFLICT' } } };
+  assert.match(approvalProblem(new AxiosError('Conflict', undefined, undefined, undefined, response), 'Error'),
+    /Revisa las solicitudes duplicadas y el resultado de la acción/);
 });

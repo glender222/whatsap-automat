@@ -94,6 +94,19 @@ async function main() {
     const expiring = await create('qa.approval.expiring', 'write', admin.user.companyId, 10);
     const expired = await create('qa.approval.expired', 'write', admin.user.companyId, -1);
     const foreign = await create('qa.approval.foreign', 'low', other.user.companyId);
+    const historical = await create('qa.approval.historical', 'write');
+    const historicalApproved = 'historical-' + historical.id;
+    await tenantScopedUoW.run(admin.user.companyId, async (db) => {
+      await db.query(`UPDATE approval_requests SET historical_effect_key_conflict = true
+        WHERE tenant_id = $1 AND id = $2`, [admin.user.companyId, historical.id]);
+      await db.query(`INSERT INTO approval_requests (id, tenant_id, run_id, node_id, tool_name, effect_key,
+        proposed_action_hash, risk, status, input_payload, redacted_details, version, expires_at,
+        decided_by, decided_at, historical_effect_key_conflict)
+        SELECT $3, tenant_id, run_id, node_id, tool_name, effect_key, proposed_action_hash, risk,
+          'approved', input_payload, redacted_details, 2, expires_at, $4, clock_timestamp(), true
+        FROM approval_requests WHERE tenant_id = $1 AND id = $2`,
+      [admin.user.companyId, historical.id, historicalApproved, String(admin.user.id)]);
+    });
     const [pageTwo] = await service.listPendingApprovals(admin.user.companyId, { risk: 'low', offset: 20, limit: 20 });
     assert.ok(pageTwo, 'The approval fixture must have a second filtered page');
     process.stdout.write(JSON.stringify({
@@ -103,6 +116,7 @@ async function main() {
       ids: {
         queue, pageTwo: pageTwo.id, responseLoss: responseLoss.id, sensitive: sensitive.id,
         expiring: expiring.id, expired: expired.id, foreign: foreign.id,
+        historical: historical.id, historicalApproved,
       },
     }));
   } finally {

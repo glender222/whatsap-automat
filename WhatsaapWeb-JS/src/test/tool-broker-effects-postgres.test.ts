@@ -9,6 +9,9 @@ import { Pool } from 'pg';
 import type { ToolExecutionResultV1 } from '@whatsap-automat/contracts';
 import { TenantScopedUoW } from '../db/TenantScopedUoW';
 import { EffectCache } from '../services/ai/broker/EffectCache';
+import { HitlApprovalService } from '../services/ai/broker/HitlApprovalService';
+
+const { hashPassword } = require('../utils/password') as { hashPassword(password: string): Promise<string> };
 
 const connectionString = process.env.TOOL_BROKER_TEST_DATABASE_URL;
 const options = { skip: !connectionString && 'TOOL_BROKER_TEST_DATABASE_URL is required', timeout: 30_000 };
@@ -21,8 +24,13 @@ async function fixture(t: TestContext) {
   const uow = new TenantScopedUoW(db);
   const tenantId = randomInt(600_000_000, 700_000_000);
   t.after(async () => {
-    try { await uow.run(tenantId, (sql) => sql.query('DELETE FROM tenants WHERE id = $1', [tenantId])); }
-    finally { await db.end(); }
+    try {
+      await uow.run(tenantId, async (sql) => {
+        await sql.query('DELETE FROM tenants WHERE id = $1', [tenantId]);
+        await sql.query('DELETE FROM usuarios WHERE company_id = $1', [tenantId]);
+        await sql.query('DELETE FROM companies WHERE id = $1', [tenantId]);
+      });
+    } finally { await db.end(); }
   });
   const { rows: [role] } = await db.query('SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user');
   assert.deepEqual(role, { rolsuper: false, rolbypassrls: false });
@@ -40,13 +48,16 @@ async function fixture(t: TestContext) {
   const runId = randomUUID();
 
   function worker(mode: 'hold' | 'crash' | 'complete' | 'completion_ack_lost' | 'completion_not_saved' | 'late',
-    overrides: { tenantId?: number; runId?: string; toolInput?: Record<string, unknown>; timeoutMs?: number } = {}) {
+    overrides: { tenantId?: number; runId?: string; toolInput?: Record<string, unknown>; timeoutMs?: number;
+      approvalRequired?: boolean; holdApprovalInsert?: boolean; risk?: 'write' | 'financial' } = {}) {
     const child = fork(join(__dirname, 'fixtures/toolBrokerEffectWorker.ts'), [JSON.stringify({ tenantId, effectKey, runId, log, mode, ...overrides })], {
       execArgv: ['--import', 'tsx'], stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
     });
     t.after(() => { if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL'); });
     let effectRecorded!: () => void;
     const effect = new Promise<void>((resolve) => { effectRecorded = resolve; });
+    let approvalInsertReached!: () => void;
+    const approvalInsert = new Promise<void>((resolve) => { approvalInsertReached = resolve; });
     let resultReceived!: (result: ToolExecutionResultV1) => void;
     let result: ToolExecutionResultV1 | undefined;
     const response = new Promise<ToolExecutionResultV1>((resolve) => { resultReceived = resolve; });
@@ -56,11 +67,27 @@ async function fixture(t: TestContext) {
     child.on('message', (message: unknown) => {
       const event = message as { event: string; result: ToolExecutionResultV1 };
       if (event.event === 'effect') effectRecorded();
+      if (event.event === 'approval_insert') approvalInsertReached();
       if (event.event === 'result') { result = event.result; resultReceived(event.result); }
     });
-    return { effect, response, exited, release: () => { if (child.connected) child.send({ release: true }); }, result: () => result };
+    return { effect, approvalInsert, response, exited, release: () => { if (child.connected) child.send({ release: true }); }, result: () => result };
   }
-  return { worker, uow, db, tenantId, effectKey, runId,
+  async function reviewer() {
+    const password = 'approval-fixture-' + randomUUID();
+    const passwordHash = await hashPassword(password);
+    const actorId = await uow.run(tenantId, async (db) => {
+      await db.query("INSERT INTO companies (id, name) VALUES ($1, 'Approval fixture')", [tenantId]);
+      const { rows: [actor] } = await db.query(
+        "INSERT INTO usuarios (nombre, email, password_hash, rol, company_id) VALUES ('Reviewer', $1, $2, 'ADMIN', $3) RETURNING id",
+        [randomUUID() + '@example.invalid', passwordHash, tenantId],
+      );
+      await db.query("INSERT INTO workspaces (tenant_id, name, slug, is_default) VALUES ($1, 'Approval fixture', 'approval-fixture', true)", [tenantId]);
+      await db.query("INSERT INTO memberships (tenant_id, user_id, role) VALUES ($1, $2, 'admin')", [tenantId, actor.id]);
+      return String(actor.id);
+    });
+    return { actorId, password, sessionRole: 'ADMIN' as const };
+  }
+  return { worker, uow, db, tenantId, effectKey, runId, reviewer,
     receipts: async () => {
       try { return (await readFile(log, 'utf8')).trim().split('\n'); }
       catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []; throw error; }
@@ -71,6 +98,188 @@ async function fixture(t: TestContext) {
     )).rows[0]),
   };
 }
+
+test('approval uniqueness migration preserves historical decisions and enforces RLS after a repeatable upgrade', options, async (t) => {
+  const local = await fixture(t);
+  const client = await local.db.connect();
+  try {
+    await client.query('BEGIN');
+    const schema = 'fixture_approval_' + randomUUID().replace(/-/g, '');
+    await client.query(`CREATE SCHEMA ${schema}`);
+    await client.query(`SET LOCAL search_path TO ${schema}, public`);
+    await client.query(`CREATE TABLE approval_requests (LIKE public.approval_requests INCLUDING DEFAULTS INCLUDING CONSTRAINTS)`);
+    await client.query('ALTER TABLE approval_requests DROP COLUMN historical_effect_key_conflict');
+    await client.query(`ALTER TABLE approval_requests ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE approval_requests FORCE ROW LEVEL SECURITY;
+      CREATE POLICY tenant_isolation_policy ON approval_requests
+        USING (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::integer)
+        WITH CHECK (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::integer)`);
+    const bravo = local.tenantId + 1;
+    for (const [tenant, id, status, key] of [
+      [local.tenantId, 'old-approved', 'approved', 'duplicated'],
+      [local.tenantId, 'old-rejected', 'rejected', 'duplicated'],
+      [local.tenantId, 'old-pending', 'pending', 'single'],
+      [bravo, 'bravo-pending', 'pending', 'duplicated'],
+    ] as const) {
+      await client.query("SELECT set_config('app.current_tenant_id', $1, true)", [String(tenant)]);
+      await client.query(`INSERT INTO approval_requests (id, tenant_id, run_id, tool_name, effect_key,
+        proposed_action_hash, risk, status, input_payload, decided_by, decided_at, version, expires_at)
+        VALUES ($1, $2, 'historical-run', 'fixture_local_effect', $3, $4, 'write', $5,
+          '{"value":12}', '12', '2026-01-01T00:00:00Z', 2, '2026-12-01T00:00:00Z')`,
+      [id, tenant, key, 'a'.repeat(64), status]);
+    }
+    const read = async (tenantId: number) => {
+      await client.query("SELECT set_config('app.current_tenant_id', $1, true)", [String(tenantId)]);
+      return (await client.query('SELECT to_jsonb(request) AS value FROM approval_requests request ORDER BY id')).rows.map(({ value }) => value);
+    };
+    const before = [await read(local.tenantId), await read(bravo)];
+    const migration = await readFile(join(__dirname, '../db/migrations/068_approval_effect_uniqueness.sql'), 'utf8');
+    await client.query(migration);
+    await client.query(migration);
+    for (const [index, tenant] of [local.tenantId, bravo].entries()) {
+      const after = await read(tenant);
+      assert.equal(after.length, before[index].length);
+      assert.deepEqual(after.map(({ historical_effect_key_conflict, ...record }) => record), before[index]);
+      assert.deepEqual(after.map((record) => record.historical_effect_key_conflict),
+        index === 0 ? [true, false, true] : [false]);
+    }
+    const { rows: [rls] } = await client.query(
+      'SELECT relrowsecurity, relforcerowsecurity FROM pg_class WHERE oid = $1::regclass', [schema + '.approval_requests'],
+    );
+    assert.deepEqual(rls, { relrowsecurity: true, relforcerowsecurity: true });
+    await client.query("SELECT set_config('app.current_tenant_id', '', true)");
+    assert.deepEqual((await client.query('SELECT id FROM approval_requests')).rows, []);
+    await client.query("SELECT set_config('app.current_tenant_id', $1, true)", [String(local.tenantId)]);
+    await client.query('SAVEPOINT expected_conflict');
+    await assert.rejects(client.query(`INSERT INTO approval_requests (id, tenant_id, run_id, tool_name, effect_key,
+      proposed_action_hash, risk, status, expires_at)
+      VALUES ('duplicate-single', $1, 'new-run', 'fixture_local_effect', 'single', $2, 'write', 'pending', clock_timestamp())`,
+    [local.tenantId, 'b'.repeat(64)]), { code: '23505' });
+    await client.query('ROLLBACK TO SAVEPOINT expected_conflict');
+    assert.deepEqual((await read(local.tenantId)).map(({ historical_effect_key_conflict, ...record }) => record), before[0]);
+  } finally {
+    await client.query('ROLLBACK');
+    client.release();
+  }
+});
+
+test('concurrent requests for one effect expose one approval and execute once after reviewer reauthentication', options, async (t) => {
+  const local = await fixture(t);
+  const first = local.worker('complete', { risk: 'financial', holdApprovalInsert: true });
+  const second = local.worker('complete', { risk: 'financial', holdApprovalInsert: true });
+  await Promise.all([first.approvalInsert, second.approvalInsert]);
+  first.release();
+  second.release();
+
+  const [a, b] = await Promise.all([first.response, second.response]);
+  assert.equal(a.status, 'awaiting_approval');
+  assert.equal(b.status, 'awaiting_approval');
+  assert.ok(a.approvalId);
+  assert.equal(a.approvalId, b.approvalId, 'Retries of one effect must return the same approval identity');
+  assert.deepEqual([a.error?.code, b.error?.code].sort(), ['HITL_PENDING', 'HITL_REQUIRED']);
+  const { rows } = await local.uow.run(local.tenantId, (db) => db.query(
+    'SELECT id FROM approval_requests WHERE tenant_id = $1 AND effect_key = $2', [local.tenantId, local.effectKey],
+  ));
+  assert.deepEqual(rows, [{ id: a.approvalId }]);
+  assert.equal(await local.state(), undefined);
+  assert.deepEqual(await local.receipts(), []);
+
+  const { actorId, password } = await local.reviewer();
+  const approvals = new HitlApprovalService(local.uow);
+  const command = { tenantId: local.tenantId, actorId, sessionRole: 'ADMIN', approvalId: a.approvalId,
+    decision: 'approved' as const, expectedVersion: 1, reason: 'Confirm synthetic effect', idempotencyKey: randomUUID() };
+  await assert.rejects(approvals.decideReviewerApproval({ ...command, password: 'incorrect' }),
+    { code: 'APPROVAL_REAUTH_INVALID' });
+  assert.equal((await approvals.getApprovalById(local.tenantId, a.approvalId))?.status, 'pending');
+  const approved = await approvals.decideReviewerApproval({ ...command, password });
+  assert.equal(approved.status, 'approved');
+  assert.deepEqual(await approvals.decideReviewerApproval({ ...command, password }), approved);
+  assert.equal((await local.worker('complete', { risk: 'financial' }).response).status, 'executed');
+  assert.equal((await local.worker('complete', { risk: 'financial' }).response).status, 'cached');
+  assert.equal((await local.worker('complete', { approvalRequired: true }).response).error?.code, 'APPROVAL_ACTION_MISMATCH');
+  assert.equal((await local.receipts()).length, 1);
+  await local.uow.run(local.tenantId, (db) => db.query(
+    'UPDATE approval_requests SET historical_effect_key_conflict = true WHERE tenant_id = $1 AND id = $2',
+    [local.tenantId, a.approvalId],
+  ));
+  assert.deepEqual(await approvals.decideReviewerApproval({ ...command, password }), approved,
+    'A recorded decision retains its exact idempotent response after historical conflict discovery');
+  assert.equal((await local.worker('complete', { risk: 'financial' }).response).error?.code, 'APPROVAL_EFFECT_CONFLICT');
+  assert.equal((await local.receipts()).length, 1);
+});
+
+test('competing proposals cannot borrow the approval identity of a different action', options, async (t) => {
+  const local = await fixture(t);
+  const first = local.worker('complete', { approvalRequired: true, holdApprovalInsert: true, toolInput: { count: 1 } });
+  const second = local.worker('complete', { approvalRequired: true, holdApprovalInsert: true, toolInput: { count: 2 } });
+  await Promise.all([first.approvalInsert, second.approvalInsert]);
+  first.release();
+  second.release();
+
+  const results = await Promise.all([first.response, second.response]);
+  const accepted = results.find((result) => result.status === 'awaiting_approval');
+  const denied = results.find((result) => result.status === 'unauthorized');
+  assert.ok(accepted?.approvalId);
+  assert.equal(denied?.error?.code, 'APPROVAL_ACTION_MISMATCH');
+  assert.equal(denied?.approvalId, null);
+  const { rows } = await local.uow.run(local.tenantId, (db) => db.query(
+    'SELECT id FROM approval_requests WHERE tenant_id = $1 AND effect_key = $2', [local.tenantId, local.effectKey],
+  ));
+  assert.deepEqual(rows, [{ id: accepted.approvalId }]);
+  assert.deepEqual(await local.receipts(), []);
+});
+
+test('ambiguous historical approvals preserve both decisions and authorize no effect', options, async (t) => {
+  const local = await fixture(t);
+  const attempt = await local.worker('complete', { approvalRequired: true }).response;
+  assert.ok(attempt.approvalId);
+  await local.uow.run(local.tenantId, async (db) => {
+    await db.query(`UPDATE approval_requests SET historical_effect_key_conflict = true,
+      status = 'approved', decided_by = '12', decided_at = clock_timestamp(), version = 2
+      WHERE tenant_id = $1 AND id = $2`, [local.tenantId, attempt.approvalId]);
+    await db.query(`INSERT INTO approval_requests (id, tenant_id, run_id, tool_name, effect_key,
+      proposed_action_hash, risk, status, decided_by, decided_at, version, expires_at, historical_effect_key_conflict)
+      SELECT 'historical-fixture-' || id, tenant_id, run_id, tool_name, effect_key,
+        proposed_action_hash, risk, 'rejected', '13', clock_timestamp(), 2, expires_at, true
+      FROM approval_requests WHERE tenant_id = $1 AND id = $2`, [local.tenantId, attempt.approvalId]);
+    await db.query(`INSERT INTO approval_requests (id, tenant_id, run_id, tool_name, effect_key,
+      proposed_action_hash, risk, status, version, expires_at, historical_effect_key_conflict)
+      SELECT 'pending-fixture-' || id, tenant_id, run_id, tool_name, effect_key,
+        proposed_action_hash, risk, 'pending', 1, expires_at, true
+      FROM approval_requests WHERE tenant_id = $1 AND id = $2`, [local.tenantId, attempt.approvalId]);
+  });
+  const records = () => local.uow.run(local.tenantId, async (db) => (await db.query(
+    `SELECT id, status, decided_by, decided_at, version FROM approval_requests
+     WHERE tenant_id = $1 AND effect_key = $2 ORDER BY id`, [local.tenantId, local.effectKey],
+  )).rows);
+  const before = await records();
+  const denied = await local.worker('complete', { approvalRequired: true }).response;
+  assert.equal(denied.error?.code, 'APPROVAL_EFFECT_CONFLICT');
+  assert.equal(denied.approvalId, null);
+  assert.equal(await local.state(), undefined);
+  assert.deepEqual(await local.receipts(), []);
+  assert.equal(before.length, 3);
+  assert.deepEqual(await records(), before);
+
+  const reviewer = await local.reviewer();
+  const service = new HitlApprovalService(local.uow);
+  const approvalId = 'pending-fixture-' + attempt.approvalId;
+  await assert.rejects(service.findApprovalByEffectKey(local.tenantId, local.effectKey), { code: 'APPROVAL_EFFECT_CONFLICT' });
+  assert.equal((await service.getApprovalById(local.tenantId, approvalId))?.executionBlocker, 'APPROVAL_EFFECT_CONFLICT');
+  const command = { ...reviewer, tenantId: local.tenantId, approvalId, decision: 'approved' as const,
+    expectedVersion: 1, reason: 'Review duplicate', idempotencyKey: randomUUID() };
+  await assert.rejects(service.decideReviewerApproval(command), { code: 'APPROVAL_EFFECT_CONFLICT' });
+  await assert.rejects(service.decideApproval({ ...command, actorRole: 'admin' }), { code: 'APPROVAL_EFFECT_CONFLICT' });
+  assert.deepEqual(await records(), before);
+
+  const rejected = await service.decideReviewerApproval({ ...command, decision: 'rejected', idempotencyKey: randomUUID() });
+  assert.equal(rejected.status, 'rejected');
+  const after = await records();
+  assert.deepEqual(after.filter(({ id }) => id !== approvalId), before.filter(({ id }) => id !== approvalId));
+  assert.equal(after.find(({ id }) => id === approvalId)?.status, 'rejected');
+  assert.equal((await local.worker('complete', { approvalRequired: true }).response).error?.code, 'APPROVAL_EFFECT_CONFLICT');
+  assert.deepEqual(await local.receipts(), []);
+});
 
 test('a timed-out tool can still produce its effect later, and remains fenced from retry', options, async (t) => {
   const local = await fixture(t);

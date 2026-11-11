@@ -39,6 +39,9 @@ describe('PR-F7-01: OpenAPI v1 Routes & Specification Endpoint', () => {
     assert.ok(body.paths);
     assert.ok(body.paths['/conversations']);
     assert.ok(body.paths['/channel-connections']);
+    const approval = body.components.schemas.ApprovalRequest;
+    assert.deepEqual(approval.properties.executionBlocker.enum, ['APPROVAL_EFFECT_CONFLICT']);
+    assert.equal(approval.required.includes('executionBlocker'), false);
   });
 
   it('serves openapi.yaml with status 200 and application/yaml header', async () => {
@@ -50,6 +53,8 @@ describe('PR-F7-01: OpenAPI v1 Routes & Specification Endpoint', () => {
     const text = await res.text();
     assert.ok(text.includes('openapi:'));
     assert.ok(text.includes('/conversations:'));
+    assert.ok(text.includes('executionBlocker:'));
+    assert.ok(text.includes('enum: [APPROVAL_EFFECT_CONFLICT]'));
   });
 
   it('supports conditional GET with If-None-Match returning 304 Not Modified', async () => {

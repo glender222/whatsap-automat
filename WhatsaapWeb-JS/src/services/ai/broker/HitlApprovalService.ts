@@ -75,57 +75,96 @@ export class ApprovalIdempotencyConflictError extends Error {
   }
 }
 
+type EffectApprovalInput = {
+  tenantId: number;
+  runId: string;
+  agentGraphId?: string;
+  nodeId?: string;
+  toolName: string;
+  effectKey: string;
+  proposedActionHash: string;
+  risk: string;
+  inputPayload: Record<string, unknown>;
+  conversationId?: number;
+  expectedConversationVersion?: number;
+  expiresInSeconds?: number;
+};
+
+type EffectApprovalReservation =
+  | { kind: 'conflict' }
+  | { kind: 'created' | 'existing'; approval: ApprovalRequestV1 };
+
 export class HitlApprovalService {
   constructor(private readonly uow: TenantScopedUoW = tenantScopedUoW) {}
 
-  async createApprovalRequest(params: {
-    tenantId: number;
-    runId: string;
-    agentGraphId?: string;
-    nodeId?: string;
-    toolName: string;
-    effectKey: string;
-    proposedActionHash: string;
-    risk: string;
-    inputPayload: Record<string, unknown>;
-    conversationId?: number;
-    expectedConversationVersion?: number;
-    expiresInSeconds?: number;
-  }): Promise<ApprovalRequestV1> {
+  async createApprovalRequest(params: EffectApprovalInput): Promise<ApprovalRequestV1> {
+    const result = await this.reserveEffectApproval(params);
+    if (result.kind === 'conflict' || result.approval.runId !== params.runId ||
+        result.approval.proposedActionHash !== params.proposedActionHash ||
+        result.approval.details?.toolName !== params.toolName || result.approval.risk !== params.risk) {
+      throw new ApprovalReviewError(409, 'APPROVAL_EFFECT_CONFLICT', 'The effect key is already associated with an incompatible approval');
+    }
+    return result.approval;
+  }
+
+  async reserveEffectApproval(params: EffectApprovalInput): Promise<EffectApprovalReservation> {
+    return this.uow.run(params.tenantId, async (client) => {
+      const existing = await this.readEffectApproval(client, params.tenantId, params.effectKey);
+      if (existing) return existing;
+
+      const approval = await this.insertApproval(client, params);
+      if (approval) return { kind: 'created', approval };
+
+      // A competing INSERT may have committed after the initial read.
+      const winner = await this.readEffectApproval(client, params.tenantId, params.effectKey);
+      if (winner) return winner;
+      throw new Error('The approval associated with the effect key could not be confirmed');
+    });
+  }
+
+  private async readEffectApproval(client: Queryable, tenantId: number, effectKey: string): Promise<EffectApprovalReservation | null> {
+    const { rows } = await client.query(
+      `SELECT * FROM approval_requests
+       WHERE tenant_id = $1 AND effect_key = $2
+       LIMIT 2`, [tenantId, effectKey],
+    );
+    const [approval] = rows;
+    if (!approval) return null;
+    if (rows.length > 1 || approval.historical_effect_key_conflict) return { kind: 'conflict' };
+    return { kind: 'existing', approval: this.mapRowToContract(approval) };
+  }
+
+  private async insertApproval(client: Queryable, params: EffectApprovalInput): Promise<ApprovalRequestV1 | null> {
     const id = `appr_${randomUUID()}`;
     const expiresAt = new Date(Date.now() + (params.expiresInSeconds ?? 86400) * 1000).toISOString();
-
     const redacted = this.redactSensitiveData(params.inputPayload);
-
-    return this.uow.run(params.tenantId, async (client) => {
-      const res = await client.query(
-        `INSERT INTO approval_requests (
-          id, tenant_id, run_id, agent_graph_id, node_id, tool_name,
-          effect_key, proposed_action_hash, risk, status,
-          input_payload, redacted_details, conversation_id, expected_conversation_version,
-          version, expires_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', $10, $11, $12, $13, 1, $14)
-        RETURNING *`,
-        [
-          id,
-          params.tenantId,
-          params.runId,
-          params.agentGraphId || null,
-          params.nodeId || null,
-          params.toolName,
-          params.effectKey,
-          params.proposedActionHash,
-          params.risk,
-          JSON.stringify(params.inputPayload),
-          JSON.stringify(redacted),
-          params.conversationId || null,
-          params.expectedConversationVersion ?? null,
-          expiresAt,
-        ]
-      );
-
-      return this.mapRowToContract(res.rows[0]);
-    });
+    const { rows: [approval] } = await client.query(
+      `INSERT INTO approval_requests (
+        id, tenant_id, run_id, agent_graph_id, node_id, tool_name,
+        effect_key, proposed_action_hash, risk, status,
+        input_payload, redacted_details, conversation_id, expected_conversation_version,
+        version, expires_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', $10, $11, $12, $13, 1, $14)
+      ON CONFLICT (tenant_id, effect_key) WHERE NOT historical_effect_key_conflict DO NOTHING
+      RETURNING *`,
+      [
+        id,
+        params.tenantId,
+        params.runId,
+        params.agentGraphId || null,
+        params.nodeId || null,
+        params.toolName,
+        params.effectKey,
+        params.proposedActionHash,
+        params.risk,
+        JSON.stringify(params.inputPayload),
+        JSON.stringify(redacted),
+        params.conversationId || null,
+        params.expectedConversationVersion ?? null,
+        expiresAt,
+      ],
+    );
+    return approval ? this.mapRowToContract(approval) : null;
   }
 
   async listPendingApprovals(
@@ -176,15 +215,11 @@ export class HitlApprovalService {
 
   async findApprovalByEffectKey(tenantId: number, effectKey: string): Promise<ApprovalRequestV1 | null> {
     return this.uow.run(tenantId, async (client) => {
-      const res = await client.query(
-        `SELECT * FROM approval_requests
-         WHERE tenant_id = $1 AND effect_key = $2
-         ORDER BY created_at DESC
-         LIMIT 1`,
-        [tenantId, effectKey]
-      );
-      if (res.rowCount === 0) return null;
-      return this.mapRowToContract(res.rows[0]);
+      const result = await this.readEffectApproval(client, tenantId, effectKey);
+      if (result?.kind === 'conflict') {
+        throw new ApprovalReviewError(409, 'APPROVAL_EFFECT_CONFLICT', 'Historical approvals for this effect require review');
+      }
+      return result?.approval ?? null;
     });
   }
 
@@ -196,9 +231,12 @@ export class HitlApprovalService {
     const result = await this.uow.run(params.tenantId, async (client) => {
       const actorId = await this.requireReviewer(client, params.tenantId, params.actorId, sessionRole);
       const { rows: [approval] } = await client.query(
-        'SELECT risk FROM approval_requests WHERE tenant_id = $1 AND id = $2', [params.tenantId, params.approvalId],
+        'SELECT risk, status, historical_effect_key_conflict FROM approval_requests WHERE tenant_id = $1 AND id = $2', [params.tenantId, params.approvalId],
       );
       if (!approval) throw new ApprovalNotFoundError(params.approvalId, params.tenantId);
+      if (params.decision === 'approved' && approval.status === 'pending' && approval.historical_effect_key_conflict) {
+        throw new ApprovalReviewError(409, 'APPROVAL_EFFECT_CONFLICT', 'Review the duplicated historical requests and their effect before creating a new proposal');
+      }
       const reauthenticated = sensitiveApprovalRisks.has(approval.risk);
       if (reauthenticated) {
         const failure = await this.verifyReviewerPassword(client, params.tenantId, actorId, params.reason, password);
@@ -290,6 +328,7 @@ export class HitlApprovalService {
            updated_at = NOW()
        WHERE id = $4 AND tenant_id = $5 AND version = $6 AND status = 'pending'
          AND expires_at > clock_timestamp()
+         AND ($1 <> 'approved' OR NOT historical_effect_key_conflict)
        RETURNING *`,
       [
         params.decision,
@@ -304,7 +343,7 @@ export class HitlApprovalService {
     if (updateRes.rowCount === 0) {
       // Disambiguate failure reasons
       const checkRes = await client.query(
-        `SELECT id, status, version, expires_at <= clock_timestamp() AS expired FROM approval_requests
+        `SELECT id, status, version, historical_effect_key_conflict, expires_at <= clock_timestamp() AS expired FROM approval_requests
          WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
         [params.approvalId, params.tenantId]
       );
@@ -320,6 +359,9 @@ export class HitlApprovalService {
 
       if (current.expired) {
         throw new ApprovalExpiredError(params.approvalId);
+      }
+      if (params.decision === 'approved' && current.historical_effect_key_conflict) {
+        throw new ApprovalReviewError(409, 'APPROVAL_EFFECT_CONFLICT', 'Review the duplicated historical requests and their effect before creating a new proposal');
       }
 
       if (Number(current.version) !== params.expectedVersion) {
@@ -406,6 +448,7 @@ export class HitlApprovalService {
       createdAt: new Date(row.created_at).toISOString(),
       ...(row.decided_at && { decidedAt: new Date(row.decided_at).toISOString() }),
       ...(row.decided_by && { decidedBy: row.decided_by }),
+      ...(row.historical_effect_key_conflict && { executionBlocker: 'APPROVAL_EFFECT_CONFLICT' as const }),
     };
   }
 }

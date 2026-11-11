@@ -63,6 +63,14 @@ describe('Agent Graphs, Tool Invocations & Approvals Contracts', () => {
     assert.equal(parsed.data.details?.requiredRole, 'SALES_SUPERVISOR');
   });
 
+  it('preserves the historical execution blocker without changing the recorded decision', () => {
+    const result = approvalRequestV1Schema.parse({ ...pendingApprovalFixture, status: 'approved',
+      executionBlocker: 'APPROVAL_EFFECT_CONFLICT' });
+    assert.equal(result.status, 'approved');
+    assert.equal(result.executionBlocker, 'APPROVAL_EFFECT_CONFLICT');
+    assert.equal(approvalRequestV1Schema.safeParse({ ...pendingApprovalFixture, executionBlocker: 'unknown' }).success, false);
+  });
+
   it('validates expired ApprovalRequestV1 fixture', () => {
     const parsed = approvalRequestV1Schema.safeParse(expiredApprovalFixture);
     assert.ok(parsed.success);

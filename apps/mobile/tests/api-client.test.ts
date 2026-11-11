@@ -45,6 +45,15 @@ test('reads canonical workspace capability and tenant-scoped approval list and d
   assert.deepEqual(await apiClient.getApproval(approval.id), approval);
 });
 
+test('reads historical approval blockers and rejects an unknown blocker', async () => {
+  await authStorage.saveAuthSession(session);
+  let value: unknown = { ...approval, executionBlocker: 'APPROVAL_EFFECT_CONFLICT' };
+  globalThis.fetch = async () => json(200, value);
+  assert.deepEqual(await apiClient.getApproval(approval.id), value);
+  value = { ...approval, executionBlocker: 'unknown' };
+  await assert.rejects(apiClient.getApproval(approval.id), { status: 502 });
+});
+
 test('writes only the canonical decision and version, reuses the given key and preserves 409 and 410', async () => {
   await authStorage.saveAuthSession(session);
   const command = { approvalId: approval.id, decision: 'approved' as const, expectedVersion: approval.policyVersion, key: 'approval-key' };

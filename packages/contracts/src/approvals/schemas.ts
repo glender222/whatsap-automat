@@ -27,6 +27,7 @@ export const approvalRequestV1Schema = z.object({
   createdAt: z.string().datetime(),
   decidedAt: z.string().datetime().optional(),
   decidedBy: z.string().optional(),
+  executionBlocker: z.literal('APPROVAL_EFFECT_CONFLICT').optional(),
 });
 
 export const tenantActorSchema = z.object({

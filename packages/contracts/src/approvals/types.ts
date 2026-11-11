@@ -45,6 +45,7 @@ export interface ApprovalRequestV1 {
   readonly createdAt: string;
   readonly decidedAt?: string;
   readonly decidedBy?: string;
+  readonly executionBlocker?: 'APPROVAL_EFFECT_CONFLICT';
 }
 
 export interface ApprovalDecisionCommandV1 {
