@@ -23,6 +23,7 @@ async function main() {
   assert.equal(process.env.META_WA_ACCESS_TOKEN, 'synthetic-local-token');
   const providerMode = process.env.STUDIO_PROVIDER_FIXTURE === '1';
   const fixtureAuthorization = 'Bearer fixture-studio-provider';
+  const fixtureCatalogReply = providerMode ? (await import('./browserStudioCatalog')).fixtureCatalogReply : undefined;
 
   const checkpoints = new Map<string, () => void>();
   const server = createServer(async (req, res) => {
@@ -42,9 +43,10 @@ async function main() {
       for await (const chunk of req) chunks.push(chunk);
       const body = JSON.parse(Buffer.concat(chunks).toString());
       assert.equal(body.model, boundedTextCapability.model);
+      const content = fixtureCatalogReply?.(body.messages[0].content, body.messages[1].content) ?? 'Resultado de prueba: ' + body.messages[1].content;
       res.end(JSON.stringify({ model: body.model, service_tier: 'default',
         usage: { prompt_tokens: 12, completion_tokens: 4, total_tokens: 16 },
-        choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: 'Resultado de prueba: ' + body.messages[1].content } }],
+        choices: [{ finish_reason: 'stop', message: { role: 'assistant', content } }],
       }));
     } catch { res.writeHead(400).end('{}'); }
   }).listen(Number(provider.port), provider.hostname);

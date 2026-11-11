@@ -32,7 +32,8 @@ async function main() {
     const studio = process.argv.includes('--studio');
     const studioProvider = studio && process.env.STUDIO_PROVIDER_FIXTURE === '1';
     const publishedWhatsapp = process.argv.includes('--published-whatsapp');
-    assert.ok(!publishedWhatsapp || studioProvider);
+    const catalogGraphId = process.argv.includes('--catalog-studio') ? 'qa-catalog-' + randomUUID() : undefined;
+    assert.ok(!(publishedWhatsapp || catalogGraphId) || studioProvider);
     const fixtureUrls = [
       ...(send || publishedWhatsapp ? [process.env.PRODUCT_GRAPH_FIXTURE_URL] : []),
       ...(studio ? [process.env.STUDIO_FIXTURE_URL] : []),
@@ -69,6 +70,10 @@ async function main() {
         const { AgentRepositoryPg } = await import('../../modules/ai/infra/db/AgentRepositoryPg');
         await new AgentRepositoryPg(pool).setAutomatorMode(data.user.companyId, 'mixed');
       }
+      if (catalogGraphId) {
+        const { seedStudioCatalog } = await import('./browserStudioCatalog');
+        await seedStudioCatalog(pool, data.user.companyId, data.user.id, nombre, catalogGraphId);
+      }
       if (outboundId) {
         await new MetaInboxStore({ companyId: data.user.companyId }).persistOutbound({
           chatId: '12025550145', body: 'Envío de ' + nombre, messageType: 'text',
@@ -84,6 +89,7 @@ async function main() {
       companies.push({
         phoneNumberId,
         outboundId,
+        catalogGraphId,
         auth: {
           browserSessionId: randomUUID(),
           accessToken: data.accessToken,

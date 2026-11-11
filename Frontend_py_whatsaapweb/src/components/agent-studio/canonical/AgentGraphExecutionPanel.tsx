@@ -5,14 +5,14 @@ import AgentGraphWhatsappBinding from './AgentGraphWhatsappBinding';
 import {
   cancelStudioEvaluation, executeStudioRevision, graphProblem, publishStudioRevision, readStudioExecution,
   saveStudioOpenAiCredential, saveStudioSuite, studioEvaluation,
-  type ExecutionEvaluation, type GraphDraft, type GraphProblem, type StudioExecutionMode,
+  type ExecutionEvaluation, type GraphDraft, type GraphProblem, type StudioExecutionMode, type StudioExecutionProfileName,
 } from './agentGraphApi';
 
 const control = 'w-full rounded-md border border-subtle bg-canvas px-3 py-2 text-sm';
 const button = 'min-h-11 rounded-md border border-subtle px-3 text-sm font-semibold disabled:opacity-55';
 type Attempt = { runId: string; suiteId: string };
 type ExecutionAttempt = { attemptId: string; timeoutMs: number };
-type Case = { id: string; input: string; pattern: string };
+type Case = { id: string; input: string; pattern: string; toolUse?: 'required' | 'forbidden' };
 const firstCase: Case = { id: 'case-1', input: '', pattern: '' };
 const outcomes = { passed: 'Aprobado', assertion_failed: 'Aserción incumplida', uncertain: 'Resultado incierto', blocked: 'Bloqueado' };
 const evaluating = 'Evaluando revisión…';
@@ -30,6 +30,11 @@ function attemptKey(draft: GraphDraft, mode: StudioExecutionMode) {
 
 function executionAttemptKey(draft: GraphDraft, mode: StudioExecutionMode, userId: string) {
   return `studio-execution/${encodeURIComponent(userId)}/${attemptKey(draft, mode)}`;
+}
+
+function evaluationAttemptKey(draft: GraphDraft, mode: StudioExecutionMode, profile: StudioExecutionProfileName, userId: string | null) {
+  if (profile === 'linear-text-v1') return attemptKey(draft, mode);
+  return userId === null ? undefined : `studio-evaluation/${encodeURIComponent(userId)}/${profile}/${attemptKey(draft, mode)}`;
 }
 
 function readExecutionAttempt(key: string): ExecutionAttempt | null {
@@ -68,20 +73,31 @@ export default function AgentGraphExecutionPanel({ draft }: { draft: GraphDraft 
   const cancellation = useRef<AbortController>(null);
   const suiteSave = useRef<{ id: string; signature: string } | null>(null);
   const executionField = useRef<HTMLTextAreaElement>(null);
+  const lastCaseInput = useRef<HTMLTextAreaElement>(null);
+  const focusNewCase = useRef(false);
 
   useEffect(() => {
     const request = new AbortController();
     readStudioExecution(draft, { signal: request.signal, sessionGeneration }).then((value) => {
       if (request.signal.aborted) return;
       setStatus(value);
-      setAttempt(value.mode ? readAttempt(attemptKey(draft, value.mode)) : null);
+      const profile = value.profile?.name ?? 'linear-text-v1';
+      const key = value.mode && evaluationAttemptKey(draft, value.mode, profile, userId);
+      setAttempt(key ? readAttempt(key) : null);
       setPendingExecution(value.mode && userId !== null ? readExecutionAttempt(executionAttemptKey(draft, value.mode, userId)) : null);
-      setResult((current) => current?.mode === value.mode ? current : undefined);
+      setResult((current) => current?.mode === value.mode && (current?.profile ?? 'linear-text-v1') === profile ? current : undefined);
     }).catch((cause: unknown) => {
       if (!request.signal.aborted) setProblem(graphProblem(cause, 'No pudimos consultar la disponibilidad de ejecución.'));
     });
     return () => { request.abort(); action.current?.abort(); cancellation.current?.abort(); };
   }, [draft, sessionGeneration, statusAttempt, userId]);
+
+  useEffect(() => {
+    if (focusNewCase.current) {
+      lastCaseInput.current?.focus();
+      focusNewCase.current = false;
+    }
+  }, [cases.length]);
 
   const forSession = (signal: AbortSignal) => ({ signal, sessionGeneration });
 
@@ -102,8 +118,11 @@ export default function AgentGraphExecutionPanel({ draft }: { draft: GraphDraft 
 
   function saveSuite(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const suite = { name: suiteName.trim(), scenarios: cases.map((item, index) => ({
+    if (!catalogSuiteValid) return;
+    const suite = { name: suiteName.trim(), ...(catalogProfile && { profile: catalogProfile.name }), scenarios: cases.map((item, index) => ({
       id: item.id, name: `Caso ${index + 1}`, mockInput: item.input, expectedTextPatterns: [item.pattern],
+      ...(catalogProfile && item.toolUse === 'required' && { expectedTools: ['catalog.search'] }),
+      ...(catalogProfile && item.toolUse === 'forbidden' && { forbiddenTools: ['catalog.search'] }),
     })) };
     const signature = JSON.stringify(suite);
     if (suiteSave.current?.signature !== signature) suiteSave.current = { id: crypto.randomUUID(), signature };
@@ -140,19 +159,29 @@ export default function AgentGraphExecutionPanel({ draft }: { draft: GraphDraft 
   const active = status?.active;
   const mode = status?.mode;
   const verification = mode === 'verification';
+  const profile = status?.profile?.name ?? 'linear-text-v1';
+  const catalogProfile = status?.profile?.name === 'catalog-router-v1' ? status.profile : undefined;
+  const publicationAllowed = !catalogProfile && status?.profile?.publicationAllowed !== false && result?.publicationAllowed !== false;
+  const maxScenarios = catalogProfile?.maxScenarios ?? 20;
+  const maxInputLength = catalogProfile?.maxInputLength ?? 4096;
+  const catalogSuiteValid = !catalogProfile || (catalogProfile.compatible && cases.length <= maxScenarios &&
+    cases.every((item) => item.toolUse && item.input.length <= maxInputLength &&
+      JSON.stringify(item.input).length <= catalogProfile.maxSerializedInputLength));
   const canDispatch = verification || status?.availability === 'ready';
   const suite = status?.suites.find(({ id }) => id === suiteId);
   const controlsBusy = Boolean(busy) || cancelling;
   const canCancel = attempt && (result ? result.status === 'running' : busy === evaluating);
   function evaluate() {
-    if (!mode || !suite || !canDispatch || action.current || cancellation.current) return;
+    if (!mode || !suite || !status.profile?.compatible || !canDispatch || action.current || cancellation.current) return;
     const reusable = attempt?.suiteId === suiteId && (!result || result.status === 'running');
     const next = reusable ? attempt : { runId: crypto.randomUUID(), suiteId };
     setAttempt(next);
     setResult(undefined);
-    try { sessionStorage.setItem(attemptKey(draft, mode), JSON.stringify(next)); } catch { /* Browser storage is optional. */ }
+    const key = evaluationAttemptKey(draft, mode, profile, userId);
+    try { if (key) sessionStorage.setItem(key, JSON.stringify(next)); } catch { /* Browser storage is optional. */ }
     void perform(evaluating, async (signal) => {
-      const evaluation = await studioEvaluation(draft, next, mode, forSession(signal), verification ? 1000 : providerTimeout(draft, suite.scenarioCount));
+      const timeoutMs = catalogProfile?.minScenarioTimeoutMs ?? (verification ? 1000 : providerTimeout(draft, suite.scenarioCount));
+      const evaluation = await studioEvaluation(draft, next, mode, forSession(signal), timeoutMs, profile);
       if (!signal.aborted) {
         setResult((current) => current?.status === 'cancelled' && evaluation.status === 'running' ? current : evaluation);
       }
@@ -166,7 +195,7 @@ export default function AgentGraphExecutionPanel({ draft }: { draft: GraphDraft 
     setCancelling(true);
     setProblem(undefined);
     try {
-      const evaluation = await cancelStudioEvaluation(draft, attempt, mode, forSession(request.signal));
+      const evaluation = await cancelStudioEvaluation(draft, attempt, mode, forSession(request.signal), profile);
       if (!request.signal.aborted) {
         setResult((current) => current?.runId === evaluation.runId && current.scenarios.length > evaluation.scenarios.length
           ? current : evaluation);
@@ -180,7 +209,7 @@ export default function AgentGraphExecutionPanel({ draft }: { draft: GraphDraft 
   }
 
   function publish() {
-    if (!mode || !canDispatch || !result || result.mode !== mode) return;
+    if (!mode || !publicationAllowed || !canDispatch || !result || result.mode !== mode || result.status !== 'completed' || !result.passed) return;
     void perform('Publicando revisión…', async (signal) => {
       const publication = await publishStudioRevision(draft, result.runId, mode, forSession(signal));
       if (!signal.aborted) setStatus((value) => value && { ...value, active: publication });
@@ -199,7 +228,7 @@ export default function AgentGraphExecutionPanel({ draft }: { draft: GraphDraft 
 
   function execute(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!mode || !canDispatch || !executionInput.trim()) return;
+    if (!mode || catalogProfile || !canDispatch || !executionInput.trim()) return;
     void perform('Ejecutando prueba…', async (signal) => {
       const attempt = pendingExecution ?? { attemptId: crypto.randomUUID(), timeoutMs: verification ? 1000 : providerTimeout(draft) };
       savePendingExecution(attempt);
@@ -242,27 +271,44 @@ export default function AgentGraphExecutionPanel({ draft }: { draft: GraphDraft 
           </form>
         </details>}
         {!status.profile?.compatible && <p role="status" className="text-sm text-secondary">
-          Esta revisión requiere un grafo de texto compatible con el modelo {status.profile?.model} y un presupuesto suficiente. <code>{status.profile?.issue}</code>
+          {catalogProfile ? 'La evaluación de catálogo requiere el modo proveedor y presupuesto suficiente para cada caso.'
+            : `Esta revisión requiere un grafo de texto compatible con el modelo ${status.profile?.model} y un presupuesto suficiente.`} <code>{status.profile?.issue}</code>
         </p>}
-        <details>
-          <summary className="cursor-pointer text-sm font-semibold">Crear suite de texto</summary>
+        {catalogProfile && <p className="text-sm text-secondary">La evaluación comprueba el texto y el uso de la búsqueda de catálogo. La publicación de este perfil aún no está disponible.</p>}
+        {(!catalogProfile || catalogProfile.compatible) && <details>
+          <summary className="cursor-pointer text-sm font-semibold">{catalogProfile ? 'Crear suite de catálogo' : 'Crear suite de texto'}</summary>
           <form className="mt-3 space-y-3" onSubmit={saveSuite}>
             <label className="block text-sm">Nombre de la suite<input className={control} required disabled={controlsBusy} maxLength={120} value={suiteName} onChange={(event) => setSuiteName(event.target.value)} /></label>
             {cases.map((item, index) => <fieldset key={item.id} disabled={controlsBusy} className="space-y-2 rounded-md border border-subtle p-3">
               <legend className="text-sm font-semibold">Caso {index + 1}</legend>
-              <label className="block text-sm">Entrada de prueba<textarea className={control} required maxLength={4096} value={item.input}
+              <label className="block text-sm">Entrada de prueba<textarea ref={index === cases.length - 1 ? lastCaseInput : undefined}
+                className={control} required maxLength={maxInputLength} value={item.input}
                 onChange={(event) => setCases((previous) => previous.map((entry) => entry.id === item.id ? { ...entry, input: event.target.value } : entry))} /></label>
+              {catalogProfile && JSON.stringify(item.input).length > catalogProfile.maxSerializedInputLength &&
+                <p role="status" className="text-sm text-secondary">La entrada ocupa demasiado espacio al enviarse. Acorta el texto.</p>}
               <label className="block text-sm">Patrón esperado<input className={control} required maxLength={256} value={item.pattern}
                 onChange={(event) => setCases((previous) => previous.map((entry) => entry.id === item.id ? { ...entry, pattern: event.target.value } : entry))} /></label>
+              {catalogProfile && <label className="block text-sm">Búsqueda de catálogo<select className={control} required value={item.toolUse ?? ''}
+                onChange={(event) => {
+                  const toolUse = event.target.value === 'required' ? 'required' : event.target.value === 'forbidden' ? 'forbidden' : undefined;
+                  setCases((previous) => previous.map((entry) => entry.id === item.id ? { ...entry, toolUse } : entry));
+                }}>
+                <option value="">Selecciona el comportamiento esperado</option>
+                <option value="required">Debe usarse</option>
+                <option value="forbidden">No debe usarse</option>
+              </select></label>}
               {cases.length > 1 && <button type="button" className={button} onClick={() => setCases((previous) => previous.filter((entry) => entry.id !== item.id))}>Quitar caso {index + 1}</button>}
             </fieldset>)}
             <div className="flex flex-wrap gap-2">
-              <button type="button" className={button} disabled={controlsBusy || cases.length >= 20}
-                onClick={() => setCases((previous) => [...previous, { id: crypto.randomUUID(), input: '', pattern: '' }])}>Agregar caso</button>
-              <button className={button} disabled={controlsBusy || !suiteName.trim()}>Guardar suite</button>
+              <button type="button" className={button} disabled={controlsBusy || cases.length >= maxScenarios}
+                onClick={() => {
+                  focusNewCase.current = true;
+                  setCases((previous) => [...previous, { id: crypto.randomUUID(), input: '', pattern: '' }]);
+                }}>Agregar caso</button>
+              <button className={button} disabled={controlsBusy || !suiteName.trim() || !catalogSuiteValid}>Guardar suite</button>
             </div>
           </form>
-        </details>
+        </details>}
         <label className="block text-sm">Suite para evaluar<select className={control} value={suiteId} disabled={controlsBusy} onChange={(event) => {
           setSelected(event.target.value);
           setResult(undefined);
@@ -273,7 +319,7 @@ export default function AgentGraphExecutionPanel({ draft }: { draft: GraphDraft 
         <div className="flex flex-wrap gap-2">
           <button className={button} type="button" disabled={controlsBusy || !canDispatch || !status.profile?.compatible || !suite} onClick={evaluate}>Evaluar revisión</button>
           {attempt && <button className={button} type="button" disabled={controlsBusy} onClick={() => void perform('Consultando evaluación…', async (signal) => {
-            const evaluation = await studioEvaluation(draft, attempt, mode, forSession(signal));
+            const evaluation = await studioEvaluation(draft, attempt, mode, forSession(signal), undefined, profile);
             if (!signal.aborted) {
               setSelected(evaluation.suiteId);
               setResult(evaluation);
@@ -293,14 +339,19 @@ export default function AgentGraphExecutionPanel({ draft }: { draft: GraphDraft 
           {result.admittedScenarioId && result.status !== 'running' && (
             <p className="text-secondary">El último caso iniciado aún no tiene un resultado confirmado.</p>
           )}
-          <ul className="list-disc break-words pl-5">{result.scenarios.map((scenario, index) => <li key={scenario.scenarioId}>Caso {index + 1} · {outcomes[scenario.outcome]}</li>)}</ul>
-          <button className={button} type="button" disabled={controlsBusy || !canDispatch || result.status !== 'completed' || !result.passed || (active?.version ?? 0) >= draft.version} onClick={publish}>
+          <ul className="list-disc break-words pl-5">{result.scenarios.map((scenario, index) => <li key={scenario.scenarioId}>
+            Caso {index + 1} · {outcomes[scenario.outcome]}
+            {catalogProfile && scenario.executedTools && <p className="text-secondary">{scenario.executedTools.length
+              ? 'Usó la búsqueda de catálogo.' : 'Sin herramientas ejecutadas.'}</p>}
+          </li>)}</ul>
+          {result.failureCode === 'CATALOG_EVIDENCE_INCOMPLETE' && <p className="text-secondary">No se confirmó la evidencia necesaria de una ronda.</p>}
+          {publicationAllowed && <button className={button} type="button" disabled={controlsBusy || !canDispatch || result.status !== 'completed' || !result.passed || (active?.version ?? 0) >= draft.version} onClick={publish}>
             {verification ? 'Publicar en verificación' : 'Publicar para proveedor'}
-          </button>
+          </button>}
         </div>}
         {active && <p role="status" className="text-sm font-medium">{verification ? 'Revisión activa en verificación' : 'Revisión activa para proveedor'} · {active.version}</p>}
-        {mode === 'provider' && <AgentGraphWhatsappBinding draft={draft} active={active ?? null} sessionGeneration={sessionGeneration} />}
-        {active?.version === draft.version && <form className="space-y-2" onSubmit={execute}>
+        {mode === 'provider' && !catalogProfile && <AgentGraphWhatsappBinding draft={draft} active={active ?? null} sessionGeneration={sessionGeneration} />}
+        {!catalogProfile && active?.version === draft.version && <form className="space-y-2" onSubmit={execute}>
           {pendingExecution && !controlsBusy && <div id="published-execution-recovery" className="space-y-1 text-sm text-secondary">
             <p role="status">Hay una ejecución sin confirmar.</p>
             <p>Vuelve a introducir el mismo texto para reintentar con el identificador anterior. Preparar una ejecución nueva puede generar otro consumo.</p>

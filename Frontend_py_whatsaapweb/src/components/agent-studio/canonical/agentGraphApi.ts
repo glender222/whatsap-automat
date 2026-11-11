@@ -243,8 +243,17 @@ export function graphFixtureProblem(cause: unknown): GraphProblem {
   return graphProblem(cause, 'No pudimos ejecutar la simulación de esta revisión.');
 }
 
-export interface ExecutionSuite { id: string; name: string; scenarioCount: number }
+export type StudioExecutionProfileName = 'linear-text-v1' | 'catalog-router-v1';
+export interface ExecutionSuite { id: string; name: string; scenarioCount: number; profile?: StudioExecutionProfileName }
 export type StudioExecutionMode = 'verification' | 'provider';
+export interface CatalogExecutionProfile {
+  name: 'catalog-router-v1'; compatible: boolean; issue: string | null; model: string;
+  publicationAllowed: false; minScenarioTimeoutMs: number; maxScenarioTimeoutMs: number;
+  maxScenarios: number; maxInputLength: number; maxSerializedInputLength: number;
+}
+type ExecutionProfile = CatalogExecutionProfile | {
+  name?: 'linear-text-v1'; compatible: boolean; issue: string | null; model: string; publicationAllowed?: boolean;
+};
 export interface StudioPublication {
   graphId: string; version: number; specHash: string; evaluationId: string; mode: StudioExecutionMode;
 }
@@ -252,7 +261,11 @@ export interface ExecutionEvaluation {
   runId: string; suiteId: string; graphId: string; version: number; specHash: string;
   mode: StudioExecutionMode; status: 'running' | 'completed' | 'failed' | 'cancelled'; passed: boolean;
   admittedScenarioId: string | null;
-  scenarios: { scenarioId: string; outcome: 'passed' | 'assertion_failed' | 'uncertain' | 'blocked' }[];
+  profile?: StudioExecutionProfileName; publicationAllowed?: boolean; publicationEvidence?: boolean;
+  totalTokensUsed?: number; totalCostMicroUsd?: number; failureCode?: string;
+  scenarios: {
+    scenarioId: string; outcome: 'passed' | 'assertion_failed' | 'uncertain' | 'blocked'; executedTools?: string[];
+  }[];
 }
 
 type StudioRequest = { signal: AbortSignal; sessionGeneration: number };
@@ -267,18 +280,35 @@ function verifiedPublication(publication: StudioPublication | undefined, draft: 
     (publication.version !== draft.version || publication.specHash === draft.specHash);
 }
 
+function positiveInteger(value: number) {
+  return Number.isSafeInteger(value) && value > 0;
+}
+
+function verifiedCatalogProfile(profile: CatalogExecutionProfile) {
+  return profile.publicationAllowed === false && Number.isSafeInteger(profile.maxScenarios) &&
+    profile.maxScenarios >= 0 && profile.maxScenarios <= 20 && positiveInteger(profile.maxInputLength) &&
+    positiveInteger(profile.maxSerializedInputLength) && positiveInteger(profile.minScenarioTimeoutMs) &&
+    positiveInteger(profile.maxScenarioTimeoutMs) && (!profile.compatible || (profile.maxScenarios > 0 &&
+      profile.minScenarioTimeoutMs <= profile.maxScenarioTimeoutMs));
+}
+
 export async function readStudioExecution(draft: GraphDraft, request: StudioRequest) {
   const { data } = await api.get<{
     mode: StudioExecutionMode | null; suites: ExecutionSuite[]; active: StudioPublication | null;
     availability?: 'ready' | 'paused' | 'credential_required';
-    profile?: { compatible: boolean; issue: string | null; model: string };
+    profile?: ExecutionProfile;
   }>(
     graphEndpoint(draft.graphId) + '/execution', executionConfig(draft, request),
   );
+  const profile = data?.profile;
+  const profileName = profile?.name ?? 'linear-text-v1';
   if ((data?.mode !== 'verification' && data?.mode !== 'provider' && data?.mode !== null) || !Array.isArray(data.suites) ||
-      !data.suites.every((suite) => typeof suite.id === 'string' && typeof suite.name === 'string' && Number.isSafeInteger(suite.scenarioCount)) ||
+      !data.suites.every((suite) => typeof suite.id === 'string' && typeof suite.name === 'string' &&
+        positiveInteger(suite.scenarioCount) && (suite.profile ?? 'linear-text-v1') === profileName) ||
       (data.active !== null && !verifiedPublication(data.active, draft, data.mode)) ||
-      (data.mode !== null && (typeof data.profile?.compatible !== 'boolean' || typeof data.profile.model !== 'string')) ||
+      (data.mode !== null && (typeof profile?.compatible !== 'boolean' || typeof profile.model !== 'string')) ||
+      (profileName !== 'linear-text-v1' && profileName !== 'catalog-router-v1') ||
+      (profile?.name === 'catalog-router-v1' && !verifiedCatalogProfile(profile)) ||
       (data.mode === 'provider' && !['ready', 'paused', 'credential_required'].some((state) => state === data.availability))) {
     throw new Error('El servidor no confirmó la disponibilidad de ejecución.');
   }
@@ -292,38 +322,51 @@ export async function saveStudioOpenAiCredential(apiKey: string, request: Studio
 }
 
 export async function saveStudioSuite(draft: GraphDraft, suite: {
-  id: string; name: string; scenarios: { id: string; name: string; mockInput: string; expectedTextPatterns: string[] }[];
+  id: string; name: string; profile?: StudioExecutionProfileName;
+  scenarios: {
+    id: string; name: string; mockInput: string; expectedTextPatterns: string[]; expectedTools?: string[]; forbiddenTools?: string[];
+  }[];
 }, request: StudioRequest) {
   const { data } = await api.post<ExecutionSuite>(graphEndpoint(draft.graphId) + '/evaluation-suites', suite, executionConfig(draft, request));
-  if (data?.id !== suite.id || data.name !== suite.name || data.scenarioCount !== suite.scenarios.length) {
+  if (data?.id !== suite.id || data.name !== suite.name || data.scenarioCount !== suite.scenarios.length ||
+      (data.profile ?? 'linear-text-v1') !== (suite.profile ?? 'linear-text-v1')) {
     throw new Error('El servidor no confirmó la suite guardada.');
   }
   return data;
 }
 
 export async function studioEvaluation(draft: GraphDraft, attempt: { runId: string; suiteId: string },
-  mode: StudioExecutionMode, request: StudioRequest, timeoutMs?: number) {
+  mode: StudioExecutionMode, request: StudioRequest, timeoutMs?: number, profile: StudioExecutionProfileName = 'linear-text-v1') {
   const endpoint = graphEndpoint(draft.graphId) + '/evaluations';
   const config = executionConfig(draft, request);
   const { data } = timeoutMs === undefined
     ? await api.get<ExecutionEvaluation>(endpoint + '/' + encodeURIComponent(attempt.runId), config)
     : await api.post<ExecutionEvaluation>(endpoint, { ...attempt, timeoutMs }, { ...config, timeout: 65000 });
-  return confirmEvaluation(data, draft, attempt, mode);
+  return confirmEvaluation(data, draft, attempt, mode, profile);
 }
 
 export async function cancelStudioEvaluation(draft: GraphDraft, attempt: { runId: string; suiteId: string },
-  mode: StudioExecutionMode, request: StudioRequest) {
+  mode: StudioExecutionMode, request: StudioRequest, profile: StudioExecutionProfileName = 'linear-text-v1') {
   const endpoint = graphEndpoint(draft.graphId) + '/evaluations/' + encodeURIComponent(attempt.runId) + '/cancel';
   const { data } = await api.post<ExecutionEvaluation>(endpoint, {}, executionConfig(draft, request));
-  return confirmEvaluation(data, draft, attempt, mode);
+  return confirmEvaluation(data, draft, attempt, mode, profile);
 }
 
-function confirmEvaluation(data: ExecutionEvaluation, draft: GraphDraft, attempt: { runId: string; suiteId: string }, mode: StudioExecutionMode) {
+function confirmEvaluation(data: ExecutionEvaluation, draft: GraphDraft, attempt: { runId: string; suiteId: string },
+  mode: StudioExecutionMode, profile: StudioExecutionProfileName) {
   if (data?.runId !== attempt.runId || data.suiteId !== attempt.suiteId || data.graphId !== draft.graphId ||
       data.version !== draft.version || data.specHash !== draft.specHash || data.mode !== mode ||
+      (data.profile ?? 'linear-text-v1') !== profile ||
       (data.admittedScenarioId != null && typeof data.admittedScenarioId !== 'string') ||
       typeof data.passed !== 'boolean' || !['running', 'completed', 'failed', 'cancelled'].includes(data.status) || !Array.isArray(data.scenarios)) {
     throw new Error('El servidor no confirmó una evaluación para esta revisión.');
+  }
+  if (profile === 'catalog-router-v1' && (data.publicationAllowed !== false || data.publicationEvidence !== false ||
+      !data.scenarios.every((scenario) => typeof scenario?.scenarioId === 'string' &&
+        ['passed', 'assertion_failed', 'uncertain', 'blocked'].includes(scenario.outcome) &&
+        (scenario.executedTools === undefined || (Array.isArray(scenario.executedTools) &&
+          scenario.executedTools.every((tool) => tool === 'catalog.search')))))) {
+    throw new Error('El servidor no confirmó la evidencia de la evaluación de catálogo.');
   }
   return data;
 }

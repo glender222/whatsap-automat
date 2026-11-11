@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-export type Company = { phoneNumberId: string; outboundId?: string; auth: { accessToken: string } };
+export type Company = { phoneNumberId: string; outboundId?: string; catalogGraphId?: string; auth: { accessToken: string } };
 
 export function provisionCompanies(...options: string[]): Company[] {
   const output = execFileSync(process.execPath, ['--import', 'tsx', 'src/test/fixtures/browserInbox.ts', ...options], {

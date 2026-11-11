@@ -5,8 +5,9 @@ import { api } from '../shared/axios/http';
 import { readBrowserSessionId, saveRenewedAccess, saveSession } from '../shared/auth/session';
 import { readStudioListPosition, rememberStudioListPosition } from '../components/agent-studio/canonical/studioListHistory';
 import {
-  compareGraphSpecs, draftSpec, exampleGraph, getGraphDraft, graphFixtureProblem, graphPath, graphProblem, listGraphDrafts, saveGraphDraft,
-  simulateGraphDraft, validateGraphDraft, type GraphDraft, type GraphFixtureResult, type GraphValidation,
+  cancelStudioEvaluation, compareGraphSpecs, draftSpec, exampleGraph, getGraphDraft, graphFixtureProblem, graphPath,
+  graphProblem, listGraphDrafts, readStudioExecution, saveGraphDraft, saveStudioSuite, simulateGraphDraft, studioEvaluation,
+  validateGraphDraft, type GraphDraft, type GraphFixtureResult, type GraphValidation,
 } from '../components/agent-studio/canonical/agentGraphApi';
 
 Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: () => null } });
@@ -22,6 +23,43 @@ function mockResponse(context: TestContext, respond: (request: InternalAxiosRequ
 const draft: GraphDraft = {
   ...exampleGraph, schemaVersion: 1, graphId: 'nuevo', tenantId: '27', version: 1, status: 'draft', specHash: 'a'.repeat(64),
 };
+
+test('catalog suites use the server limits and receive evidence tied to the evaluation profile', async (context) => {
+  const profile = { name: 'catalog-router-v1', compatible: true, issue: null, model: 'gpt-5.4-mini', publicationAllowed: false,
+    minScenarioTimeoutMs: 3000, maxScenarioTimeoutMs: 30000, maxScenarios: 2, maxInputLength: 1024, maxSerializedInputLength: 1536 } as const;
+  const suite = { id: 'suite', name: 'Catálogo', profile: profile.name,
+    scenarios: [{ id: 'case-1', name: 'Caso 1', mockInput: 'Consultar café', expectedTextPatterns: ['café'], expectedTools: ['catalog.search'] }] };
+  const summary = { id: suite.id, name: suite.name, scenarioCount: 1, profile: profile.name };
+  const attempt = { runId: 'run', suiteId: suite.id };
+  const evaluation = { ...attempt, graphId: draft.graphId, version: draft.version, specHash: draft.specHash, mode: 'provider',
+    profile: profile.name, publicationAllowed: false, publicationEvidence: false, admittedScenarioId: null, status: 'completed', passed: true,
+    scenarios: [{ scenarioId: 'case-1', outcome: 'passed', executedTools: ['catalog.search'] }] };
+  mockResponse(context, (request) => {
+    assert.deepEqual(request.params, { version: 1 });
+    if (request.url?.endsWith('/execution')) return { mode: 'provider', suites: [summary], active: null, availability: 'ready', profile };
+    if (request.url?.endsWith('/evaluation-suites')) {
+      assert.deepEqual(JSON.parse(request.data), suite);
+      return summary;
+    }
+    if (request.url?.endsWith('/cancel')) return { ...evaluation, status: 'cancelled', passed: false };
+    if (request.method === 'post') assert.deepEqual(JSON.parse(request.data), { ...attempt, timeoutMs: profile.minScenarioTimeoutMs });
+    return evaluation;
+  });
+  const request = { signal: new AbortController().signal, sessionGeneration: 0 };
+  assert.deepEqual((await readStudioExecution(draft, request)).profile, profile);
+  assert.deepEqual(await saveStudioSuite(draft, suite, request), summary);
+  assert.deepEqual(await studioEvaluation(draft, attempt, 'provider', request, profile.minScenarioTimeoutMs, profile.name), evaluation);
+  assert.deepEqual(await studioEvaluation(draft, attempt, 'provider', request, undefined, profile.name), evaluation);
+  assert.equal((await cancelStudioEvaluation(draft, attempt, 'provider', request, profile.name)).status, 'cancelled');
+});
+
+test('catalog verification rejects an evaluation without the publication restriction', async (context) => {
+  const attempt = { runId: 'run', suiteId: 'suite' };
+  mockResponse(context, () => ({ ...attempt, graphId: draft.graphId, version: draft.version, specHash: draft.specHash, mode: 'provider',
+    profile: 'catalog-router-v1', publicationAllowed: true, publicationEvidence: false, status: 'completed', passed: true, scenarios: [] }));
+  await assert.rejects(studioEvaluation(draft, attempt, 'provider', { signal: new AbortController().signal, sessionGeneration: 0 },
+    undefined, 'catalog-router-v1'), /no confirmó la evidencia/);
+});
 
 test('revision comparison ignores object key order and detects ordered graph changes', () => {
   const previous = { ...exampleGraph, nodes: [{ ...exampleGraph.nodes[0], config: { a: 1, b: 2 } }] };
