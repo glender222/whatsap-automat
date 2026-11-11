@@ -222,7 +222,9 @@ test('Studio evaluates catalog tools against durable provider evidence without g
       assert.equal(evaluated.body.status, 'completed', JSON.stringify(evaluated.body));
       assert.equal(evaluated.body.passed, true, JSON.stringify(evaluated.body));
       assert.equal(evaluated.body.profile, 'catalog-router-v1');
-      assert.equal(evaluated.body.publicationAllowed, false);
+      assert.equal(evaluated.body.publicationAllowed, true);
+      assert.equal(evaluated.body.publicationEvidence, true);
+      assert.equal(evaluated.body.publicationBlocker, null);
       assert.equal(evaluated.body.totalTokensUsed, 112);
       assert.deepEqual(evaluated.body.scenarios.map((item: { executedTools: string[] }) => item.executedTools), [['catalog.search'], []]);
       assert.equal(new Set(evaluated.body.scenarios.flatMap((item: { ledgerIds: number[] }) => item.ledgerIds)).size, 4);
@@ -230,7 +232,7 @@ test('Studio evaluates catalog tools against durable provider evidence without g
       const before = requests.length;
       assert.deepEqual(await evaluate(tenant, id, evaluated.body.runId), evaluated);
       assert.equal(requests.length, before);
-      assert.equal((await request(tenant, '/publish', { evaluationId: evaluated.body.runId })).status, 409);
+      assert.equal((await request(tenant, '/publish', { evaluationId: evaluated.body.runId })).status, 200);
       assert.equal((await request(tenant, '/execute', { attemptId: randomUUID(), input: 'Visible', timeoutMs: 1000 })).status, 409);
       const other = tenants.find((entry) => entry.id !== tenant.id)!;
       assert.equal((await request({ ...other, graph: tenant.graph }, `/evaluations/${evaluated.body.runId}`)).status, 404);

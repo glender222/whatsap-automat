@@ -6,6 +6,8 @@ import { loadDraft } from './AgentStudioDrafts';
 import { executionAttemptId, executionRunIdPattern, loadExecutionSuite, type ExecutionMode } from './AgentExecutionEvidence';
 import { preflightBoundedAgentDispatch, type BoundedAgentDispatch } from './BoundedAgentDispatch';
 import { compileCatalogRouterExecutionProfile } from './CatalogRouterExecutionProfile';
+import { CatalogPublicationGate, catalogManifestHash, catalogPublicationBlocker } from './CatalogPublicationGate';
+import { catalogPublicationEvidenceVersion } from './CatalogEvidenceVersions';
 
 interface PublicationRow {
   graph_id: string;
@@ -15,6 +17,10 @@ interface PublicationRow {
   spec_hash: string;
   suite_hash: string;
   published_at: Date;
+  execution_profile?: 'linear-text-v1' | 'catalog-router-v1';
+  evidence_version?: string;
+  evidence_hash?: string;
+  evidence_manifest?: { authorizationHash: string; evidenceVersion: string };
 }
 
 export async function dispatchPublishedAgent(
@@ -28,6 +34,9 @@ export async function dispatchPublishedAgent(
   if (!active) return null;
   if (command.version !== undefined && command.version !== active.publication.version) {
     throw new AgentPublicationConflict('The selected revision is no longer the active publication');
+  }
+  if (active.publication.profile === 'catalog-router-v1') {
+    throw new AgentPublicationConflict('CATALOG_CANONICAL_ADMISSION_REQUIRED');
   }
   const execution = await dispatcher.dispatch({
     tenantId, graph: active.graph, attemptId, input, timeoutMs, operation: 'completion',
@@ -61,6 +70,10 @@ function publication(row: PublicationRow) {
     graphId: row.graph_id, version: row.version, evaluationId: row.evaluation_id,
     mode: row.execution_mode, specHash: row.spec_hash, suiteHash: row.suite_hash,
     publishedAt: row.published_at.toISOString(),
+    ...(row.execution_profile === 'catalog-router-v1' ? {
+      profile: row.execution_profile, evidenceVersion: row.evidence_version!, evidenceHash: row.evidence_hash!,
+      authorizationHash: row.evidence_manifest!.authorizationHash, executionAllowed: false, whatsappBindingAllowed: false,
+    } : {}),
   };
 }
 
@@ -72,6 +85,7 @@ export class AgentStudioPublications {
   constructor(
     private readonly mode: ExecutionMode,
     private readonly authorize?: (db: Queryable, tenantId: number) => Promise<void>,
+    private readonly catalog?: CatalogPublicationGate,
   ) {}
 
   /** Call inside a tenant transaction. Publication is immutable and versions advance monotonically. */
@@ -88,18 +102,35 @@ export class AgentStudioPublications {
     if (!locked) return null;
     const graph = await loadDraft(db, tenantId, graphId, version);
     if (!graph) return null;
-    if (compileCatalogRouterExecutionProfile(graph).compatible) {
-      throw new AgentPublicationConflict('Catalog evaluation does not yet authorize publication or WhatsApp binding');
-    }
-
     const { rows: [active] } = await db.query(`
       SELECT * FROM agent_studio_publications
       WHERE tenant_id = $1 AND graph_id = $2 AND execution_mode = $3
       ORDER BY version DESC LIMIT 1
     `, [tenantId, graphId, this.mode]);
-    if (active?.version === version && active.evaluation_id === evaluationId) return publication(active);
-    if (active && active.version >= version) {
+    const replay = active?.version === version && active.evaluation_id === evaluationId;
+    // A future compiler/capability change must not turn a catalog replay into the legacy text shortcut.
+    const catalog = compileCatalogRouterExecutionProfile(graph).compatible ||
+      replay && active.execution_profile === 'catalog-router-v1';
+    if (replay && !catalog) return publication(active);
+    if (!replay && active && active.version >= version) {
       throw new AgentPublicationConflict('This revision cannot supersede the active publication');
+    }
+
+    if (catalog) {
+      const evidence = await this.catalogEvidence(db, tenantId, graph, evaluationId);
+      if (replay) {
+        if (active.execution_profile !== 'catalog-router-v1' || active.evidence_hash !== evidence.evidenceHash) {
+          throw new AgentPublicationConflict('CATALOG_PUBLICATION_EVIDENCE');
+        }
+        return publication(active);
+      }
+      const { rows: [created] } = await db.query(`INSERT INTO agent_studio_publications
+        (tenant_id,graph_id,version,execution_mode,evaluation_id,spec_hash,suite_hash,published_by,
+          execution_profile,evidence_version,evidence_hash,evidence_manifest)
+        VALUES($1,$2,$3,'provider',$4,$5,$6,$7,'catalog-router-v1',$8,$9,$10::jsonb) RETURNING *`,
+      [tenantId,graphId,version,evaluationId,graph.specHash,evidence.suiteHash,actorId,
+        catalogPublicationEvidenceVersion,evidence.evidenceHash,JSON.stringify(evidence.manifest)]);
+      return publication(created);
     }
 
     const suiteHash = await this.verifyEvidence(db, tenantId, graph, evaluationId);
@@ -121,7 +152,40 @@ export class AgentStudioPublications {
     if (!active) return null;
     const graph = await loadDraft(db, tenantId, graphId, active.version);
     if (!graph || graph.specHash !== active.spec_hash) return null;
+    if (active.execution_profile === 'catalog-router-v1' &&
+        (!active.evidence_manifest || active.evidence_version !== active.evidence_manifest.evidenceVersion ||
+         catalogManifestHash(active.evidence_manifest) !== active.evidence_hash)) return null;
     return { publication: publication(active), graph: { ...graph, status: 'published' as const } };
+  }
+
+  /** Advisory UI state. publish rechecks this in its own write transaction, including exact replays. */
+  async catalogReadiness(db: Queryable, tenantId: number, graphId: string, version: number, evaluationId: string) {
+    try {
+      await this.authorize?.(db, tenantId);
+      const graph = await loadDraft(db, tenantId, graphId, version);
+      if (!graph) throw new AgentPublicationConflict('CATALOG_PUBLICATION_EVIDENCE');
+      await this.catalogEvidence(db,tenantId,graph,evaluationId);
+      const { rows: [active] } = await db.query(`SELECT version,evaluation_id FROM agent_studio_publications
+        WHERE tenant_id=$1 AND graph_id=$2 AND execution_mode=$3 ORDER BY version DESC LIMIT 1`, [tenantId,graphId,this.mode]);
+      if (active && (active.version > version || active.version === version && active.evaluation_id !== evaluationId)) {
+        return { publicationAllowed: false, publicationEvidence: true, publicationBlocker: 'CATALOG_PUBLICATION_SUPERSEDED' };
+      }
+      return { publicationAllowed: true, publicationEvidence: true, publicationBlocker: null };
+    } catch (error) {
+      const code = error instanceof AgentPublicationConflict ? error.message : catalogPublicationBlocker(error);
+      if (!code) throw error;
+      return { publicationAllowed: false, publicationEvidence: false, publicationBlocker: code };
+    }
+  }
+
+  private async catalogEvidence(db: Queryable, tenantId: number, graph: AgentGraphVersionV1, evaluationId: string) {
+    if (this.mode !== 'provider' || !this.catalog) throw new AgentPublicationConflict('CATALOG_PUBLICATION_EVIDENCE');
+    try { return await this.catalog.verify(db,tenantId,graph,evaluationId); }
+    catch (error) {
+      const code = catalogPublicationBlocker(error);
+      if (!code) throw error;
+      throw new AgentPublicationConflict(code);
+    }
   }
 
   private async verifyEvidence(db: Queryable, tenantId: number, graph: AgentGraphVersionV1, evaluationId: string) {

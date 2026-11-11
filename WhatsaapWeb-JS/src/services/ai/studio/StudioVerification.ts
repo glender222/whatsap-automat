@@ -8,6 +8,7 @@ import { AgentStudioPublications, dispatchPublishedAgent } from './AgentStudioPu
 import { BoundedAgentDispatch } from './BoundedAgentDispatch';
 import { CatalogRouterCheckpointRuntime } from '../runtime/CatalogRouterCheckpointRuntime';
 import { CatalogExecutionEvaluator } from './CatalogExecutionEvaluator';
+import { CatalogPublicationGate } from './CatalogPublicationGate';
 
 type StudioEvaluationResult = Awaited<ReturnType<AgentExecutionEvaluator['evaluate']>> |
   Awaited<ReturnType<CatalogExecutionEvaluator['evaluate']>>;
@@ -34,7 +35,7 @@ export function createStudioProviderExecution(
     },
   };
   return createStudioExecution(uow, 'provider', dispatcher,
-    new AgentStudioPublications('provider', (db, tenantId) => execution.policy.assertStrict(db, tenantId)),
+    new AgentStudioPublications('provider', (db, tenantId) => execution.policy.assertStrict(db, tenantId), new CatalogPublicationGate(uow)),
     new CatalogExecutionEvaluator(uow, new CatalogRouterCheckpointRuntime(uow, undefined, undefined, execution), 'provider'));
 }
 
@@ -61,7 +62,8 @@ function createStudioExecution<Mode extends ExecutionMode>(
       const { rows: [suite] } = await uow.run(command.tenantId, (db) => db.query(`
         SELECT execution_profile FROM agent_eval_suites WHERE tenant_id=$1 AND agent_graph_id=$2 AND id=$3
       `, [command.tenantId, command.graphId, command.suiteId]));
-      return (suite?.execution_profile === 'catalog-router-v1' ? catalog : linear).evaluate(command);
+      const result = await (suite?.execution_profile === 'catalog-router-v1' ? catalog : linear).evaluate(command);
+      return withReadiness(command.tenantId, result);
     },
     read: (...args: Parameters<AgentExecutionEvaluator['read']>) => observe(false, ...args),
     cancel: (...args: Parameters<AgentExecutionEvaluator['cancel']>) => observe(true, ...args),
@@ -73,7 +75,18 @@ function createStudioExecution<Mode extends ExecutionMode>(
       WHERE tenant_id=$1 AND agent_graph_id=$2 AND graph_version=$3 AND id=$4 AND execution_mode=$5
     `, [tenantId, graphId, version, runId, mode]));
     const selected = catalog && run?.execution_profile === 'catalog-router-v1' ? catalog : linear;
-    return cancel ? selected.cancel(tenantId, graphId, version, runId) : selected.read(tenantId, graphId, version, runId);
+    const result = await (cancel ? selected.cancel(tenantId, graphId, version, runId) : selected.read(tenantId, graphId, version, runId));
+    return result ? withReadiness(tenantId,result) : null;
+  }
+
+  async function withReadiness(tenantId: number, result: StudioEvaluationResult): Promise<StudioEvaluationResult> {
+    if (!('profile' in result) || result.profile !== 'catalog-router-v1' || result.status !== 'completed' || !result.passed) return result;
+    const readiness = await uow.run(tenantId, async (db) => {
+      await db.query("SET LOCAL statement_timeout='1000ms'");
+      await db.query("SET LOCAL lock_timeout='1000ms'");
+      return publications.catalogReadiness(db,tenantId,result.graphId,result.version,result.runId);
+    });
+    return { ...result, ...readiness };
   }
   return {
     mode,

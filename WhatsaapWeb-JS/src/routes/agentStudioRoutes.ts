@@ -100,6 +100,8 @@ function catalogExecutionStatus(plan: CatalogRouterExecutionPlan, provider: bool
     : minScenarioTimeoutMs > maxScenarioTimeoutMs || maxScenarios < 1 ? 'CATALOG_EVALUATION_BUDGET' : null;
   return { name: catalogRouterExecutionProfile, compatible: issue === null, issue,
     model: boundedTextCapability.model, publicationAllowed: false,
+    publicationSupported: provider && issue === null && maxScenarios >= 2,
+    executionAllowed: false, whatsappBindingAllowed: false,
     minScenarioTimeoutMs, maxScenarioTimeoutMs, maxSuiteDurationMs, maxScenarios, maxInputLength: 1024, maxSerializedInputLength: 1536 };
 }
 

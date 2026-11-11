@@ -264,7 +264,7 @@ export class StrictWhatsappRuntimeStore {
   private async loadPin(db: Queryable, tenantId: number, pin: Pick<StrictWhatsappBinding, 'graphId' | 'version' | 'specHash'>) {
     const { rows } = await db.query(`
       SELECT graph_id FROM agent_studio_publications WHERE tenant_id = $1 AND graph_id = $2
-        AND version = $3 AND spec_hash = $4 AND execution_mode = 'provider'
+        AND version = $3 AND spec_hash = $4 AND execution_mode = 'provider' AND execution_profile = 'linear-text-v1'
     `, [tenantId, pin.graphId, pin.version, pin.specHash]);
     const graph = rows.length ? await loadDraft(db, tenantId, pin.graphId, pin.version) : null;
     if (!graph || graph.specHash !== pin.specHash || !preflightBoundedAgentDispatch({

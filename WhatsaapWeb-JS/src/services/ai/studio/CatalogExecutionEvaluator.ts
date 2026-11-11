@@ -1,4 +1,6 @@
 import { isDeepStrictEqual } from 'node:util';
+import { catalogEvaluationEvidenceVersion } from './CatalogEvidenceVersions';
+import { measuredCatalogScenario, type ScenarioResult } from './CatalogScenarioResult';
 import type { EvalScenarioV1 } from '@whatsap-automat/contracts';
 import { TenantScopedUoW } from '../../../db/TenantScopedUoW';
 import type { Queryable } from '../../../shared/UnitOfWorkPort';
@@ -11,30 +13,20 @@ import { compileCatalogRouterExecutionProfile, catalogReadTimeoutMs, type Catalo
 import { catalogScenarioChecks } from './CatalogEvaluationAssertions';
 import { CatalogEvaluationEvidence, CatalogEvidenceIncomplete, catalogEvaluationScenarioRunId } from './CatalogEvaluationEvidence';
 
+export type { ScenarioResult } from './CatalogScenarioResult';
+
 interface EvaluationCommand { tenantId: number; graphId: string; version: number; suiteId: string; runId: string; timeoutMs: number }
-export interface ScenarioResult {
-  scenarioId: string;
-  runtimeRunId: string;
-  outcome: 'passed' | 'assertion_failed' | 'blocked' | 'uncertain';
-  ledgerIds: number[];
-  tokens: number;
-  costMicroUsd: number;
-  latencyMs?: number;
-  failedAssertions?: string[];
-  executedTools?: string[];
-  rounds?: Array<{ slot: 'router' | 'answer'; roundId: string; requestHash: string; outputHash: string; ledgerId: number }>;
-  tool?: { name: string; schemaVersion: number; nodeId: string; invocationId: string; inputHash: string; outputHash: string; authorizationHash: string };
-}
 interface EvaluationRow {
   id: string; suite_id: string; agent_graph_id: string; graph_version: number; execution_spec_hash: string;
-  execution_suite_hash: string; execution_mode: ExecutionMode; status: 'running' | 'completed' | 'failed' | 'cancelled';
+  execution_evidence_version: string | null; execution_suite_hash: string; execution_mode: ExecutionMode; status: 'running' | 'completed' | 'failed' | 'cancelled';
   passed: boolean; total_tokens_used: number; total_cost_micro_usd: string;
   scorecard: { timeoutMs: number; scenarios?: ScenarioResult[]; admittedScenarioId?: string; admittedDeadlineAt?: string; failureCode?: string };
 }
 function summary(row: EvaluationRow) {
   return { runId: row.id, suiteId: row.suite_id, graphId: row.agent_graph_id, version: row.graph_version,
     specHash: row.execution_spec_hash, suiteHash: row.execution_suite_hash, mode: row.execution_mode,
-    profile: 'catalog-router-v1' as const, publicationEvidence: false, publicationAllowed: false,
+    profile: 'catalog-router-v1' as const, evidenceVersion: row.execution_evidence_version, publicationEvidence: false, publicationAllowed: false,
+    publicationBlocker: 'CATALOG_PUBLICATION_EVIDENCE' as string | null,
     status: row.status, passed: row.passed, scenarios: row.scorecard.scenarios ?? [],
     admittedScenarioId: row.scorecard.admittedScenarioId ?? null, totalTokensUsed: row.total_tokens_used,
     totalCostMicroUsd: Number(row.total_cost_micro_usd),
@@ -97,10 +89,10 @@ export class CatalogExecutionEvaluator {
         throw new SimulationInputError('The full catalog suite must fit both model budgets and the declared scenario timeouts');
       }
       await db.query(`INSERT INTO agent_eval_runs(id,tenant_id,suite_id,agent_graph_id,graph_version,status,scorecard,
-          execution_spec_hash,execution_suite_hash,execution_deadline_at,execution_mode,execution_profile)
+          execution_spec_hash,execution_suite_hash,execution_deadline_at,execution_mode,execution_profile,execution_evidence_version)
         VALUES($1,$2,$3,$4,$5,'running',jsonb_build_object('timeoutMs',$6::integer),$7,$8,
-          clock_timestamp()+$9::integer*interval '1 second',$10,'catalog-router-v1') ON CONFLICT(id) DO NOTHING`,
-      [runId,tenantId,suiteId,graphId,version,timeoutMs,graph.specHash,source.suiteHash,plan.limits.maxDurationSeconds,this.mode]);
+          clock_timestamp()+$9::integer*interval '1 second',$10,'catalog-router-v1',$11) ON CONFLICT(id) DO NOTHING`,
+      [runId,tenantId,suiteId,graphId,version,timeoutMs,graph.specHash,source.suiteHash,plan.limits.maxDurationSeconds,this.mode,catalogEvaluationEvidenceVersion]);
       const { rows: [row] } = await db.query('SELECT * FROM agent_eval_runs WHERE tenant_id=$1 AND id=$2', [tenantId,runId]);
       if (!row || row.execution_profile !== 'catalog-router-v1' || row.execution_mode !== this.mode || row.suite_id !== suiteId ||
           row.agent_graph_id !== graphId || row.graph_version !== version || row.execution_spec_hash !== graph.specHash ||
@@ -167,7 +159,7 @@ export class CatalogExecutionEvaluator {
         outcome: status === 'uncertain' ? 'uncertain' : 'blocked', ledgerIds: partial.ledgerIds,
         tokens: partial.tokens, costMicroUsd: partial.costMicroUsd };
       if (status === 'completed') {
-        try { result = this.measured(scenario, runtimeCommand.runId, await this.evidence.verify(db, runtimeCommand, plan)); }
+        try { result = measuredCatalogScenario(scenario, runtimeCommand.runId, await this.evidence.verify(db, runtimeCommand, plan)); }
         catch (error) { if (!isEvidenceDenial(error)) throw error; }
       }
       const { rows: [row] } = await db.query('SELECT * FROM agent_eval_runs WHERE tenant_id=$1 AND id=$2 FOR UPDATE', [command.tenantId,command.runId]);
@@ -191,14 +183,6 @@ export class CatalogExecutionEvaluator {
     });
   }
 
-  private measured(scenario: EvalScenarioV1, runtimeRunId: string,
-    proof: Awaited<ReturnType<CatalogEvaluationEvidence['verify']>>): ScenarioResult {
-    const failedAssertions = catalogScenarioChecks(scenario).filter(({ check }) => !check(proof)).map(({ id }) => id);
-    return { scenarioId: scenario.id, runtimeRunId, outcome: failedAssertions.length ? 'assertion_failed' : 'passed',
-      ledgerIds: proof.ledgerIds, tokens: proof.tokens, costMicroUsd: proof.costMicroUsd, latencyMs: proof.latencyMs,
-      executedTools: proof.tools, failedAssertions, rounds: proof.rounds, ...(proof.tool ? { tool: proof.tool } : {}) };
-  }
-
   private async finish(command: EvaluationCommand, plan: CatalogRouterExecutionPlan, scenarios: EvalScenarioV1[], threshold: number) {
     return this.transaction(command.tenantId, async (db) => {
       let valid = true;
@@ -206,7 +190,7 @@ export class CatalogExecutionEvaluator {
       try {
         for (const scenario of scenarios) {
           const input = this.runtimeCommand(command, plan, scenario);
-          results.push(this.measured(scenario,input.runId,await this.evidence.verify(db,input,plan)));
+          results.push(measuredCatalogScenario(scenario,input.runId,await this.evidence.verify(db,input,plan)));
         }
       } catch (error) { if (!isEvidenceDenial(error)) throw error; valid = false; }
       const { rows: [row] } = await db.query('SELECT * FROM agent_eval_runs WHERE tenant_id=$1 AND id=$2 FOR UPDATE', [command.tenantId,command.runId]);

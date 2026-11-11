@@ -1,6 +1,6 @@
 # Recuperación durable del perfil de catálogo
 
-Estado: bloque de ejecución y verificación, 2026-11-11. `CatalogRouterCheckpointRuntime` ejecuta router, hasta una lectura existente de catálogo y respuesta final. Todos los resultados conservan `publicationEvidence: false` y `deliveryAllowed: false`. La 065 lo compone exclusivamente dentro de [evaluaciones de Studio](CATALOG_STUDIO_EVALUATIONS.md), sin respuesta de texto directa por HTTP, worker, publicación, binding ni envío. `linear-text-v1` mantiene su contrato.
+Estado: bloque de ejecución y verificación, 2026-11-11. `CatalogRouterCheckpointRuntime` ejecuta router, hasta una lectura existente de catálogo y respuesta final. Todos los resultados conservan `publicationEvidence: false` y `deliveryAllowed: false`. La 065 lo compone exclusivamente dentro de [evaluaciones de Studio](CATALOG_STUDIO_EVALUATIONS.md), sin respuesta de texto directa por HTTP, worker, binding ni envío. La [publicación versionada de 066](CATALOG_STUDIO_PUBLICATIONS.md) confirma su evaluación sin habilitar esas salidas. `linear-text-v1` mantiene su contrato.
 
 ## Fallo reproducido
 

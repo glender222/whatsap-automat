@@ -1,6 +1,6 @@
 # Evaluaciones de catálogo en Studio
 
-Estado del corte: 2026-11-11. `catalog-router-v1` participa en el flujo normal de evaluaciones de Studio con proveedor real acotado. **Pasar una suite todavía no permite publicar, vincular con WhatsApp, ejecutar manualmente una publicación ni enviar mensajes.** La API devuelve scorecards y referencias de evidencia; no devuelve texto generado o contenido del catálogo.
+Estado del corte: 2026-11-11. `catalog-router-v1` participa en el flujo normal de evaluaciones de Studio con proveedor real acotado. **La publicación exige además el gate versionado de 066; vincular con WhatsApp, ejecutar manualmente una publicación y enviar mensajes siguen bloqueados.** Véase [publicaciones de catálogo](CATALOG_STUDIO_PUBLICATIONS.md). La API devuelve scorecards y referencias de evidencia; no devuelve texto generado o contenido del catálogo.
 
 ## Discriminador y compatibilidad
 
@@ -21,7 +21,8 @@ Todas las rutas existentes parten de `/api/v1/agent-graphs/:id` y requieren `?ve
 | `POST /evaluations` | `{suiteId, runId: UUIDv4, timeoutMs}`; repetir exactamente retoma un run aún en curso |
 | `GET /evaluations/:runId` | Observación de scorecard y estado; no ejecuta proveedor |
 | `POST /evaluations/:runId/cancel` | Cuerpo vacío; corta pasos futuros y conserva contabilidad del paso ya despachado |
-| `POST /publish` y `/execute` | El catálogo sigue rechazado con conflicto; no hay publicación compatible habilitada |
+| `POST /publish` | Gate durable versionado de 066; exige ambas rutas y permisos vigentes |
+| `POST /execute` | Catálogo sigue rechazado, incluso después de publicar |
 
 El objeto `profile` de catálogo contiene `name`, `compatible`, `issue`, `model`, `publicationAllowed: false`, `minScenarioTimeoutMs`, `maxScenarioTimeoutMs`, `maxSuiteDurationMs`, `maxScenarios`, `maxInputLength: 1024` y `maxSerializedInputLength: 1536`. El mínimo de timeout es la suma de los dos modelos más los 1000 ms de catálogo; el máximo es el menor de 30000 ms y la duración total del grafo. `maxScenarios` es el techo a timeout mínimo según tokens, coste, duración y máximo absoluto de veinte. Si se aumenta el timeout, `scenarioCount * timeoutMs` también debe caber en `maxSuiteDurationMs`.
 
@@ -29,7 +30,7 @@ Las suites de catálogo listadas y creadas devuelven `{id,name,scenarioCount,pro
 
 Las aserciones explícitas reutilizan los tipos existentes: texto, herramienta esperada/prohibida, máximo de pasos, coste y latencia. `approval_triggered` no está soportado. La ruta con catálogo tiene cuatro pasos y la ruta directa tres. Los campos tool nombrados en la respuesta del modelo no son evidencia de ejecución.
 
-El resultado añade `profile: "catalog-router-v1"`, `publicationEvidence: false`, `publicationAllowed: false`, `totalTokensUsed`, `totalCostMicroUsd` y conserva `runId`, `suiteId`, `graphId`, `version`, `specHash`, `suiteHash`, `mode`, `status`, `passed`, `admittedScenarioId`, `scenarios`.
+El resultado añade `profile: "catalog-router-v1"`, `evidenceVersion`, `publicationEvidence`, `publicationAllowed` y `publicationBlocker` (disponibilidad dinámica de 066), `totalTokensUsed`, `totalCostMicroUsd` y conserva `runId`, `suiteId`, `graphId`, `version`, `specHash`, `suiteHash`, `mode`, `status`, `passed`, `admittedScenarioId`, `scenarios`.
 
 Cada escenario tiene `scenarioId`, `runtimeRunId`, `outcome`, `ledgerIds`, `tokens` y `costMicroUsd`. Cuando existe evidencia completa incluye:
 
@@ -58,13 +59,13 @@ Dos POST simultáneos comparten el caso admitido, sus reservas y checkpoints. Un
 
 La cancelación se revalida entre pasos y antes del proveedor. Una llamada ya admitida puede liquidar su consumo, pero no habilita catálogo, otra ronda o un aprobado posterior. El scorecard cancelado se actualiza cuando llega ese consumo. La API no crea un canal alternativo de respuestas del worker.
 
-GET de una evaluación terminada es **historia**: no vuelve a cobrar, no descifra texto y no convierte una aprobación histórica en autorización vigente. Los resultados cifrados siguen sujetos al TTL de 064; las operaciones de evaluación ejecutan limpieza acotada por tenant. El barrido periódico independiente continúa pendiente de la composición operativa del runtime.
+GET de una evaluación terminada conserva **historia** (`status` y `passed`), pero 066 vuelve a verificar la evidencia cifrada y los permisos para calcular disponibilidad de publicación. No llama al proveedor ni vuelve a cobrar; si falta evidencia vigente, mantiene el scorecard y devuelve `publicationAllowed:false`. Los resultados cifrados siguen sujetos al TTL de 064; las operaciones de evaluación ejecutan limpieza acotada por tenant. El barrido periódico independiente continúa pendiente de la composición operativa del runtime.
 
 ## Publicación y próximos controles
 
-`AgentStudioPublications` rechaza expresamente un grafo compatible con catálogo y exige `execution_profile='linear-text-v1'` para su puerta actual. El binding de WhatsApp conserva el preflight de texto. No existe un endpoint para devolver directamente la respuesta del nuevo runtime.
+`AgentStudioPublications` permite el perfil mediante el [gate de publicación 066](CATALOG_STUDIO_PUBLICATIONS.md): evidencia durable versionada, cobertura de consulta y respuesta sin herramientas, suite/revisión exactas y permisos vigentes. El binding de WhatsApp conserva explícitamente el perfil de texto. No existe un endpoint para devolver directamente la respuesta del nuevo runtime.
 
-Para habilitar catálogo fuera de evaluación aún hacen falta el contrato de publicación propio (perfil y versión de adaptadores/evidencia), binding explícito que no mueva revisiones antiguas, fuente única tenant/inbound, controles canónicos `ownership_epoch`/`ia_paused_at` de 063, limpieza periódica y entrega/sugerencia bajo el flujo existente. Una evaluación pasada no omite esos controles.
+Para habilitar catálogo fuera de evaluación aún hacen falta binding explícito que no mueva revisiones antiguas, fuente única tenant/inbound, controles canónicos `ownership_epoch`/`ia_paused_at` de 063 y entrega/sugerencia bajo el flujo existente. Publicar no omite esos controles.
 
 ## Pruebas
 
@@ -78,6 +79,6 @@ npm run typecheck
 npm run build
 ```
 
-Proporcionar privadamente las URLs locales `_smoke` mediante `STRICT_CATALOG_TEST_DATABASE_URL`, `AI_QUOTA_RESERVATIONS_TEST_DATABASE_URL` y `AGENT_STUDIO_TEST_DATABASE_URL`, sin imprimirlas. La suite mata procesos con SIGKILL después de checkpoints reales, retoma por la API y comprueba una llamada por ronda. También cubre cancelación, revocación, concurrencia, presupuestos, texto que menciona tools inexistentes, snapshot ausente, petición de ledger adulterada, cronología inválida y publicación denegada aun con suite pasada.
+Proporcionar privadamente las URLs locales `_smoke` mediante `STRICT_CATALOG_TEST_DATABASE_URL`, `AI_QUOTA_RESERVATIONS_TEST_DATABASE_URL` y `AGENT_STUDIO_TEST_DATABASE_URL`, sin imprimirlas. La suite mata procesos con SIGKILL después de checkpoints reales, retoma por la API y comprueba una llamada por ronda. También cubre cancelación, revocación, concurrencia, presupuestos, texto que menciona tools inexistentes, snapshot ausente, petición de ledger adulterada, cronología inválida y rechazo cuando la evidencia no autoriza publicación. El corte 066 añade el gate y su suite de publicación independiente.
 
 Validación: **84/84** pruebas de perfiles, checkpoints, evaluación API y compatibilidad de Studio/publicación; **251/251** de `npm test`; typecheck y build de producción, typecheck explícito de pruebas/fixture de crash, migración 065 sobre esquema existente y `db:status` correctos. No se utilizaron proveedores reales ni se modificó CI.
