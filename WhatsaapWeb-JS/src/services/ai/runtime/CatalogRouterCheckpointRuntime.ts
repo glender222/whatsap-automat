@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { TenantScopedUoW } from '../../../db/TenantScopedUoW';
+import type { Queryable } from '../../../shared/UnitOfWorkPort';
 import { ToolBroker } from '../broker/ToolBroker';
 import { ToolRegistry } from '../broker/ToolRegistry';
 import { createTenantBoundedModelExecution } from '../gateway/TenantBoundedModelExecution';
@@ -29,15 +30,29 @@ export interface CatalogRouterCheckpointCommand {
   input: string;
 }
 
-/** Internal verification runtime. No routes, publications, bindings, or message delivery consume its output. */
+/** Shared by execution and evidence verification; neither caller may supply a system prompt or tool identity. */
+export function catalogCheckpointRoundPlan(command: CatalogRouterCheckpointCommand, plan: CatalogRouterExecutionPlan,
+  slot: 'router' | 'answer', input: string) {
+  const config = plan[slot];
+  const roundId = catalogRoundId(command.tenantId, command.runId, slot);
+  const budget = boundedTextBudget(config.maxTokens, config.timeoutMs)!;
+  const request = { system: (slot === 'router' ? routerProtocol : answerProtocol) + '\n' + config.prompt,
+    input, maxCompletionTokens: config.maxTokens };
+  const requestHash = digest(['catalog-router-checkpoint-v1', command.tenantId, command.runId, plan.graphId, plan.version,
+    plan.specHash, plan.profile, plan.limits, budget, config.timeoutMs, request]);
+  return { roundId, requestHash, request, ...budget, timeoutMs: config.timeoutMs };
+}
+
+/** Internal execution block for Studio evidence; never a direct HTTP response, publication, or message delivery. */
 export class CatalogRouterCheckpointRuntime {
   private readonly execution;
   constructor(private readonly uow: TenantScopedUoW, fetchProvider?: FetchFunction,
-    private readonly store = new CatalogRouterCheckpointStore(uow)) {
-    this.execution = createTenantBoundedModelExecution(uow, fetchProvider);
+    private readonly store = new CatalogRouterCheckpointStore(uow),
+    execution?: ReturnType<typeof createTenantBoundedModelExecution>) {
+    this.execution = execution ?? createTenantBoundedModelExecution(uow, fetchProvider);
   }
 
-  async execute(command: CatalogRouterCheckpointCommand) {
+  async execute(command: CatalogRouterCheckpointCommand, guard?: (db: Queryable) => Promise<void>) {
     if (!Number.isSafeInteger(command.tenantId) || command.tenantId < 1 || !executionRunIdPattern.test(command.runId) ||
         !/^[a-zA-Z0-9_-]{1,128}$/.test(command.graphId) || !Number.isSafeInteger(command.version) || command.version < 1 ||
         !/^[0-9a-f]{64}$/.test(command.specHash) || !isBoundedText(command.input) || command.input.length > 1024 || JSON.stringify(command.input).length > 1536) {
@@ -53,16 +68,19 @@ export class CatalogRouterCheckpointRuntime {
       if (!compiled.compatible) return { ...closed, status: 'blocked' as const, code: 'CATALOG_PROFILE' };
       const plan = compiled.plan;
       const tool = new StrictCatalogSearchTool(this.uow, plan);
-      const authorizationHash = await tool.assertAuthorized(command.tenantId);
+      const authorizationHash = await this.uow.run(command.tenantId, async (db) => {
+        await guard?.(db);
+        return tool.assertAuthorized(command.tenantId, db);
+      });
       const run = await this.store.prepare(command.tenantId, { id: command.runId, graphId: plan.graphId,
         version: plan.version, specHash: plan.specHash, inputHash: digest(command.input), authorizationHash,
         maxTokens: plan.maxTokens, maxCostMicroUsd: plan.maxCostMicroUsd, maxDurationSeconds: plan.limits.maxDurationSeconds });
       if (run.state !== 'active') return { ...closed, status: 'blocked' as const, code: 'CHECKPOINT_' + run.state.toUpperCase() };
       const authorize: CatalogRouterCheckpointAuthorize = async (db, expected) => {
+        await guard?.(db);
         if (await tool.assertAuthorized(command.tenantId, db) !== expected) throw new CatalogReadDeniedError();
       };
-      const router = await this.round(command, run, plan, 'router', routerProtocol + '\n' + plan.router.prompt,
-        command.input, authorize);
+      const router = await this.round(command, run, plan, 'router', command.input, authorize);
       if (router.status !== 'completed') return { ...closed, ...router };
       const route = parseCatalogRoute(router.checkpoint.output!, plan.catalog.maxResults);
       if (!route) return { ...closed, status: 'blocked' as const, code: 'ROUTER_OUTPUT' };
@@ -92,8 +110,7 @@ export class CatalogRouterCheckpointRuntime {
       const answerInput = JSON.stringify({ customer: command.input, route: route.route,
         ...(snapshot ? { catalog: { items: snapshot.items } } : {}) });
       if (!isBoundedText(answerInput)) return { ...closed, status: 'blocked' as const, code: 'ANSWER_INPUT_BOUND' };
-      const answer = await this.round(command, run, plan, 'answer', answerProtocol + '\n' + plan.answer.prompt,
-        answerInput, authorizeAnswer);
+      const answer = await this.round(command, run, plan, 'answer', answerInput, authorizeAnswer);
       if (answer.status !== 'completed') return { ...closed, ...answer };
       const toolReceipt = await this.store.getTool(command.tenantId, run.id, authorizeAnswer);
       const current = await this.store.get(command.tenantId, run.id);
@@ -119,13 +136,9 @@ export class CatalogRouterCheckpointRuntime {
   }
 
   private async round(command: CatalogRouterCheckpointCommand, run: CatalogRouterCheckpointRun, plan: CatalogRouterExecutionPlan,
-    slot: 'router' | 'answer', system: string, input: string, authorize: CatalogRouterCheckpointAuthorize) {
+    slot: 'router' | 'answer', input: string, authorize: CatalogRouterCheckpointAuthorize) {
     const config = plan[slot];
-    const roundId = catalogRoundId(command.tenantId, run.id, slot);
-    const budget = boundedTextBudget(config.maxTokens, config.timeoutMs)!;
-    const request = { system, input, maxCompletionTokens: config.maxTokens };
-    const requestHash = digest(['catalog-router-checkpoint-v1', command.tenantId, run.id, plan.graphId, plan.version,
-      plan.specHash, plan.profile, plan.limits, budget, config.timeoutMs, request]);
+    const { roundId, requestHash, ...requestPlan } = catalogCheckpointRoundPlan(command, plan, slot, input);
     const identity = { slot, roundId, requestHash };
     // Read before ensureRound so an interrupted claim remains inspectable after the dispatch deadline.
     let checkpoint = await this.store.getRound(command.tenantId, run.id, slot, authorize);
@@ -159,7 +172,7 @@ export class CatalogRouterCheckpointRuntime {
     } }, { tenantId: command.tenantId, attemptId: roundId, operation: 'eval', isByok,
       // The per-round timeout never extends the persisted run deadline after restart.
       started: performance.now() - Math.max(0, config.timeoutMs - (Date.parse(run.deadlineAt) - Date.now())),
-      plan: { request, requestHash, timeoutMs: config.timeoutMs, ...budget } });
+      plan: { ...requestPlan, requestHash } });
     checkpoint = await this.store.getRound(command.tenantId, run.id, slot, authorize);
     if (checkpoint?.state === 'completed' && isBoundedText(checkpoint.output)) return { status: 'completed' as const, checkpoint };
     if (checkpoint?.state === 'terminal') return { status: 'blocked' as const, code: 'ROUND_TERMINAL' };

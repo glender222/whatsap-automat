@@ -5,6 +5,7 @@ import { boundedTextCapability } from '../gateway/BoundedTextCompletion';
 import { loadDraft } from './AgentStudioDrafts';
 import { executionAttemptId, executionRunIdPattern, loadExecutionSuite, type ExecutionMode } from './AgentExecutionEvidence';
 import { preflightBoundedAgentDispatch, type BoundedAgentDispatch } from './BoundedAgentDispatch';
+import { compileCatalogRouterExecutionProfile } from './CatalogRouterExecutionProfile';
 
 interface PublicationRow {
   graph_id: string;
@@ -87,6 +88,9 @@ export class AgentStudioPublications {
     if (!locked) return null;
     const graph = await loadDraft(db, tenantId, graphId, version);
     if (!graph) return null;
+    if (compileCatalogRouterExecutionProfile(graph).compatible) {
+      throw new AgentPublicationConflict('Catalog evaluation does not yet authorize publication or WhatsApp binding');
+    }
 
     const { rows: [active] } = await db.query(`
       SELECT * FROM agent_studio_publications
@@ -125,6 +129,7 @@ export class AgentStudioPublications {
       SELECT suite_id, execution_suite_hash, scorecard FROM agent_eval_runs
       WHERE tenant_id = $1 AND id = $2 AND agent_graph_id = $3 AND graph_version = $4
         AND execution_spec_hash = $5 AND execution_mode = $6
+        AND execution_profile = 'linear-text-v1'
         AND status = 'completed' AND passed AND pass_rate_percent >= 95
         AND completed_at <= execution_deadline_at AND NOT regression_detected
         AND cardinality(security_tool_leaks) = 0

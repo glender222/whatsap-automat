@@ -1,6 +1,6 @@
 # Perfil estricto de router y catálogo
 
-Estado del corte: compilación, lectura y ejecución durable de verificación interna, 2026-11-11. No está habilitado en HTTP, evaluaciones publicables, el binding de WhatsApp ni el worker. La migración 064 y su contrato de recuperación se describen en [checkpoints del perfil](STRICT_CATALOG_ROUTER_CHECKPOINTS.md). La 063 pertenece a la invalidación por versión canónica de conversación en el runtime de texto y no se modifica aquí.
+Estado del corte: compilación, ejecución durable y [evaluaciones de Studio](CATALOG_STUDIO_EVALUATIONS.md), 2026-11-11. La evaluación usa el proveedor acotado y evidencia propia; siguen bloqueados publicación, binding de WhatsApp y worker. La migración 064 y su contrato de recuperación se describen en [checkpoints del perfil](STRICT_CATALOG_ROUTER_CHECKPOINTS.md); la 065 discrimina los perfiles de evaluación. La 063 pertenece a la invalidación por versión canónica de conversación en el runtime de texto y no se modifica aquí.
 
 ## Problema reproducido
 
@@ -67,7 +67,7 @@ El resultado de herramienta añade huellas de entrada, autorización y salida. E
 
 ## Adaptación durable necesaria antes de producción
 
-No se deben montar el probe ni el runtime de verificación en rutas o workers. La migración 064 implementa las rondas, consumo y snapshots de los puntos 3–6 para verificación interna; siguen pendientes la evidencia de evaluación propia y la composición canónica con los controles siguientes:
+El probe y el runtime no deben exponerse como ejecución libre o entrega del worker. La migración 064 implementa rondas, consumo y snapshots de los puntos 3–6; la 065 incorpora el evaluador propio del punto 7 y el discriminador de evaluación. La publicación y composición canónica siguen pendientes con los controles siguientes:
 
 1. **Pin y compatibilidad.** Añadir un discriminador de perfil a evidencia/publicación/binding. Los registros existentes conservan `linear-text-v1`. Una publicación nueva debe fijar perfil y versión de comportamiento, capability, versión de grafo, specHash, suiteHash y digest de adaptadores/esquemas de tool. Una evaluación de texto o simulación no satisface esa publicación. Publicar otra versión nunca mueve automáticamente el binding.
 2. **Fuente durable.** Mantener la unicidad del run por tenant/inbound ya existente. Fijar el binding y la versión canónica de conversación incorporada por 063. Una pausa, toma humana, nueva revisión del vínculo o cambio de versión de conversación invalida salida y continuación; reanudar no revive el resultado antiguo.

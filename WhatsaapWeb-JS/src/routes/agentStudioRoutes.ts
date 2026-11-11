@@ -14,6 +14,8 @@ import { requireJwt } from '../middleware/jwtAuth';
 import { type TenantContext, tenantContext } from '../middleware/tenantContext';
 import { agentEvalService, SimulationInputError } from '../services/ai/eval/AgentEvalService';
 import { compileAgentExecutionProfile, executionProfile } from '../services/ai/studio/AgentExecutionProfile';
+import { catalogReadTimeoutMs, catalogRouterExecutionProfile, compileCatalogRouterExecutionProfile, type CatalogRouterExecutionPlan } from '../services/ai/studio/CatalogRouterExecutionProfile';
+import { catalogScenarioChecks } from '../services/ai/studio/CatalogEvaluationAssertions';
 import { executionRunIdPattern, listExecutionSuites, saveExecutionSuite } from '../services/ai/studio/AgentExecutionEvidence';
 import { AgentPublicationConflict } from '../services/ai/studio/AgentStudioPublications';
 import type { StudioAccess, StudioProviderAccess, StudioVerification } from '../services/ai/studio/StudioVerification';
@@ -55,7 +57,27 @@ const suiteScenario = evalScenarioV1Schema.pick({ id: true, name: true, mockInpu
 }).strict();
 const suiteInput = createGraphDraftSchema.pick({}).extend({
   id: runId, name: evalScenarioV1Schema.shape.name.trim().min(1).max(120), scenarios: suiteScenario.array().min(1).max(20),
+  profile: evalScenarioV1Schema.shape.id.refine((profile) => profile === executionProfile).optional(),
 }).strict().refine(({ scenarios }) => new Set(scenarios.map(({ id }) => id)).size === scenarios.length);
+const toolName = evalScenarioV1Schema.shape.id.regex(/^[A-Za-z0-9_.-]{1,100}$/);
+const catalogScenario = evalScenarioV1Schema.pick({
+  id: true, name: true, mockInput: true, expectedTextPatterns: true, forbiddenTextPatterns: true,
+  expectedTools: true, forbiddenTools: true, assertions: true,
+}).extend({
+  id: graphIdSchema,
+  mockInput: evalScenarioV1Schema.shape.mockInput.refine((input) =>
+    isBoundedText(input) && input.length <= 1024 && JSON.stringify(input).length <= 1536),
+  expectedTextPatterns: evalScenarioV1Schema.shape.expectedTextPatterns.removeDefault().max(8).default([]),
+  forbiddenTextPatterns: evalScenarioV1Schema.shape.forbiddenTextPatterns.removeDefault().max(8).default([]),
+  expectedTools: toolName.array().max(8).default([]), forbiddenTools: toolName.array().max(8).default([]),
+  assertions: evalScenarioV1Schema.shape.assertions.removeDefault().max(16).default([]),
+}).strict();
+const catalogSuiteInput = createGraphDraftSchema.pick({}).extend({
+  id: runId, name: evalScenarioV1Schema.shape.name.trim().min(1).max(120),
+  profile: evalScenarioV1Schema.shape.id.refine((profile) => profile === catalogRouterExecutionProfile),
+  scenarios: catalogScenario.array().min(1).max(20),
+}).strict().refine(({ scenarios }) => new Set(scenarios.map(({ id }) => id)).size === scenarios.length);
+
 const timeoutMs = agentGraphVersionV1Schema.shape.version.max(boundedTextCapability.maxTimeoutMs);
 const evaluateInput = createGraphDraftSchema.pick({}).extend({ suiteId: graphIdSchema, runId, timeoutMs }).strict();
 const publishInput = createGraphDraftSchema.pick({}).extend({ evaluationId: runId }).strict();
@@ -66,6 +88,20 @@ const executeInput = createGraphDraftSchema.pick({}).extend({
 
 type StudioActor = TenantContext & { userId: number };
 type StudioHandler = (req: Request, res: Response, actor: StudioActor) => Promise<void>;
+
+function catalogExecutionStatus(plan: CatalogRouterExecutionPlan, provider: boolean) {
+  const minScenarioTimeoutMs = plan.router.timeoutMs + plan.answer.timeoutMs + catalogReadTimeoutMs;
+  const maxSuiteDurationMs = plan.limits.maxDurationSeconds * 1000;
+  const maxScenarioTimeoutMs = Math.min(boundedTextCapability.maxTimeoutMs, maxSuiteDurationMs);
+  const maxScenarios = Math.min(20, Math.floor(plan.limits.maxModelTokens / plan.maxTokens),
+    Math.floor(plan.limits.maxCostMicroUsd / plan.maxCostMicroUsd),
+    Math.floor(plan.limits.maxDurationSeconds * 1000 / minScenarioTimeoutMs));
+  const issue = !provider ? 'CATALOG_PROVIDER_REQUIRED'
+    : minScenarioTimeoutMs > maxScenarioTimeoutMs || maxScenarios < 1 ? 'CATALOG_EVALUATION_BUDGET' : null;
+  return { name: catalogRouterExecutionProfile, compatible: issue === null, issue,
+    model: boundedTextCapability.model, publicationAllowed: false,
+    minScenarioTimeoutMs, maxScenarioTimeoutMs, maxSuiteDurationMs, maxScenarios, maxInputLength: 1024, maxSerializedInputLength: 1536 };
+}
 
 function problem(res: Response, code: StandardErrorCode, detail: string, invalidParams?: InvalidParamDetail[]) {
   const req = res.req;
@@ -305,6 +341,13 @@ export default function createAgentStudioRoutes(
 
   router.get('/:id/execution-preflight', withDraft((res, draft) => {
     const result = compileAgentExecutionProfile(draft);
+    const catalog = result.compatible ? null : compileCatalogRouterExecutionProfile(draft);
+    if (catalog?.compatible) {
+      res.json({ graphId: draft.graphId, version: draft.version, specHash: draft.specHash,
+        scope: 'execution_profile', profile: catalogRouterExecutionProfile, publicationEvidence: false,
+        publicationAllowed: false, compatible: true, nodeOrder: [], issues: [] });
+      return;
+    }
     res.json({
       graphId: draft.graphId, version: draft.version, specHash: draft.specHash,
       scope: 'execution_profile', profile: executionProfile, publicationEvidence: false,
@@ -331,21 +374,39 @@ export default function createAgentStudioRoutes(
       return;
     }
     const preflight = preflightBoundedAgentDispatch({ tenantId: actor.tenantId, graph: draft, input: 'Verification preflight', timeoutMs: 1000 });
+    const catalog = preflight.ok ? null : compileCatalogRouterExecutionProfile(draft);
+    const catalogProfile = catalog?.compatible ? catalogExecutionStatus(catalog.plan, access.studio.mode === 'provider') : null;
     const status = await actor.runInScope(async (db) => ({
       mode: access.studio.mode,
       availability: access.availability,
-      profile: { compatible: preflight.ok, issue: preflight.ok ? null : preflight.code, model: boundedTextCapability.model },
+      profile: catalogProfile ?? { compatible: preflight.ok, issue: preflight.ok ? null : preflight.code, model: boundedTextCapability.model },
       suites: await listExecutionSuites(db, actor.tenantId, draft.graphId),
       active: (await access.studio.publications.loadActive(db, actor.tenantId, draft.graphId))?.publication ?? null,
     }));
     res.json(status);
   }, true));
 
-  router.post('/:id/evaluation-suites', withExecutionDraft(async (res, draft, req, actor) => {
+  router.post('/:id/evaluation-suites', withExecutionDraft(async (res, draft, req, actor, studio) => {
+    if (req.body?.profile === catalogRouterExecutionProfile) {
+      const input = catalogSuiteInput.safeParse(req.body);
+      if (!input.success || studio.mode !== 'provider' || !compileCatalogRouterExecutionProfile(draft).compatible) {
+        return problem(res, 'VALIDATION_ERROR', 'A compatible provider catalog revision and bounded catalog evaluation suite are required.');
+      }
+      const scenarios = input.data.scenarios.map((scenario) => evalScenarioV1Schema.parse(scenario));
+      for (const scenario of scenarios) catalogScenarioChecks(scenario);
+      const suite = await actor.runInScope((db) => saveExecutionSuite(db, {
+        ...input.data, profile: catalogRouterExecutionProfile, tenantId: actor.tenantId, graphId: draft.graphId,
+        scenarios,
+      }));
+      if (!suite) return problem(res, 'CONFLICT', 'The suite ID is already bound to another suite.');
+      res.json(suite);
+      return;
+    }
     const input = suiteInput.safeParse(req.body);
     if (!input.success) return problem(res, 'VALIDATION_ERROR', 'Invalid bounded text evaluation suite.');
     const suite = await actor.runInScope((db) => saveExecutionSuite(db, {
       ...input.data, tenantId: actor.tenantId, graphId: draft.graphId,
+      profile: executionProfile,
       scenarios: input.data.scenarios.map((scenario) => evalScenarioV1Schema.parse(scenario)),
     }));
     if (!suite) return problem(res, 'CONFLICT', 'The suite ID is already bound to another suite.');

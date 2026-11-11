@@ -1,6 +1,6 @@
 # Recuperación durable del perfil de catálogo
 
-Estado: verificación interna, 2026-11-11. `CatalogRouterCheckpointRuntime` ejecuta router, hasta una lectura existente de catálogo y respuesta final. Todos los resultados conservan `publicationEvidence: false` y `deliveryAllowed: false`. No hay montaje HTTP, worker, publicación, binding ni envío. `linear-text-v1` mantiene su contrato.
+Estado: bloque de ejecución y verificación, 2026-11-11. `CatalogRouterCheckpointRuntime` ejecuta router, hasta una lectura existente de catálogo y respuesta final. Todos los resultados conservan `publicationEvidence: false` y `deliveryAllowed: false`. La 065 lo compone exclusivamente dentro de [evaluaciones de Studio](CATALOG_STUDIO_EVALUATIONS.md), sin respuesta de texto directa por HTTP, worker, publicación, binding ni envío. `linear-text-v1` mantiene su contrato.
 
 ## Fallo reproducido
 
@@ -40,13 +40,13 @@ La huella incluye las versiones PostgreSQL `xmin` de política, grant, configura
 
 El snapshot también fija versiones y proyección de producto, pertenencia elegida, catálogo y sección. Se bloquean cambios de precio, producto retirado, catálogo/sección deshabilitados, pertenencia eliminada y revocar/restaurar. La comprobación relee como máximo tres productos bajo locks de lectura; no reemplaza su contenido por una búsqueda nueva. Incluso una respuesta final ya confirmada debe superar esta comprobación.
 
-Texto y JSON se cifran mediante `SecretCipher`; cada payload tiene máximo 4096 caracteres. El run vence una hora después de crearse. Leerlo vencido borra los cifrados; `eraseExpired(tenant)` limpia hasta cien por llamada con `SKIP LOCKED`, conservando hashes y contabilidad. Este módulo no está montado: su futura composición **debe programar esa limpieza**. La migración por sí sola no garantiza eliminación física a la hora exacta sin un consumidor. Un payload corrupto bloquea; no genera otra llamada al proveedor.
+Texto y JSON se cifran mediante `SecretCipher`; cada payload tiene máximo 4096 caracteres. El run vence una hora después de crearse. Leerlo vencido borra los cifrados; `eraseExpired(tenant)` limpia hasta cien por llamada con `SKIP LOCKED`, conservando hashes y contabilidad. La composición de evaluaciones 065 invoca esta limpieza al operar; su integración operativa **debe programar además un barrido independiente**. La migración por sí sola no garantiza eliminación física a la hora exacta sin un consumidor. Un payload corrupto bloquea; no genera otra llamada al proveedor.
 
 No se mantiene una transacción abierta durante HTTP. La liquidación bloquea cuota antes de run; las lecturas de checkpoints bloquean run y filas de autorización, pero no bloquean cuota. La lectura local no abre otra transacción mientras mantiene bloqueado el run.
 
 ## Contrato pendiente para integrar Studio y WhatsApp
 
-Los checkpoints son verificables, pero no equivalen a una evaluación aprobada. Antes de publicar o entregar se necesita:
+Los checkpoints no autorizan publicación o entrega. El evaluador propio y su discriminador están implementados en 065; permanecen pendientes sus contratos de publicación/binding y la composición operativa. Antes de publicar o entregar se necesita:
 
 1. Discriminador de perfil en evaluaciones/publicaciones/bindings, sin convertir permisos de texto existentes en permisos de herramientas. Fijar versión del adaptador, capability, grafo/specHash y suiteHash evaluados.
 2. Evaluador propio que compruebe `expectedTools`/`forbiddenTools`, ambos ledgers, hashes de requests/resultados, coste agregado, ramas, revocación y tenant. La evidencia debe venir de estos eventos durables, nunca de una afirmación del modelo.

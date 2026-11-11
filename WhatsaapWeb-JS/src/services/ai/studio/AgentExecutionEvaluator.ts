@@ -18,7 +18,7 @@ interface EvaluationCommand {
   timeoutMs: number;
 }
 
-interface ExecutionResult {
+export interface ExecutionResult {
   scenarioId: string;
   outcome: 'passed' | 'assertion_failed' | 'uncertain' | 'blocked';
   ledgerId?: number;
@@ -115,7 +115,8 @@ export class AgentExecutionEvaluator {
     const identity = [tenantId, graphId, version, runId, this.mode];
     const row = await this.uow.run(tenantId, async (db) => {
       const scope = `tenant_id = $1 AND agent_graph_id = $2 AND graph_version = $3
-        AND id = $4 AND execution_mode = $5 AND execution_deadline_at IS NOT NULL`;
+        AND id = $4 AND execution_mode = $5 AND execution_deadline_at IS NOT NULL
+        AND execution_profile = 'linear-text-v1'`;
       const { rows: [stopped] } = await db.query(`
         WITH observed AS (SELECT clock_timestamp() AS at)
         UPDATE agent_eval_runs SET status = CASE WHEN execution_deadline_at <= observed.at THEN 'failed' ELSE 'cancelled' END,
@@ -144,6 +145,9 @@ export class AgentExecutionEvaluator {
       const graph = await loadDraft(db, tenantId, graphId, version);
       const executionSuite = await loadExecutionSuite(db, tenantId, graphId, suiteId);
       if (!graph || !executionSuite) throw new SimulationInputError('Execution suite or revision was not found in this tenant');
+      if (executionSuite.profile !== 'linear-text-v1') {
+        throw new SimulationInputError('This evaluator only accepts the linear text execution profile');
+      }
       const { suite, suiteHash } = executionSuite;
       const deadlineMs = Math.min(graph.limits.maxDurationSeconds * 1000, 60_000);
       let maxTokens = 0;
@@ -163,10 +167,10 @@ export class AgentExecutionEvaluator {
       const { rows: [created] } = await db.query(`
         INSERT INTO agent_eval_runs (
           id, tenant_id, suite_id, agent_graph_id, graph_version, status, scorecard,
-          execution_spec_hash, execution_suite_hash, execution_deadline_at, execution_mode
+          execution_spec_hash, execution_suite_hash, execution_deadline_at, execution_mode, execution_profile
         )
         VALUES ($1, $2, $3, $4, $5, 'running', jsonb_build_object('timeoutMs', $6::integer),
-          $7, $8, clock_timestamp() + $9::integer * interval '1 millisecond', $10)
+          $7, $8, clock_timestamp() + $9::integer * interval '1 millisecond', $10, 'linear-text-v1')
         ON CONFLICT (id) DO NOTHING RETURNING id
       `, [runId, tenantId, suiteId, graphId, version, timeoutMs, graph.specHash, suiteHash, deadlineMs, this.mode]);
       if (created) return { kind: 'claimed' as const, graph, scenarios, threshold: Math.max(95, suite.passThresholdPercent) };
@@ -177,6 +181,7 @@ export class AgentExecutionEvaluator {
       if (!existing || existing.suite_id !== suiteId || existing.agent_graph_id !== graphId ||
           existing.graph_version !== version || existing.execution_spec_hash !== graph.specHash ||
           existing.execution_suite_hash !== suiteHash || existing.execution_mode !== this.mode ||
+          existing.execution_profile !== 'linear-text-v1' ||
           existing.scorecard.timeoutMs !== timeoutMs) {
         throw new SimulationInputError('Evaluation run UUID is already bound to a different execution');
       }

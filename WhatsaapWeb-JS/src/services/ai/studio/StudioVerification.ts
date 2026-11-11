@@ -6,6 +6,16 @@ import { AgentExecutionEvaluator } from './AgentExecutionEvaluator';
 import type { ExecutionMode } from './AgentExecutionEvidence';
 import { AgentStudioPublications, dispatchPublishedAgent } from './AgentStudioPublications';
 import { BoundedAgentDispatch } from './BoundedAgentDispatch';
+import { CatalogRouterCheckpointRuntime } from '../runtime/CatalogRouterCheckpointRuntime';
+import { CatalogExecutionEvaluator } from './CatalogExecutionEvaluator';
+
+type StudioEvaluationResult = Awaited<ReturnType<AgentExecutionEvaluator['evaluate']>> |
+  Awaited<ReturnType<CatalogExecutionEvaluator['evaluate']>>;
+interface StudioExecutionEvaluator {
+  evaluate(command: Parameters<AgentExecutionEvaluator['evaluate']>[0]): Promise<StudioEvaluationResult>;
+  read(...args: Parameters<AgentExecutionEvaluator['read']>): Promise<StudioEvaluationResult | null>;
+  cancel(...args: Parameters<AgentExecutionEvaluator['cancel']>): Promise<StudioEvaluationResult | null>;
+}
 
 /** Explicit verification composition. Its publications are never used by the provider runtime. */
 export function createStudioVerification(uow: TenantScopedUoW, adapter: BoundedTextAdapter) {
@@ -24,7 +34,8 @@ export function createStudioProviderExecution(
     },
   };
   return createStudioExecution(uow, 'provider', dispatcher,
-    new AgentStudioPublications('provider', (db, tenantId) => execution.policy.assertStrict(db, tenantId)));
+    new AgentStudioPublications('provider', (db, tenantId) => execution.policy.assertStrict(db, tenantId)),
+    new CatalogExecutionEvaluator(uow, new CatalogRouterCheckpointRuntime(uow, undefined, undefined, execution), 'provider'));
 }
 
 export function createStudioProviderAccess(
@@ -42,11 +53,32 @@ export function createStudioProviderAccess(
 
 function createStudioExecution<Mode extends ExecutionMode>(
   uow: TenantScopedUoW, mode: Mode, dispatcher: Pick<BoundedAgentDispatch, 'dispatch'>, publications: AgentStudioPublications,
+  catalog?: CatalogExecutionEvaluator,
 ) {
+  const linear = new AgentExecutionEvaluator(uow, dispatcher, mode);
+  const evaluator: StudioExecutionEvaluator = catalog ? {
+    async evaluate(command: Parameters<AgentExecutionEvaluator['evaluate']>[0]) {
+      const { rows: [suite] } = await uow.run(command.tenantId, (db) => db.query(`
+        SELECT execution_profile FROM agent_eval_suites WHERE tenant_id=$1 AND agent_graph_id=$2 AND id=$3
+      `, [command.tenantId, command.graphId, command.suiteId]));
+      return (suite?.execution_profile === 'catalog-router-v1' ? catalog : linear).evaluate(command);
+    },
+    read: (...args: Parameters<AgentExecutionEvaluator['read']>) => observe(false, ...args),
+    cancel: (...args: Parameters<AgentExecutionEvaluator['cancel']>) => observe(true, ...args),
+  } : linear;
+
+  async function observe(cancel: boolean, tenantId: number, graphId: string, version: number, runId: string) {
+    const { rows: [run] } = await uow.run(tenantId, (db) => db.query(`
+      SELECT execution_profile FROM agent_eval_runs
+      WHERE tenant_id=$1 AND agent_graph_id=$2 AND graph_version=$3 AND id=$4 AND execution_mode=$5
+    `, [tenantId, graphId, version, runId, mode]));
+    const selected = catalog && run?.execution_profile === 'catalog-router-v1' ? catalog : linear;
+    return cancel ? selected.cancel(tenantId, graphId, version, runId) : selected.read(tenantId, graphId, version, runId);
+  }
   return {
     mode,
     publications,
-    evaluator: new AgentExecutionEvaluator(uow, dispatcher, mode),
+    evaluator,
     execute: (command: Parameters<typeof dispatchPublishedAgent>[3] & { version: number }) =>
       dispatchPublishedAgent(uow, publications, dispatcher, command),
   };
