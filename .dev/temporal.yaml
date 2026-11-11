@@ -1,0 +1,4 @@
+include:
+  - path:
+      - ../deploy/temporal/docker-compose.yml
+      - ./temporal.override.yaml

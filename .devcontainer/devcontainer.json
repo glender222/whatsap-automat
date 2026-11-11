@@ -1,0 +1,16 @@
+{
+  "name": "Whatsap-Automat Linux",
+  "dockerComposeFile": "../.dev/local/compose.resolved.yaml",
+  "service": "tools",
+  "runServices": ["postgres", "tools", "api", "web"],
+  "workspaceFolder": "/workspace",
+  "shutdownAction": "none",
+  "remoteUser": "developer",
+  "overrideCommand": false,
+  "customizations": {
+    "vscode": {
+      "extensions": ["dbaeumer.vscode-eslint", "ms-python.python"],
+      "settings": {"python.defaultInterpreterPath": "/opt/venv/bin/python"}
+    }
+  }
+}

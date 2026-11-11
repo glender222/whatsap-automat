@@ -52,58 +52,27 @@ El alcance de esta entrega no acredita una operación omnicanal completa ni una 
 
 ## Pruébalo en tu entorno
 
-**Requisitos:** Git autenticado con acceso al repositorio, Node.js 22 con npm y PostgreSQL 16. Instala FFmpeg y ffprobe en el servidor para inspeccionar y convertir videos de WhatsApp Cloud. Docker con Compose se usa para la demo de Temporal; el SDK de Python requiere Python 3.10 o posterior.
-
-### 1. Clona e instala
-
-El tag `v0.4.0` reproduce la primera versión de QA; `main` contiene el desarrollo posterior y la web.
+En Linux (laptop o VM de Azure), necesitas Git con acceso al repositorio y Docker Engine con Compose v2. Node.js, npm, Python, PostgreSQL, FFmpeg y Playwright se ejecutan en contenedores con las versiones fijadas por el repositorio.
 
 ```bash
-git clone --branch v0.4.0 https://github.com/glender222/whatsap-automat.git
+git clone --branch main https://github.com/glender222/whatsap-automat.git
 cd whatsap-automat
-
-npm --prefix packages/contracts ci
-npm --prefix packages/contracts run build
-PUPPETEER_SKIP_DOWNLOAD=true npm --prefix WhatsaapWeb-JS ci
-npm --prefix Frontend_py_whatsaapweb ci
+./dev setup
+./dev up
+./dev doctor
 ```
 
-Para trabajar sobre el desarrollo actual, usa `--branch main` al clonar.
+Abre `http://localhost:5173` e inicia sesión con `demo@automat.local` / `Demo-local-2026!`. La API usa `http://localhost:3000` y su visor está en `/api/v1/docs`. La demo utiliza la API real, JWT y PostgreSQL con RLS; contiene datos sintéticos de dos empresas y credenciales locales, sin activar proveedores externos.
 
-### 2. Configura y migra
-
-Crea una base de desarrollo aislada y copia los ejemplos de entorno:
+`./dev setup` genera `.dev/local/dev.env` privado e ignorado por Git, sin reemplazar los `.env` existentes. En ejecuciones posteriores detiene API y web mientras prepara las dependencias; vuelve a ejecutar `up` después. Si necesitas otros puertos, cambia `DEV_WEB_PORT` y `DEV_API_PORT` en ese archivo antes de `./dev up`. Los puertos se publican solo en localhost; cada checkout conserva su propia base y dependencias.
 
 ```bash
-cp -n WhatsaapWeb-JS/.env.example WhatsaapWeb-JS/.env
-cp -n Frontend_py_whatsaapweb/.env.example Frontend_py_whatsaapweb/.env
+./dev check   # Validaciones de código y pruebas
+./dev smoke   # Recorrido web y persistencia tras reiniciar
+./dev down    # Detiene el entorno y conserva sus volúmenes
 ```
 
-En el backend, rellena `DB_*` y genera claves independientes de al menos 32 caracteres para `JWT_SECRET` y `MASTER_ENCRYPTION_KEY`. El proveedor predeterminado, WhatsApp Cloud, requiere configurar `META_*` para arrancar: usa una cuenta de prueba. Configura también una clave independiente en `META_TOKEN_ENCRYPTION_KEY` cuando corresponda al entorno de despliegue. En la web, usa `VITE_API_URL=http://localhost:3000/api` con los puertos predeterminados.
-
-```bash
-npm --prefix WhatsaapWeb-JS run db:migrate
-npm --prefix WhatsaapWeb-JS run db:status
-```
-
-Comprueba que todas las migraciones figuren como aplicadas. La [guía de inicio](docs-site/content/guia-inicio.md) amplía la configuración y el envío de adjuntos.
-
-### 3. Arranca y comprueba
-
-Ejecuta cada proceso en su propia terminal:
-
-```bash
-# Terminal 1: API
-npm --prefix WhatsaapWeb-JS run dev
-
-# Terminal 2: web
-npm --prefix Frontend_py_whatsaapweb run dev
-
-# Comprobación de disponibilidad
-curl --fail --silent --show-error http://localhost:3000/ready
-```
-
-Abre la web en `http://localhost:5173` y el visor de API en `http://localhost:3000/api/v1/docs`.
+Consulta la [guía de desarrollo](docs/development.md) para Azure, diagnóstico, móvil, Temporal y el uso explícito de proveedores reales. El tag `v0.4.0` conserva la primera entrega de QA; esta ruta `./dev` corresponde a `main`.
 
 ## Desarrollo y verificación
 
@@ -115,15 +84,11 @@ Abre la web en `http://localhost:5173` y el visor de API en `http://localhost:30
 | [packages/](packages/) | Contratos, SDK y CLI |
 | [docs-site/](docs-site/) | Presentación web, documentación y descargas |
 
-Desde la raíz, tras instalar dependencias, ejecuta las comprobaciones básicas:
+Desde la raíz, ejecuta las comprobaciones dentro del entorno reproducible:
 
 ```bash
-npm --prefix packages/contracts test
-npm --prefix WhatsaapWeb-JS run typecheck
-npm --prefix WhatsaapWeb-JS run typecheck:scripts
-npm --prefix WhatsaapWeb-JS test
-npm --prefix Frontend_py_whatsaapweb run build
-npm --prefix Frontend_py_whatsaapweb test
+./dev check
+./dev smoke
 ```
 
 Las suites de integración requieren sus servicios y variables de entorno. Consulta los [criterios de QA](docs/qa/QA_GATES_AND_CASES.md) y los [resultados de CI del commit elegido](https://github.com/glender222/whatsap-automat/actions/workflows/ci.yml); la evidencia de proveedores y dispositivos se verifica por separado.

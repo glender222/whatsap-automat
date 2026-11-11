@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+# Linux entry point. Application runtimes live in the development container.
+set -euo pipefail
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+LOCAL="$ROOT/.dev/local"
+ENV_FILE="$LOCAL/dev.env"
+
+help() {
+  cat <<'HELP'
+Whatsap-Automat · desarrollo Linux
+  ./dev setup               Construir herramientas, instalar y migrar la demo
+  ./dev up                  Arrancar API y web de demostración
+  ./dev doctor              Comprobar versiones, RLS, servicios y migraciones
+  ./dev check               Compilar y probar web, backend, SDK y CLI
+  ./dev smoke               Probar navegador, aislamiento y persistencia tras restart
+  ./dev restart             Reiniciar API y web conservando los datos
+  ./dev down                Detener este entorno; conserva los volúmenes
+  ./dev logs [servicio...]   Seguir logs de API/web o servicios indicados
+  ./dev shell [comando...]   Terminal/comando con las herramientas del contenedor
+  ./dev mobile [web|check]   Preparar Expo y abrir web, o verificar el cliente
+  ./dev temporal [up|down]   Servicios opcionales de Temporal
+HELP
+}
+
+fail() { printf '%s\n' "$*" >&2; exit 1; }
+COMMAND="${1:-help}"
+[[ $# -eq 0 ]] || shift
+case "$COMMAND" in help|-h|--help) help; exit 0 ;; esac
+[[ "$(uname -s)" == Linux ]] || fail 'Este entorno requiere Linux.'
+command -v docker >/dev/null || fail 'Instala Docker Engine y Docker Compose v2. Consulta docs/development.md.'
+docker info >/dev/null 2>&1 || fail 'Docker no está disponible para este usuario. Revisa el servicio/permisos con docker info; consulta docs/development.md.'
+docker compose version >/dev/null 2>&1 || fail 'Se requiere Docker Compose v2.'
+
+default_project="automatdev-$(printf '%s' "$ROOT" | sha256sum | cut -c1-12)"
+read_env() {
+  local file="$1" key value
+  while IFS='=' read -r key value || [[ -n "$key" ]]; do
+    [[ -z "$key" || "$key" == \#* ]] && continue
+    [[ "$key" =~ ^DEV_[A-Z0-9_]+$ ]] || fail "Variable no admitida en $file"
+    [[ "$value" != *$'\r'* ]] || fail "Usa finales de línea Linux en $file"
+    # Environment overrides are useful for CI and independent port assignments.
+    [[ -v "$key" ]] || export "$key=$value"
+  done < "$file"
+}
+read_env "$ROOT/.dev/versions.env"
+if [[ ! -f "$ENV_FILE" ]]; then
+  [[ "$COMMAND" == setup ]] || fail 'Primero ejecuta ./dev setup.'
+  project="${DEV_PROJECT_NAME:-$default_project}"
+  [[ "$project" =~ ^[a-z0-9][a-z0-9_-]*$ ]] || fail 'DEV_PROJECT_NAME inválido.'
+  [[ -z "$(docker volume ls -q --filter "label=com.docker.compose.project=$project")" ]] || fail 'Falta .dev/local/dev.env pero existen volúmenes de este entorno. Restaura ese archivo antes de continuar.'
+  umask 077
+  mkdir -p "$LOCAL"
+  secret() { od -An -N32 -tx1 /dev/urandom | tr -d ' \n'; }
+  {
+    printf 'DEV_PROJECT_NAME=%s\n' "$project"
+    printf 'DEV_API_PORT=%s\nDEV_WEB_PORT=%s\n' "${DEV_API_PORT:-3000}" "${DEV_WEB_PORT:-5173}"
+    printf 'DEV_UID=%s\nDEV_GID=%s\n' "$(id -u)" "$(id -g)"
+    for key in DEV_DB_PASSWORD DEV_PG_ADMIN_PASSWORD DEV_JWT_SECRET DEV_MASTER_KEY DEV_META_KEY; do
+      printf '%s=%s\n' "$key" "$(secret)"
+    done
+  } > "$ENV_FILE"
+fi
+read_env "$ENV_FILE"
+export DEV_SOURCE_DIR="$ROOT"
+export DEV_UID="$(id -u)" DEV_GID="$(id -g)"
+[[ "$DEV_UID" != 0 ]] || fail 'Ejecuta ./dev como tu usuario, sin sudo. Configura el acceso de ese usuario a Docker.'
+[[ "$DEV_PROJECT_NAME" =~ ^[a-z0-9][a-z0-9_-]*$ ]] || fail 'DEV_PROJECT_NAME inválido.'
+for port in "$DEV_API_PORT" "$DEV_WEB_PORT"; do
+  [[ "$port" =~ ^[0-9]{4,5}$ && "$port" -ge 1024 && "$port" -le 65535 ]] || fail 'Puertos locales inválidos (1024–65535).'
+done
+[[ "$DEV_API_PORT" != "$DEV_WEB_PORT" ]] || fail 'API y web requieren puertos diferentes.'
+for key in DEV_DB_PASSWORD DEV_PG_ADMIN_PASSWORD DEV_JWT_SECRET DEV_MASTER_KEY DEV_META_KEY; do
+  [[ "${!key}" =~ ^[a-f0-9]{64}$ ]] || fail "$key debe ser un valor generado de 64 caracteres hexadecimales."
+done
+dc() { docker compose --project-directory "$ROOT" -p "$DEV_PROJECT_NAME" --env-file "$ENV_FILE" -f "$ROOT/.dev/compose.yaml" "$@"; }
+run() {
+  local tty=(-T)
+  if [[ -t 0 && -t 1 ]]; then tty=(); fi
+  dc run --rm --no-deps "${tty[@]}" tools "$@"
+}
+require_setup() {
+  [[ -f "$LOCAL/setup.done" && "$(cat "$LOCAL/setup.done")" == "$DEV_PROJECT_NAME" ]] || fail 'Ejecuta ./dev setup para preparar este entorno.'
+}
+bindings() {
+  local api web
+  api="$(dc ps -q api)"; web="$(dc ps -q web)"
+  [[ -n "$api" && -n "$web" ]] || fail 'La demo no está arrancada. Ejecuta ./dev up.'
+  umask 077
+  printf '{"api":%s,"web":%s}\n' \
+    "$(docker inspect --format '{{json .NetworkSettings.Ports}}' "$api")" \
+    "$(docker inspect --format '{{json .NetworkSettings.Ports}}' "$web")" > "$LOCAL/bindings.json"
+}
+ready() { dc --profile app up -d --no-build --wait --wait-timeout 120 api web; }
+
+case "$COMMAND" in
+  setup)
+    dc stop api web
+    dc build tools
+    # Only dedicated volumes are adjusted; source files keep the host user's owner.
+    dc run --rm --no-deps -T --user 0 tools chown -R "$DEV_UID:$DEV_GID" \
+      /workspace/packages/contracts/node_modules /workspace/packages/sdk/node_modules \
+      /workspace/packages/cli/node_modules /workspace/WhatsaapWeb-JS/node_modules \
+      /workspace/Frontend_py_whatsaapweb/node_modules /workspace/apps/mobile/node_modules \
+      /workspace/WhatsaapWeb-JS/uploads /opt/venv /npm-cache /ms-playwright /artifacts
+    dc up -d --wait postgres
+    run bash .dev/runtime.sh install
+    run bash .dev/runtime.sh prepare
+    printf '%s\n' "$DEV_PROJECT_NAME" > "$LOCAL/setup.done"
+    umask 077
+    dc --profile tools --profile app config > "$LOCAL/compose.resolved.yaml"
+    printf '\nEntorno preparado. Ejecuta ./dev up\n'
+    ;;
+  up)
+    require_setup; ready
+    printf '\nWeb: http://127.0.0.1:%s\nAPI: http://127.0.0.1:%s\nDemo: demo@automat.local · Demo-local-2026!\n' "$DEV_WEB_PORT" "$DEV_API_PORT"
+    ;;
+  down) dc --profile app --profile tools down --remove-orphans ;;
+  restart) require_setup; dc restart api web; ready ;;
+  doctor) require_setup; bindings; run bash .dev/runtime.sh doctor ;;
+  check) require_setup; run bash .dev/runtime.sh check ;;
+  smoke)
+    require_setup; bindings
+    run node .dev/smoke.cjs prepare
+    dc restart api web; ready
+    bindings
+    run node .dev/smoke.cjs verify
+    ;;
+  logs) if [[ $# -eq 0 ]]; then set -- api web; fi; dc logs --tail 100 -f "$@" ;;
+  shell) require_setup; if [[ $# -eq 0 ]]; then set -- bash; fi; run "$@" ;;
+  mobile)
+    require_setup
+    case "${1:-web}" in web|check) ;; *) fail 'Usa ./dev mobile web o ./dev mobile check; las compilaciones nativas requieren su SDK anfitrión.' ;; esac
+    if [[ "${1:-web}" == web ]]; then
+      dc run --rm --no-deps --service-ports tools bash .dev/runtime.sh mobile web
+    else
+      run bash .dev/runtime.sh mobile check
+    fi
+    ;;
+  temporal)
+    require_setup
+    temporal_project="${DEV_PROJECT_NAME}-temporal"
+    case "${1:-up}" in
+      up) docker compose -p "$temporal_project" -f "$ROOT/.dev/temporal.yaml" up -d --wait ;;
+      down) docker compose -p "$temporal_project" -f "$ROOT/.dev/temporal.yaml" down ;;
+      *) fail 'Usa ./dev temporal up o ./dev temporal down.' ;;
+    esac
+    ;;
+  *) help >&2; exit 2 ;;
+esac

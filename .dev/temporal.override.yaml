@@ -1,0 +1,3 @@
+volumes:
+  temporal-postgres-data:
+    name: ${DEV_PROJECT_NAME:?}-temporal-postgres-data

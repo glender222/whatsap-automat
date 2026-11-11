@@ -1,0 +1,4 @@
+dev text eol=lf
+.dev/** text eol=lf
+.devcontainer/** text eol=lf
+*.sh text eol=lf

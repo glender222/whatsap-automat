@@ -1,0 +1,2 @@
+# This tools image copies only from pinned runtime images, never workspace secrets.
+**

@@ -248,15 +248,15 @@
           </p>
           <h2 id="setup-title">Instalación local</h2>
           <p class="section-intro">
-            Usa Git, Node.js 22, npm y PostgreSQL 16 para preparar web y
-            backend. Instala FFmpeg y ffprobe para enviar videos por WhatsApp
-            Cloud. Docker con Compose es opcional para la demo de Temporal. Para
-            el SDK de Python necesitas Python 3.10 o posterior.
+            En Linux, usa Git, Docker Engine y Compose v2. Node.js, npm,
+            Python, PostgreSQL, FFmpeg y Playwright se ejecutan en contenedores
+            con versiones fijadas. La misma ruta sirve en una laptop o una VM
+            Linux de Azure.
           </p>
           <ol class="steps" role="list">
             <li>
               <span class="step-number" aria-hidden="true">01</span>
-              <h3 id="clone-title">Clona la versión de QA</h3>
+              <h3 id="clone-title">Clona el desarrollo actual</h3>
               <p>
                 Inicia sesión en GitHub con una cuenta que tenga acceso al
                 repositorio.
@@ -274,18 +274,19 @@
                     ><span>Copiar</span>
                   </button>
                 </div>
-                <pre><code id="clone-command">git clone --branch v0.4.0 https://github.com/glender222/whatsap-automat.git
+                <pre><code id="clone-command">git clone --branch main https://github.com/glender222/whatsap-automat.git
 cd whatsap-automat</code></pre>
               </div>
             </li>
             <li>
               <span class="step-number" aria-hidden="true">02</span>
               <h3 id="install-title">
-                Compila los contratos e instala las aplicaciones
+                Prepara el entorno reproducible
               </h3>
               <p>
-                El backend importa el paquete de contratos local. Compílalo
-                antes de verificar el backend.
+                Ejecuta la entrada común desde la raíz. Prepara la imagen y
+                las dependencias desde sus lockfiles, sin instalar lenguajes
+                en el host.
               </p>
               <div class="code-block">
                 <div class="code-header">
@@ -300,27 +301,21 @@ cd whatsap-automat</code></pre>
                     ><span>Copiar</span>
                   </button>
                 </div>
-                <pre><code id="install-command">npm --prefix packages/contracts ci
-npm --prefix packages/contracts run build
-PUPPETEER_SKIP_DOWNLOAD=true npm --prefix WhatsaapWeb-JS ci
-npm --prefix Frontend_py_whatsaapweb ci</code></pre>
+                <pre><code id="install-command">./dev setup</code></pre>
               </div>
             </li>
             <li>
               <span class="step-number" aria-hidden="true">03</span>
               <h3 id="env-title">
-                Configura PostgreSQL y los archivos de entorno
+                Arranca la demo local
               </h3>
               <p>
-                Copia los ejemplos a <code>.env</code> en cada aplicación. Usa
-                una base aislada, rellena <code>DB_*</code> y genera claves
-                independientes de al menos 32 caracteres para
-                <code>JWT_SECRET</code> y <code>MASTER_ENCRYPTION_KEY</code>.
-                WhatsApp Cloud requiere sus valores <code>META_*</code> para
-                arrancar. Usa una cuenta de prueba y configura una clave
-                independiente en <code>META_TOKEN_ENCRYPTION_KEY</code> para
-                producción. En la web, apunta <code>VITE_API_URL</code> al
-                backend local.
+                La configuración privada se genera en
+                <code>.dev/local/dev.env</code>, con permisos restringidos y
+                excluida de Git. Conserva los archivos <code>.env</code>
+                existentes. Cambia <code>DEV_WEB_PORT</code> y
+                <code>DEV_API_PORT</code> antes de arrancar si necesitas
+                otros puertos. La demo no requiere claves de proveedores.
               </p>
               <div class="code-block">
                 <div class="code-header">
@@ -335,27 +330,24 @@ npm --prefix Frontend_py_whatsaapweb ci</code></pre>
                     ><span>Copiar</span>
                   </button>
                 </div>
-                <pre><code id="env-command">cp -n WhatsaapWeb-JS/.env.example WhatsaapWeb-JS/.env
-cp -n Frontend_py_whatsaapweb/.env.example Frontend_py_whatsaapweb/.env
-
-# Tras configurar PostgreSQL y el .env del backend:
-npm --prefix WhatsaapWeb-JS run db:migrate
-npm --prefix WhatsaapWeb-JS run db:status</code></pre>
+                <pre><code id="env-command">./dev up
+./dev doctor</code></pre>
               </div>
               <p class="fine">
-                Comprueba que todas las migraciones figuren como aplicadas. El
-                comando devuelve un código de error si falla la conexión o una
-                migración.
+                Abre <code>http://localhost:5173</code> con
+                <code>demo@automat.local</code> y
+                <code>Demo-local-2026!</code>. Usa la API real, JWT y RLS con
+                datos sintéticos de dos empresas. Los puertos se publican
+                solo en localhost.
               </p>
             </li>
             <li>
               <span class="step-number" aria-hidden="true">04</span>
-              <h3 id="start-title">Arranca la API y la web</h3>
+              <h3 id="start-title">Comprueba y conserva tus datos</h3>
               <p>
-                Ejecuta cada comando <code>dev</code> en su propia terminal. Con
-                los puertos por defecto, abre la web en
-                <code>http://localhost:5173</code> y confirma que la API esté
-                lista en <code>http://localhost:3000/ready</code>.
+                Valida el código y el recorrido web, incluido el aislamiento
+                de empresas y la persistencia tras reiniciar. Cada checkout
+                tiene sus propios volúmenes; <code>down</code> los conserva.
               </p>
               <div class="code-block">
                 <div class="code-header">
@@ -370,21 +362,16 @@ npm --prefix WhatsaapWeb-JS run db:status</code></pre>
                     ><span>Copiar</span>
                   </button>
                 </div>
-                <pre><code id="start-command"># Terminal 1
-npm --prefix WhatsaapWeb-JS run dev
-
-# Terminal 2
-npm --prefix Frontend_py_whatsaapweb run dev
-
-# Comprobación
-curl --fail --silent --show-error http://localhost:3000/ready</code></pre>
+                <pre><code id="start-command">./dev check
+./dev smoke
+./dev down</code></pre>
               </div>
               <p class="fine">
-                Para revisar la demo de Temporal por separado, sigue la
-                <a
-                  href="https://github.com/glender222/whatsap-automat/blob/v0.4.0/deploy/temporal/README.md"
-                  >guía de Temporal del repositorio</a
-                >.
+                Consulta la
+                <a href="https://github.com/glender222/whatsap-automat/blob/main/docs/development.md"
+                  >guía de desarrollo</a
+                > para Azure, móvil, Temporal opcional y proveedores reales.
+                Clonar o arrancar la demo no activa integraciones externas.
               </p>
             </li>
           </ol>

@@ -1,0 +1,142 @@
+x-runtime: &runtime
+  image: ${DEV_PROJECT_NAME:?Run ./dev setup}-tools
+  build:
+    context: ${DEV_SOURCE_DIR:?}
+    dockerfile: .dev/Dockerfile
+    args:
+      DEV_NODE_IMAGE: ${DEV_NODE_IMAGE:?}
+      DEV_PYTHON_IMAGE: ${DEV_PYTHON_IMAGE:?}
+      DEV_UID: ${DEV_UID:?}
+      DEV_GID: ${DEV_GID:?}
+  init: true
+  working_dir: /workspace
+  environment: &runtime-env
+    NODE_ENV: development
+    DEV_PROFILE: demo
+    DOTENV_CONFIG_PATH: /dev/null
+    NODE_OPTIONS: --require=/workspace/.dev/no-dotenv.cjs
+    DB_HOST: postgres
+    DB_PORT: '5432'
+    DB_NAME: whatsap_dev_demo
+    DB_USER: whatsap_dev
+    DB_PASSWORD: ${DEV_DB_PASSWORD:?}
+    JWT_SECRET: ${DEV_JWT_SECRET:?}
+    MASTER_ENCRYPTION_KEY: ${DEV_MASTER_KEY:?}
+    META_TOKEN_ENCRYPTION_KEY: ${DEV_META_KEY:?}
+    WHATSAPP_PROVIDER: meta-cloud
+    META_GRAPH_VERSION: v25.0
+    META_WA_PHONE_NUMBER_ID: '200000000000000'
+    META_WABA_ID: '300000000000000'
+    META_WA_ACCESS_TOKEN: synthetic-local-token
+    META_APP_SECRET: demo-local-app-secret-only
+    META_WEBHOOK_VERIFY_TOKEN: demo-local-verification-only
+    AI_PROVIDER: opencode
+    AI_DEFAULT_MODE: suggest
+    AI_DETERMINISTIC_FIXTURE: 'false'
+    CONVERSATIONS_PERSIST_READS: 'true'
+    CONVERSATIONS_PERSIST_WRITES: 'true'
+    WHATSAPP_API_REQUIRE_JWT: 'true'
+    WHATSAPP_API_REQUIRE_COMPANY_CLAIM: 'true'
+    ALLOW_INSECURE_SANDBOX: 'false'
+    VITE_API_URL: /api
+    EXPO_PUBLIC_API_URL: http://127.0.0.1:${DEV_API_PORT:-3000}
+    SMOKE_STATE_FILE: /artifacts/smoke-state.json
+    SMOKE_BINDINGS_FILE: /workspace/.dev/local/bindings.json
+    DEV_NODE_VERSION: ${DEV_NODE_VERSION}
+    DEV_NPM_VERSION: ${DEV_NPM_VERSION}
+    DEV_PYTHON_VERSION: ${DEV_PYTHON_VERSION}
+    DEV_POSTGRES_MAJOR: ${DEV_POSTGRES_MAJOR}
+  volumes: &runtime-volumes
+    - type: bind
+      source: ${DEV_SOURCE_DIR:?}
+      target: /workspace
+    - contracts-deps:/workspace/packages/contracts/node_modules
+    - sdk-deps:/workspace/packages/sdk/node_modules
+    - cli-deps:/workspace/packages/cli/node_modules
+    - backend-deps:/workspace/WhatsaapWeb-JS/node_modules
+    - frontend-deps:/workspace/Frontend_py_whatsaapweb/node_modules
+    - mobile-deps:/workspace/apps/mobile/node_modules
+    - python-env:/opt/venv
+    - npm-cache:/npm-cache
+    - browser-cache:/ms-playwright
+    - artifacts:/artifacts
+    - uploads:/workspace/WhatsaapWeb-JS/uploads
+
+services:
+  postgres:
+    image: ${DEV_POSTGRES_IMAGE:?}
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DEV_PG_ADMIN_PASSWORD:?}
+      APP_DB_PASSWORD: ${DEV_DB_PASSWORD:?}
+      POSTGRES_DB: postgres
+    volumes:
+      - database:/var/lib/postgresql/data
+      - ${DEV_SOURCE_DIR:?}/.dev/init-db.sh:/docker-entrypoint-initdb.d/10-development.sh:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d whatsap_dev_demo']
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  tools:
+    <<: *runtime
+    profiles: [tools]
+    ports:
+      - '127.0.0.1:${DEV_MOBILE_PORT:-8081}:8081'
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    <<: *runtime
+    profiles: [app]
+    working_dir: /workspace/WhatsaapWeb-JS
+    command: [node, --import, tsx, ../.dev/demo.ts]
+    environment:
+      <<: *runtime-env
+      HOST: 0.0.0.0
+      PORT: '3000'
+      CORS_ORIGIN: http://127.0.0.1:${DEV_WEB_PORT:-5173},http://localhost:${DEV_WEB_PORT:-5173},http://web:5173,http://127.0.0.1:${DEV_MOBILE_PORT:-8081},http://localhost:${DEV_MOBILE_PORT:-8081}
+    ports:
+      - '127.0.0.1:${DEV_API_PORT:-3000}:3000'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3000/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+  web:
+    <<: *runtime
+    profiles: [app]
+    working_dir: /workspace/Frontend_py_whatsaapweb
+    command: [npm, run, dev, --, --config, vite.dev.config.ts, --host, 0.0.0.0, --port, '5173', --strictPort]
+    ports:
+      - '127.0.0.1:${DEV_WEB_PORT:-5173}:5173'
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:5173').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
+
+volumes:
+  database:
+  contracts-deps:
+  sdk-deps:
+  cli-deps:
+  backend-deps:
+  frontend-deps:
+  mobile-deps:
+  python-env:
+  npm-cache:
+  browser-cache:
+  artifacts:
+  uploads:

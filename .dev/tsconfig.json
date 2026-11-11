@@ -1,0 +1,10 @@
+{
+  "extends": "../WhatsaapWeb-JS/tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "..",
+    "noEmit": true,
+    "typeRoots": ["../WhatsaapWeb-JS/node_modules/@types"]
+  },
+  "include": ["*.ts"],
+  "exclude": []
+}

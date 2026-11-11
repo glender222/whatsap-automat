@@ -1,4 +1,5 @@
 # Dependencias y compilados
+.dev/local/
 node_modules/
 */node_modules/
 dist/

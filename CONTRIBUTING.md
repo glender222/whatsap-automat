@@ -8,10 +8,10 @@
 
 Antes de comenzar a programar, familiarízate con los documentos de arquitectura canónicos en `docs/`:
 
-1. [docs/architecture/BLUEPRINT_v0.4.md](file:///home/glender/.gemini/antigravity/worktrees/whatsap-automat/baseline_reproducible_pr_zero/docs/architecture/BLUEPRINT_v0.4.md): Blueprint de arquitectura v0.4 (ADRs, contratos, modelo de datos, Temporal, omnicanalidad).
-2. [docs/roadmap/PR_ROADMAP.md](file:///home/glender/.gemini/antigravity/worktrees/whatsap-automat/baseline_reproducible_pr_zero/docs/roadmap/PR_ROADMAP.md): Plan de implementación incremental por Pull Requests.
-3. [docs/qa/QA_GATES_AND_CASES.md](file:///home/glender/.gemini/antigravity/worktrees/whatsap-automat/baseline_reproducible_pr_zero/docs/qa/QA_GATES_AND_CASES.md): Gates de QA, casos de aceptación y pruebas requeridas.
-4. [docs/orchestration/README.md](file:///home/glender/.gemini/antigravity/worktrees/whatsap-automat/baseline_reproducible_pr_zero/docs/orchestration/README.md): Guía de orquestación para desarrollo paralelo en Antigravity / Git Worktrees.
+1. [docs/architecture/BLUEPRINT_v0.4.md](docs/architecture/BLUEPRINT_v0.4.md): Blueprint de arquitectura v0.4 (ADRs, contratos, modelo de datos, Temporal, omnicanalidad).
+2. [docs/roadmap/PR_ROADMAP.md](docs/roadmap/PR_ROADMAP.md): Plan de implementación incremental por Pull Requests.
+3. [docs/qa/QA_GATES_AND_CASES.md](docs/qa/QA_GATES_AND_CASES.md): Gates de QA, casos de aceptación y pruebas requeridas.
+4. [docs/orchestration/README.md](docs/orchestration/README.md): Guía de orquestación para desarrollo paralelo en Antigravity / Git Worktrees.
 
 ### Invariantes Clave:
 - **1 PR = 1 frontera clara:** No combines refactorizaciones masivas con cambios de funcionalidad.
@@ -72,65 +72,34 @@ Ejemplos:
 
 ## 4. Configuración del Entorno de Desarrollo Local
 
-### Requisitos Previos:
-- **Node.js:** Versión 20.x LTS recomendada (>= 18.0.0).
-- **npm:** Versión >= 10.x.
-- **PostgreSQL:** Versión >= 15.
+La ruta común para una laptop Linux y una VM Linux de Azure es `./dev`. El host necesita Git, Docker Engine y Compose v2; los lenguajes, herramientas y bases de datos se ejecutan en contenedores con versiones fijadas. No necesitas instalar Node.js, npm, Python, PostgreSQL, FFmpeg ni Playwright en el host.
 
-### Paso 1: Clonar y configurar variables de entorno
 ```bash
-git clone https://github.com/glender222/whatsap-automat.git
+git clone --branch main https://github.com/glender222/whatsap-automat.git
 cd whatsap-automat
-
-# Configurar Frontend
-cd Frontend_py_whatsaapweb
-cp .env.example .env
-
-# Configurar Backend
-cd ../WhatsaapWeb-JS
-cp .env.example .env
+./dev setup
+./dev up
+./dev doctor
 ```
 
-### Paso 2: Instalar dependencias
-```bash
-# Frontend
-cd Frontend_py_whatsaapweb
-npm install
+Abre `http://localhost:5173` con `demo@automat.local` / `Demo-local-2026!`. El entorno usa datos y credenciales sintéticos, API real con JWT y aislamiento RLS entre dos empresas. `setup` genera `.dev/local/dev.env` con permisos privados y excluido de Git; conserva cualquier `.env` existente. Cambia ahí `DEV_WEB_PORT` y `DEV_API_PORT` antes de `up` si los puertos predeterminados están ocupados.
 
-# Backend
-cd ../WhatsaapWeb-JS
-npm install
-```
+Cada checkout tiene sus propios volúmenes. `./dev down` los conserva; no hay un borrado implícito de la base. Consulta [docs/development.md](docs/development.md) para diagnóstico, shell, móvil, Temporal, Azure y proveedores reales.
 
 ---
 
 ## 5. Validaciones y Ejecución de Pruebas
 
-Antes de enviar cualquier cambio, ejecuta las validaciones locales disponibles:
+Desde la raíz, con el entorno preparado:
 
-### Validaciones Backend (`WhatsaapWeb-JS`):
 ```bash
-# Verificación de tipos TypeScript
-npm run typecheck
-npm run typecheck:scripts
-
-# Compilación
-npm run build
-
-# Ejecución de suite de pruebas P0 / Unitarias
-npm test
-# o ejecutar exclusivamente la suite P0:
-npm run test:p0
+./dev check
+./dev smoke
 ```
 
-### Validaciones Frontend (`Frontend_py_whatsaapweb`):
-```bash
-# Compilación y verificación de tipos
-npm run build
+`check` ejecuta las validaciones y pruebas del código dentro del contenedor. `smoke` comprueba el recorrido de la web con la API real, el aislamiento de empresas y la persistencia después de reiniciar. Las pruebas de proveedores reales y de dispositivos requieren habilitación y evidencia propias; no se activan al clonar o levantar la demo.
 
-# Análisis estático
-npm run lint
-```
+Para añadir una dependencia, usa `./dev shell` y el directorio del paquete correspondiente. Mantén sincronizados `package.json` y su `package-lock.json`; la instalación reproducible usa `npm ci`. No incluyas `.dev/local/`, claves de proveedores ni archivos `.env` en un PR.
 
 ---
 
