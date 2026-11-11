@@ -176,6 +176,12 @@ La bandeja de Alfa muestra un mensaje entrante y una respuesta automática. Grap
 - **Administración.** Studio permite consultar y desvincular el pin histórico cuando el perfil deja de admitir nuevas vinculaciones. La prueba combina el binding guardado en PostgreSQL con respuestas de disponibilidad controladas, verifica el DELETE real con CAS y devuelve el foco al título.
 - **Evidencia.** El recorrido usa dos sesiones de Chromium a 390 px, App, PostgreSQL, Socket.IO y transportes locales de modelo y Graph. Las pruebas conservan capturas de Studio y Bandeja y comprueban el ancho de la página.
 
+## UX-15. Fecha de los mensajes recibidos en vivo
+
+- **Antes.** El historial HTTP mostraba 2026, mientras la fecha del mensaje entrante por Socket.IO aparecía en 58831. El evento se normalizaba a milisegundos y el render volvía a multiplicarlo por 1000.
+- **Cambio.** El timeline utiliza el normalizador compartido y la fecha visible consume el valor ya normalizado.
+- **Evidencia.** Chromium a 1280 y 390 px compara la fecha y hora completas en America/Lima. Dos empresas reciben webhooks firmados, recuperan su historial por HTTP y conservan las fechas tras recargar. Una respuesta HTTP controlada comprueba también milisegundos. [Reproducción y contrato temporal](INBOX_MESSAGE_DATES.md).
+
 ## IA-01. Evaluación de ejecución por revisión y empresa
 
 - El evaluador interno carga una revisión inmutable y una suite guardada bajo RLS. Verifica las afirmaciones y el presupuesto del conjunto antes de llamar al proveedor. La ejecución reclama un UUID persistido y guarda las huellas de la revisión y de la suite, los resultados de las afirmaciones y las referencias de consumo. El resumen omite el texto de entrada y salida.
@@ -308,4 +314,4 @@ El ejemplo inicial del editor validaba estructura, pero no preparaba el modelo n
 | Bandeja en tiempo real | Filtro por etiqueta, reconexión, reorden de webhooks e historial paginado cubiertos en MSG-04 y MSG-05. |
 | Envío y recepción | MSG-06 a MSG-08 cubren envíos humanos y automáticos, adjuntos, entrega incierta, recuperación tras reinicio y recibos en la bandeja con Graph local. Falta el recorrido en navegador con dos líneas Meta reales. |
 | Harness IA | IA-03 a IA-15 cubren Studio, cuota, derivaciones, reclamo de efectos, texto y el recorrido canónico del catálogo publicado. Faltan perfiles con herramientas de efectos, conciliación por proveedor y piloto con proveedor real. |
-| Flujo operativo y navegación | UX-07 a UX-14 cubren conversación, pedido, pago y regreso, aprobación, conexión, conciliación con el proveedor local, pausa del agente publicado y regreso al listado de Studio. Falta el ensayo con una cuenta autorizada de Mercado Pago y la validación independiente del candidato completo. |
+| Flujo operativo y navegación | UX-07 a UX-15 cubren conversación, pedido, pago y regreso, aprobación, conexión, conciliación con el proveedor local, pausa del agente publicado y regreso al listado de Studio. Falta el ensayo con una cuenta autorizada de Mercado Pago y la validación independiente del candidato completo. |
