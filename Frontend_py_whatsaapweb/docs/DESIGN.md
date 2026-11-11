@@ -168,4 +168,6 @@ Agent Studio distingue la simulación de fixtures de la evaluación de ejecució
 
 Una revisión publicada para proveedor puede vincularse a WhatsApp como sugerencia o respuesta automática. Studio muestra el pin exacto. Cambiar o retirar la vinculación exige que siga vigente la versión observada. Si otro cambio llegó primero, el control permite volver a consultar el estado. En Bandeja, una sugerencia publicada se recupera para la conversación abierta y se identifica por su revisión. Aceptar copia el texto al borrador y enfoca el compositor. Si ya hay texto, el botón indica que lo reemplazará. Descartar conserva solo el identificador de la sugerencia en la pestaña.
 
+Después de vincular, actualizar el modo o desvincular, Studio devuelve el foco al selector de modo disponible, o al encabezado del bloque si ya no existe el selector. En una conversación canónica abierta, la pausa está disponible aunque no haya agente legacy ni sugerencia visible. El estado de pausa se muestra independientemente de la asignación del agente; pausar y reanudar conserva el borrador del operador.
+
 Campañas muestra el listado del servidor y permite preparar borradores. Segmentos solicita el recuento al backend. Auditoría y Salud del sistema muestran el error de consulta cuando el servicio no está disponible.

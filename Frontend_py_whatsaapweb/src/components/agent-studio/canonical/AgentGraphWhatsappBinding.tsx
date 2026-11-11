@@ -24,6 +24,16 @@ export default function AgentGraphWhatsappBinding({ draft, active, sessionGenera
   const [error, setError] = useState<GraphProblem>();
   const [busy, setBusy] = useState(false);
   const mutation = useRef<AbortController | null>(null);
+  const modeControl = useRef<HTMLSelectElement>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
+  const focusAfterChange = useRef(false);
+
+  useEffect(() => {
+    if (!busy && focusAfterChange.current) {
+      focusAfterChange.current = false;
+      (modeControl.current ?? heading.current)?.focus();
+    }
+  }, [busy, snapshot]);
 
   useEffect(() => {
     const request = new AbortController();
@@ -60,7 +70,10 @@ export default function AgentGraphWhatsappBinding({ draft, active, sessionGenera
       const next = action === 'bind'
         ? await bindStudioWhatsapp(draft, mode, snapshot, request)
         : await unbindStudioWhatsapp(snapshot, request);
-      if (!controller.signal.aborted) setSnapshot(next);
+      if (!controller.signal.aborted) {
+        focusAfterChange.current = true;
+        setSnapshot(next);
+      }
     } catch (cause: unknown) {
       if (!controller.signal.aborted) setError(graphProblem(cause, 'No pudimos confirmar el cambio de la revisión vinculada a WhatsApp.'));
     } finally {
@@ -76,7 +89,7 @@ export default function AgentGraphWhatsappBinding({ draft, active, sessionGenera
 
   return (
     <section aria-labelledby="studio-whatsapp-binding-title" className="space-y-3 rounded-lg border border-subtle p-3">
-      <h3 id="studio-whatsapp-binding-title" className="font-semibold">Revisión para WhatsApp</h3>
+      <h3 ref={heading} tabIndex={-1} id="studio-whatsapp-binding-title" className="font-semibold">Revisión para WhatsApp</h3>
       {!snapshot && !error && <p role="status" className="text-sm text-secondary">Consultando vinculación…</p>}
       {error && <GraphProblemNotice problem={error} retry={refresh} />}
       {snapshot && (
@@ -92,7 +105,7 @@ export default function AgentGraphWhatsappBinding({ draft, active, sessionGenera
         <form className="space-y-2" onSubmit={submit}>
           <label className="flex flex-col gap-1 text-sm">
             Modo de respuesta en WhatsApp
-            <select className={control} value={mode} disabled={busy || Boolean(error)}
+            <select ref={modeControl} className={control} value={mode} disabled={busy || Boolean(error)}
               onChange={(event) => setMode(event.target.value === 'auto' ? 'auto' : 'suggest')}>
               <option value="suggest">Sugerencias para el operador</option>
               <option value="auto">Respuestas automáticas</option>

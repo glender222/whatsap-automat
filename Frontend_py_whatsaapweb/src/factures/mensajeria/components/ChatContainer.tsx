@@ -246,9 +246,9 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
   };
 
   const getAgentStatusText = () => {
+    if (isIaPaused) return 'IA pausada en este chat.';
     if (agentStatusLoading) return 'Consultando estado del agente...';
     if (!defaultAgent) return 'No hay agente asignado a Gestion Web.';
-    if (isIaPaused) return `IA pausada en este chat. ${defaultAgent.name} no respondera hasta reanudar.`;
     if (defaultAgent.mode === 'auto') {
       return `Agente automatico activo: ${defaultAgent.name} respondera cuando llegue un mensaje nuevo.`;
     }
@@ -420,7 +420,7 @@ const ChatContainer: React.FC<ChatContainerProps> = ({
                 <button
                   type="button"
                   onClick={handleToggleIaPause}
-                  disabled={iaPauseLoading || (!defaultAgent && !publishedSuggestion && !isIaPaused)}
+                  disabled={iaPauseLoading || (!composer.conversation && !defaultAgent && !publishedSuggestion && !isIaPaused)}
                   className={`inline-flex items-center justify-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold transition disabled:opacity-60 ${
                     isIaPaused
                       ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'

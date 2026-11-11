@@ -217,6 +217,25 @@ if (process.env.STUDIO_PROVIDER_FIXTURE === '1') {
       await expect(bind).toBeEnabled();
       await bind.press('Enter');
       await expect(whatsapp.getByRole('status').filter({ hasText: `${graphId} · 1 · Sugerencias` })).toBeVisible();
+      const responseMode = whatsapp.getByRole('combobox', { name: 'Modo de respuesta en WhatsApp' });
+      await expect(responseMode).toBeFocused();
+      const revisions = [(await (await request.get(bindingUrl, { headers: alpha.headers })).json()).binding.revision];
+      for (const [key, mode, label] of [['ArrowDown', 'auto', 'Respuestas automáticas'], ['ArrowUp', 'suggest', 'Sugerencias']]) {
+        await responseMode.press(key);
+        await expect(responseMode).toHaveValue(mode);
+        await whatsapp.getByRole('button', { name: 'Actualizar modo de WhatsApp' }).press('Enter');
+        await expect(whatsapp.getByRole('status').filter({ hasText: `${graphId} · 1 · ${label}` })).toBeVisible();
+        await expect(responseMode).toBeFocused();
+        revisions.push((await (await request.get(bindingUrl, { headers: alpha.headers })).json()).binding.revision);
+      }
+      expect(new Set(revisions).size).toBe(3);
+      const pause = inboxes[0].getByRole('button', { name: 'Pausar IA', exact: true });
+      await expect(pause).toBeEnabled();
+      await pause.press('Enter');
+      await expect(inboxes[0].getByRole('button', { name: 'Reanudar IA', exact: true })).toBeEnabled();
+      await expect(inboxes[0].getByText('IA pausada en este chat.', { exact: true })).toBeVisible();
+      await inboxes[0].getByRole('button', { name: 'Reanudar IA', exact: true }).press('Enter');
+      await expect(pause).toBeEnabled();
       const inboundId = 'wamid.' + randomUUID();
       const texts = ['Consulta publicada de Alfa', 'Consulta sin vinculación de Bravo'];
       for (const [index, company] of companies.entries()) {
@@ -243,8 +262,40 @@ if (process.env.STUDIO_PROVIDER_FIXTURE === '1') {
       expect(notifications[1]).toHaveLength(0);
       await inboxes[0].reload();
       await expect(inboxes[0].getByText(suggestion, { exact: true })).toBeVisible();
-      await inboxes[0].getByRole('button', { name: 'Aceptar y editar' }).press('Enter');
-      await expect(inboxes[0].getByRole('textbox', { name: 'Mensaje', exact: true })).toHaveValue(suggestion);
+      const composer = inboxes[0].getByRole('textbox', { name: 'Mensaje', exact: true });
+      await composer.fill('Borrador manual que todavía no se envió');
+      await pause.press('Enter');
+      await expect(inboxes[0].getByRole('button', { name: 'Reanudar IA', exact: true })).toBeEnabled();
+      await expect(inboxes[0].getByText('Sugerencia de la revisión publicada 1', { exact: true })).toHaveCount(0);
+      await expect(composer).toHaveValue('Borrador manual que todavía no se envió');
+      await inboxes[0].getByRole('button', { name: 'Reanudar IA', exact: true }).press('Enter');
+      await expect(pause).toBeEnabled();
+      await expect(inboxes[0].getByText('Sugerencia de la revisión publicada 1', { exact: true })).toHaveCount(0);
+      const freshText = 'Consulta después de reanudar Alfa';
+      const freshPayload = JSON.stringify({ entry: [{ changes: [{ field: 'messages', value: {
+        metadata: { phone_number_id: companies[0].phoneNumberId },
+        messages: [{ id: 'wamid.' + randomUUID(), from: contact, timestamp: String(Math.floor(Date.now() / 1000)),
+          type: 'text', text: { body: freshText } }],
+      } }] }] });
+      const freshSignature = createHmac('sha256', process.env.META_APP_SECRET!).update(freshPayload).digest('hex');
+      const freshAccepted = await request.post(backend + '/api/webhooks/meta/whatsapp', {
+        headers: { 'content-type': 'application/json', 'x-hub-signature-256': 'sha256=' + freshSignature }, data: freshPayload,
+      });
+      expect(freshAccepted.status()).toBe(200);
+      const freshSuggestion = 'Resultado de prueba: ' + freshText;
+      await expect(inboxes[0].getByText(freshSuggestion, { exact: true })).toBeVisible();
+      await expect(inboxes[0].getByRole('button', { name: 'Aceptar y editar', exact: true })).toHaveCount(0);
+      await inboxes[0].getByRole('button', { name: 'Reemplazar borrador', exact: true }).press('Enter');
+      await expect(composer).toHaveValue(freshSuggestion);
+      await expect(composer).toBeFocused();
+      await expect(pause).toBeEnabled();
+      await pause.press('Enter');
+      await expect(inboxes[0].getByRole('button', { name: 'Reanudar IA', exact: true })).toBeEnabled();
+      await expect(composer).toHaveValue(freshSuggestion);
+      await inboxes[0].getByRole('button', { name: 'Reanudar IA', exact: true }).press('Enter');
+      await expect(pause).toBeEnabled();
+      await expect(inboxes[0].getByText('Sugerencia de la revisión publicada 1', { exact: true })).toHaveCount(0);
+      expect(await inboxes[0].evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
       const attempts = await request.get(`${process.env.PRODUCT_GRAPH_FIXTURE_URL}/attempts?line=${companies[0].phoneNumberId}`);
       expect(await attempts.json()).toEqual([]);
 
@@ -264,6 +315,7 @@ if (process.env.STUDIO_PROVIDER_FIXTURE === '1') {
       expect(await bravoBinding.json()).toEqual({ binding: null });
       await whatsapp.getByRole('button', { name: 'Desvincular de WhatsApp' }).press('Enter');
       await expect(whatsapp.getByText('Sin revisión vinculada.', { exact: true })).toBeVisible();
+      await expect(responseMode).toBeFocused();
 
       await alpha.panel.getByRole('textbox', { name: 'Entrada para la revisión publicada' }).fill('Publicación Alfa');
       await alpha.panel.getByRole('button', { name: 'Ejecutar revisión publicada' }).press('Enter');
