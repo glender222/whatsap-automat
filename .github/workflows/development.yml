@@ -1,0 +1,93 @@
+name: Development environment
+
+on:
+  push:
+    branches:
+      - main
+      - 'infra/**'
+      - 'feat/**'
+    paths:
+      - 'dev'
+      - '.dev/**'
+      - '.devcontainer/**'
+      - '.dockerignore'
+      - '.gitignore'
+      - '.github/workflows/development.yml'
+      - 'Frontend_py_whatsaapweb/**'
+      - 'WhatsaapWeb-JS/**'
+      - 'packages/contracts/**'
+      - 'packages/sdk/**'
+      - 'packages/cli/**'
+      - 'packages/python-sdk/**'
+      - '**/package.json'
+      - '**/package-lock.json'
+      - 'docs/development.md'
+      - 'CONTRIBUTING.md'
+      - 'README.md'
+      - 'docs-site/content/guia-inicio.md'
+      - 'docs-site/site/docs.html'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'dev'
+      - '.dev/**'
+      - '.devcontainer/**'
+      - '.dockerignore'
+      - '.gitignore'
+      - '.github/workflows/development.yml'
+      - 'Frontend_py_whatsaapweb/**'
+      - 'WhatsaapWeb-JS/**'
+      - 'packages/contracts/**'
+      - 'packages/sdk/**'
+      - 'packages/cli/**'
+      - 'packages/python-sdk/**'
+      - '**/package.json'
+      - '**/package-lock.json'
+      - 'docs/development.md'
+      - 'CONTRIBUTING.md'
+      - 'README.md'
+      - 'docs-site/content/guia-inicio.md'
+      - 'docs-site/site/docs.html'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  clean-linux-checkout:
+    name: Linux checkout / container toolchain
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      DEV_PROJECT_NAME: dev-ci-${{ github.run_id }}-${{ github.run_attempt }}
+      DEV_WEB_PORT: '5173'
+      DEV_API_PORT: '3000'
+    steps:
+      - name: Checkout clean sources
+        uses: actions/checkout@v4
+        with:
+          clean: true
+          persist-credentials: false
+
+      - name: Prepare tools, dependencies, migrations and fixtures
+        run: ./dev setup
+
+      - name: Start demo API and web
+        run: ./dev up
+
+      - name: Diagnose environment
+        run: ./dev doctor
+
+      - name: Check code inside containers
+        run: ./dev check
+
+      - name: Smoke UI, tenants and restart persistence
+        run: ./dev smoke
+
+      - name: Stop services and preserve volumes
+        if: always()
+        run: ./dev down
