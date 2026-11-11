@@ -1505,9 +1505,6 @@ p {
   .motion-ready .hero-copy {
     animation: panel-enter 0.9s ease both;
   }
-  .motion-ready .hero-art {
-    animation: panel-enter 1.2s 0.1s ease both;
-  }
 }
 .motion-off,
 .motion-off *,
