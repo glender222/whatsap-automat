@@ -1,4 +1,4 @@
-"""Build the documentation portal from its explicitly listed source files."""
+"""Build the product website and documentation from explicitly listed sources."""
 
 import argparse
 import hashlib
@@ -14,7 +14,10 @@ from urllib.parse import urlsplit
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
-SITE_FILES = ("index.html", "styles.css", "copy.js", "mark.svg")
+SITE_FILES = (
+    "index.html", "styles.css", "showcase.js", "mark.svg",
+    "docs.html", "docs.css", "copy.js",
+)
 DOWNLOADS = {
     "guia-inicio.md": HERE / "content/guia-inicio.md",
     "openapi.v1.json": ROOT / "docs/api/openapi.v1.json",
@@ -42,18 +45,25 @@ class SiteLinks(HTMLParser):
 
 
 def validate_links(staging):
-    links = SiteLinks()
-    links.feed((staging / "index.html").read_text(encoding="utf-8"))
-    for target in links.targets:
-        if target in links.ids:
-            continue
-        url = urlsplit(target)
-        if url.scheme or url.netloc:
-            continue
-        if url.fragment and url.fragment not in links.ids:
-            raise ValueError(f"Enlace interno roto: {target}")
-        if url.path and not (staging / url.path).is_file():
-            raise ValueError(f"Archivo referenciado no disponible: {target}")
+    staging = staging.resolve()
+    pages = {}
+    for page in staging.glob("*.html"):
+        links = SiteLinks()
+        links.feed(page.read_text(encoding="utf-8"))
+        pages[page] = links
+    for page, links in pages.items():
+        for target in links.targets:
+            if target in links.ids:
+                continue
+            url = urlsplit(target)
+            if url.scheme or url.netloc:
+                continue
+            destination = (page.parent / url.path).resolve() if url.path else page
+            if not destination.is_relative_to(staging.resolve()) or not destination.is_file():
+                raise ValueError(f"Archivo referenciado no disponible: {target}")
+            destination_links = pages.get(destination)
+            if url.fragment and (not destination_links or url.fragment not in destination_links.ids):
+                raise ValueError(f"Enlace interno roto: {target}")
 
 
 def validate_developer_kit(path):
@@ -83,6 +93,7 @@ def build(developer_kit=None):
         downloads.mkdir(parents=True)
         for name in SITE_FILES:
             shutil.copyfile(HERE / "site" / name, staging / name)
+        shutil.copytree(HERE / "site/assets", staging / "assets")
         for name, source in DOWNLOADS.items():
             shutil.copyfile(source, downloads / name)
 
@@ -90,7 +101,7 @@ def build(developer_kit=None):
             validate_developer_kit(developer_kit)
             shutil.copyfile(developer_kit, downloads / "whatsap-automat-developer-kit.zip")
         else:
-            index = staging / "index.html"
+            index = staging / "docs.html"
             index.write_text(re.sub(
                 r"^ *<!-- developer-kit:start -->.*?<!-- developer-kit:end -->\n", "",
                 index.read_text(encoding="utf-8"), flags=re.MULTILINE | re.DOTALL,

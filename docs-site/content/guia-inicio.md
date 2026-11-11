@@ -1,6 +1,6 @@
 # Guía de inicio de Whatsap-Automat
 
-Esta guía describe el candidato v0.4 disponible en la rama `integration/v0.4-consolidated` del repositorio. Los pasos de instalación se aplican a la revisión que contiene los contratos adjuntos.
+Esta guía acompaña v0.4.0, la primera release preliminar de QA. Clona el tag para reproducir esa versión. El desarrollo y la web continúan en `main`; consulta los resultados de CI de la revisión que uses.
 
 ## Requisitos
 
@@ -11,10 +11,10 @@ Esta guía describe el candidato v0.4 disponible en la rama `integration/v0.4-co
 
 ## Instalar
 
-Desde una terminal con GitHub autenticado, clona la rama de integración e instala los paquetes usando los archivos de bloqueo.
+Desde una terminal con GitHub autenticado, clona la versión de QA e instala los paquetes usando los archivos de bloqueo.
 
 ```sh
-git clone --branch integration/v0.4-consolidated https://github.com/glender222/whatsap-automat.git
+git clone --branch v0.4.0 https://github.com/glender222/whatsap-automat.git
 cd whatsap-automat
 npm --prefix packages/contracts ci
 npm --prefix packages/contracts run build
@@ -79,4 +79,4 @@ Para enviar un archivo desde una sesión con control de la conversación y una v
 - Cuando el portal incluye el kit de desarrollo, el ZIP contiene paquetes de npm instalables para el SDK de TypeScript y la CLI, una rueda del SDK de Python y sumas SHA-256.
 - El paquete de documentación incluye `openapi.v1.json` y `openapi.v1.yaml`, el contrato OpenAPI 3.1 del repositorio.
 - Consulta las [versiones y artefactos de GitHub](https://github.com/glender222/whatsap-automat/releases) y los [resultados de CI](https://github.com/glender222/whatsap-automat/actions/workflows/ci.yml) del commit que uses.
-- Para levantar la demo de orquestación por separado, consulta la [guía de Temporal](https://github.com/glender222/whatsap-automat/blob/integration/v0.4-consolidated/deploy/temporal/README.md).
+- Para levantar la demo de orquestación por separado, consulta la [guía de Temporal](https://github.com/glender222/whatsap-automat/blob/v0.4.0/deploy/temporal/README.md).

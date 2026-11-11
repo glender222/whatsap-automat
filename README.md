@@ -1,151 +1,139 @@
+<div align="center">
+
 # Whatsap-Automat
 
-[![CI](https://github.com/glender222/whatsap-automat/actions/workflows/ci.yml/badge.svg)](https://github.com/glender222/whatsap-automat/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Node.js](https://img.shields.io/badge/Node.js-%3E%3D20.x-green.svg)](https://nodejs.org/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue.svg)](https://www.typescriptlang.org/)
+### Tu WhatsApp, mejor conectado.
 
-Plataforma de código abierto para automatización omnicanal y orquestación duradera de agentes de Inteligencia Artificial para empresas y desarrolladores.
+Conversaciones, agentes de IA y tu equipo, en una plataforma que puedes alojar en tu infraestructura.
 
----
+[Explorar la web](http://glendervargas.me/whatsap-automat/) · [Documentación](http://glendervargas.me/whatsap-automat/docs.html) · [Release v0.4.0](https://github.com/glender222/whatsap-automat/releases/tag/v0.4.0)
 
-## 1. Visión y Objetivos
+[![CI](https://github.com/glender222/whatsap-automat/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/glender222/whatsap-automat/actions/workflows/ci.yml) · [Licencia MIT](LICENSE)
 
-Whatsap-Automat está diseñado bajo un paradigma **automation-first**:
-- **Omnicanalidad nativa:** Soporte para WhatsApp (Meta Cloud API oficial), Telegram, Instagram y Messenger, con identidades estrictamente desacopladas por canal.
-- **Orquestación duradera:** Transición hacia flujos de trabajo de ejecución duradera con Temporal OSS, garantizando recuperación ante caídas, idempotencia transaccional y timers fiables.
-- **Arquitectura Multi-tenant Segura:** Aislamiento de datos empresariales mediante PostgreSQL Row-Level Security (RLS) forzado y políticas de autenticación JWT *fail-closed*.
-- **Harness de Agentes IA:** Agentes multi-modelo (OpenAI, OpenCode Zen, BYOK y modelos locales) con grafos versionados, presupuestos estrictos y Policy Engine con aprobación humana (*human-in-the-loop*).
-- **Self-hosted y Cloud:** Capacidad de auto-alojamiento completo sin dependencias forzosas de servicios privativos.
+![Presentación de Whatsap-Automat: conversaciones, automatización y control humano](docs-site/site/assets/showcase-desktop.png)
 
----
+</div>
 
-## 2. Estructura del Monorepo
+## Del mensaje al siguiente paso
 
-```text
-whatsap-automat/
-├── docs/                               # Documentación arquitectónica canónica v0.4
-│   ├── architecture/BLUEPRINT_v0.4.md  # Blueprint arquitectónico maestro
-│   ├── roadmap/PR_ROADMAP.md           # Plan de implementación incremental por PRs
-│   ├── qa/QA_GATES_AND_CASES.md        # Gates de aceptación y matriz de pruebas
-│   └── orchestration/README.md         # Guía de orquestación para desarrollo paralelo
-├── Frontend_py_whatsaapweb/            # Frontend Web (React 18, Vite, TypeScript, Tailwind)
-├── WhatsaapWeb-JS/                     # Backend API (Node.js, Express, TypeScript, PostgreSQL)
-├── .github/                            # Workflows de CI/CD, Dependabot y plantillas
-├── CONTRIBUTING.md                     # Procedimientos y reglas de contribución
-├── SECURITY.md                         # Política de divulgación responsable de vulnerabilidades
-├── CODE_OF_CONDUCT.md                  # Código de conducta de la comunidad
-└── LICENSE                             # Licencia MIT
-```
+Whatsap-Automat reúne la atención por WhatsApp, el contexto comercial y la configuración de agentes. El operador puede consultar el historial, tomar el control de una conversación y continuar la atención. En Agent Studio, el equipo diseña, evalúa y publica revisiones para los perfiles de ejecución compatibles.
 
----
+| Para tu equipo | Para quienes integran |
+| --- | --- |
+| Historial persistido y estados de entrega | API REST, OpenAPI 3.1 y eventos con Socket.IO |
+| Sugerencias de IA y respuesta automática según configuración | SDK de TypeScript y Python, y CLI |
+| Catálogo, pedidos y comprobantes relacionados con la atención | Contratos tipados, versiones e idempotencia en operaciones compatibles |
+| Control humano, permisos y espacios por empresa | Backend Express, PostgreSQL y web React en el mismo repositorio |
 
-## 3. Estado de la rama de integración
+### Una bandeja con contexto
 
-`integration/v0.4-consolidated` contiene el trabajo de las fases F0–F9. La preparación para una release se valida por recorridos y por commit. El [plan de validación](docs/roadmap/PRODUCT_VALIDATION_PLAN.md) define los controles de instalación, aislamiento, UX, proveedores y distribución. El [roadmap v1.0](docs/architecture/ROADMAP_V1.0.md) conserva el alcance de producto.
+Consulta las conversaciones y retoma el trabajo con el historial disponible. Las sugerencias de IA se revisan antes de enviar; el modo automático requiere una revisión publicada y vinculada a WhatsApp, junto con los permisos y el estado de conversación vigentes.
 
-El [portal de documentación](docs-site/README.md) se puede compilar localmente y ofrece la guía de inicio, la licencia y los contratos OpenAPI como descargas.
+![Bandeja web con conversaciones, historial y una respuesta humana en preparación, usando datos de demostración](docs-site/site/assets/inbox-desktop.png)
 
----
+### Agentes con una revisión identificable
 
-## 4. Requisitos Previos
+Agent Studio permite trabajar con grafos versionados y evaluaciones. Los perfiles de texto y catálogo tienen recorridos documentados de publicación y uso en WhatsApp. La publicación conserva evidencia de la revisión y la ejecución comprueba la autoridad vigente.
 
-- **Node.js:** Versión 22.x para el entorno completo.
-- **npm:** Versión 10.x o superior.
-- **PostgreSQL:** Versión 16 para desarrollo y pruebas de integración.
-- **Git:** Versión 2.30+ con soporte para `git worktree`.
+![Agent Studio con grafos comerciales y herramientas de edición, usando datos de demostración](docs-site/site/assets/studio-desktop.png)
 
----
+Las capturas muestran la aplicación web con datos de demostración. Explora la [presentación interactiva](http://glendervargas.me/whatsap-automat/) para ver las vistas del producto y los ejemplos de integración.
 
-## 5. Inicio Rápido (Desarrollo Local)
+## Primera entrega de QA · v0.4.0
 
-### 1. Clonar el repositorio
+Esta es una **release preliminar centrada en WhatsApp**. El repositorio es privado: clonar el código y acceder a sus releases o ejecuciones de Actions requiere una cuenta de GitHub autorizada. La distribución del portal y de los artefactos se gestiona desde GitHub.
+
+- **Web y backend:** los recorridos de QA cubren persistencia, permisos, aislamiento entre empresas, mensajería y automatización con los alcances registrados por cada suite.
+- **Proveedores:** existe evidencia con servicios locales controlados y una línea real de Meta. Siguen pendientes la prueba con dos líneas reales y los pilotos autorizados de OpenAI y Mercado Pago.
+- **Pagos:** el alcance disponible es la conciliación interna administrativa. Mercado Pago requiere habilitación explícita; la validación con proveedor autorizado, el checkout público y sus webhooks siguen pendientes.
+- **Móvil:** la release incluye un APK Android ARM64 firmado para QA. La ejecución nativa en dispositivo queda pendiente y la compilación iOS requiere un entorno con Xcode.
+
+El alcance de esta entrega no acredita una operación omnicanal completa ni una instalación lista para producción. Consulta el [plan de validación](docs/roadmap/PRODUCT_VALIDATION_PLAN.md) y la [evidencia del APK](docs/qa/MOBILE_ANDROID_QA_2026-11-11.md) antes de evaluar un despliegue.
+
+## Pruébalo en tu entorno
+
+**Requisitos:** Git autenticado con acceso al repositorio, Node.js 22 con npm y PostgreSQL 16. Instala FFmpeg y ffprobe en el servidor para inspeccionar y convertir videos de WhatsApp Cloud. Docker con Compose se usa para la demo de Temporal; el SDK de Python requiere Python 3.10 o posterior.
+
+### 1. Clona e instala
+
+El tag `v0.4.0` reproduce la primera versión de QA; `main` contiene el desarrollo posterior y la web.
+
 ```bash
-git clone --branch integration/v0.4-consolidated https://github.com/glender222/whatsap-automat.git
+git clone --branch v0.4.0 https://github.com/glender222/whatsap-automat.git
 cd whatsap-automat
+
 npm --prefix packages/contracts ci
 npm --prefix packages/contracts run build
+PUPPETEER_SKIP_DOWNLOAD=true npm --prefix WhatsaapWeb-JS ci
+npm --prefix Frontend_py_whatsaapweb ci
 ```
 
-### 2. Configurar Frontend
+Para trabajar sobre el desarrollo actual, usa `--branch main` al clonar.
+
+### 2. Configura y migra
+
+Crea una base de desarrollo aislada y copia los ejemplos de entorno:
+
 ```bash
-cd Frontend_py_whatsaapweb
-cp .env.example .env
-npm ci
-npm run dev
+cp -n WhatsaapWeb-JS/.env.example WhatsaapWeb-JS/.env
+cp -n Frontend_py_whatsaapweb/.env.example Frontend_py_whatsaapweb/.env
 ```
-La aplicación web estará disponible en `http://localhost:5173`.
 
-### 3. Configurar Backend
+En el backend, rellena `DB_*` y genera claves independientes de al menos 32 caracteres para `JWT_SECRET` y `MASTER_ENCRYPTION_KEY`. El proveedor predeterminado, WhatsApp Cloud, requiere configurar `META_*` para arrancar: usa una cuenta de prueba. Configura también una clave independiente en `META_TOKEN_ENCRYPTION_KEY` cuando corresponda al entorno de despliegue. En la web, usa `VITE_API_URL=http://localhost:3000/api` con los puertos predeterminados.
+
 ```bash
-cd ../WhatsaapWeb-JS
-cp .env.example .env
-# Edita .env con las credenciales de tu base de datos local y puertos
-PUPPETEER_SKIP_DOWNLOAD=true npm ci
-npm run db:migrate
-npm run typecheck
-npm run build
-npm run dev
+npm --prefix WhatsaapWeb-JS run db:migrate
+npm --prefix WhatsaapWeb-JS run db:status
 ```
-La API estará disponible en `http://localhost:3000`.
 
----
+Comprueba que todas las migraciones figuren como aplicadas. La [guía de inicio](docs-site/content/guia-inicio.md) amplía la configuración y el envío de adjuntos.
 
-## 6. Verificación y Suite de Pruebas
+### 3. Arranca y comprueba
 
-Para garantizar la reproducibilidad y estabilidad del baseline, ejecuta las pruebas locales:
+Ejecuta cada proceso en su propia terminal:
 
-### Backend:
 ```bash
-cd WhatsaapWeb-JS
+# Terminal 1: API
+npm --prefix WhatsaapWeb-JS run dev
 
-# Validación de tipos estáticos
-npm run typecheck
-npm run typecheck:scripts
+# Terminal 2: web
+npm --prefix Frontend_py_whatsaapweb run dev
 
-# Compilación TypeScript
-npm run build
-
-# Ejecución de suite de pruebas P0 y regresión
-npm test
+# Comprobación de disponibilidad
+curl --fail --silent --show-error http://localhost:3000/ready
 ```
 
-### Frontend:
+Abre la web en `http://localhost:5173` y el visor de API en `http://localhost:3000/api/v1/docs`.
+
+## Desarrollo y verificación
+
+| Directorio | Contenido |
+| --- | --- |
+| [Frontend_py_whatsaapweb/](Frontend_py_whatsaapweb/) | Espacio de trabajo web en React, Vite y TypeScript |
+| [WhatsaapWeb-JS/](WhatsaapWeb-JS/) | API, canales, runtime de agentes y persistencia |
+| [apps/mobile/](apps/mobile/) | Cliente Expo y React Native |
+| [packages/](packages/) | Contratos, SDK y CLI |
+| [docs-site/](docs-site/) | Presentación web, documentación y descargas |
+
+Desde la raíz, tras instalar dependencias, ejecuta las comprobaciones básicas:
+
 ```bash
-cd Frontend_py_whatsaapweb
-
-# Compilación y empaquetado de producción
-npm run build
-
-# Análisis de calidad y linter
-npm run lint
+npm --prefix packages/contracts test
+npm --prefix WhatsaapWeb-JS run typecheck
+npm --prefix WhatsaapWeb-JS run typecheck:scripts
+npm --prefix WhatsaapWeb-JS test
+npm --prefix Frontend_py_whatsaapweb run build
+npm --prefix Frontend_py_whatsaapweb test
 ```
 
----
+Las suites de integración requieren sus servicios y variables de entorno. Consulta los [criterios de QA](docs/qa/QA_GATES_AND_CASES.md) y los [resultados de CI del commit elegido](https://github.com/glender222/whatsap-automat/actions/workflows/ci.yml); la evidencia de proveedores y dispositivos se verifica por separado.
 
-## 7. Documentación de Referencia
+## Documentación y colaboración
 
-Para comprender a fondo el diseño técnico, consulta los documentos de especificación:
+[Blueprint v0.4](docs/architecture/BLUEPRINT_v0.4.md) · [Roadmap v1.0](docs/architecture/ROADMAP_V1.0.md) · [API y compatibilidad](docs/api/README.md) · [Temporal](deploy/temporal/README.md) · [Compilar el portal](docs-site/README.md)
 
-- [Blueprint Arquitectónico v0.4](docs/architecture/BLUEPRINT_v0.4.md)
-- [Plan de PRs y Roadmap](docs/roadmap/PR_ROADMAP.md)
-- [Criterios de QA y Casos de Aceptación](docs/qa/QA_GATES_AND_CASES.md)
-- [Guía de Orquestación y Sesiones Paralelas](docs/orchestration/README.md)
+Para contribuir, sigue [CONTRIBUTING.md](CONTRIBUTING.md) y el [código de conducta](CODE_OF_CONDUCT.md). Reporta vulnerabilidades por el canal privado descrito en [SECURITY.md](SECURITY.md).
 
----
+El [SBOM CycloneDX](sbom.json) inventaría las dependencias npm de los seis lockfiles. Regénéralo con `bash scripts/sbom-generate.sh` y compruébalo con `node --test scripts/sbom-generate.test.cjs`; los artefactos compilados y las dependencias del sistema se auditan por separado.
 
-## 8. Contribuciones y Seguridad
-
-- Consulta [CONTRIBUTING.md](CONTRIBUTING.md) para conocer las normas de contribución, convenciones de commit y uso de worktrees.
-- Consulta [SECURITY.md](SECURITY.md) para conocer nuestra política de seguridad y cómo reportar vulnerabilidades de forma privada.
-
-El [SBOM CycloneDX](sbom.json) inventaría las dependencias npm fijadas en los seis lockfiles de web, backend, móvil, contratos, SDK y CLI. Los componentes y sus dependencias conservan la ubicación en cada proyecto. El campo `scope` distingue dependencias de desarrollo (`excluded`), opcionales (`optional`) y de runtime (`required`). Las propiedades conservan los casos mixtos de npm, las restricciones de plataforma y los enlaces locales. Las licencias reflejan los metadatos disponibles en el lockfile.
-
-Regenera el archivo con `bash scripts/sbom-generate.sh` y verifica el resultado con `node --test scripts/sbom-generate.test.cjs`. La prueba genera dos copias idénticas sin instalar dependencias y las compara con el archivo versionado. Este inventario describe el código y sus lockfiles npm. Los artefactos compilados y las dependencias del sistema operativo se auditan por separado.
-- Consulta [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) para las pautas de convivencia comunitaria.
-
----
-
-## 9. Licencia
-
-Este proyecto está licenciado bajo los términos de la **Licencia MIT**. Consulta el archivo [LICENSE](LICENSE) para más detalles.
+Código bajo [licencia MIT](LICENSE). Consulta la [release v0.4.0 y sus artefactos de QA](https://github.com/glender222/whatsap-automat/releases/tag/v0.4.0) para evaluar una versión identificable.

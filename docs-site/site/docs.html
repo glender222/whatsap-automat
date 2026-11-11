@@ -1,0 +1,597 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Guía de instalación, arquitectura, API y descargas para Whatsap-Automat."
+    />
+    <meta name="color-scheme" content="dark" />
+    <title>Documentación · Whatsap-Automat</title>
+    <link rel="icon" href="mark.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="docs.css" />
+    <script src="copy.js" defer></script>
+  </head>
+  <body>
+    <a class="skip" href="#contenido">Saltar al contenido</a>
+    <svg class="symbols" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+      <symbol id="i-arrow" viewBox="0 0 24 24">
+        <path d="M5 12h14m-6-6 6 6-6 6" />
+      </symbol>
+      <symbol id="i-out" viewBox="0 0 24 24">
+        <path
+          d="M13 5h6v6m0-6-9 9m7-1v5a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1h5"
+        />
+      </symbol>
+      <symbol id="i-download" viewBox="0 0 24 24">
+        <path d="M12 3v12m-4-4 4 4 4-4M5 16v4h14v-4" />
+      </symbol>
+      <symbol id="i-terminal" viewBox="0 0 24 24">
+        <path d="m5 6 5 6-5 6m8 0h6" />
+      </symbol>
+      <symbol id="i-copy" viewBox="0 0 24 24">
+        <rect x="8" y="8" width="11" height="12" rx="2" />
+        <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
+      </symbol>
+      <symbol id="i-file" viewBox="0 0 24 24">
+        <path
+          d="M7 3h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm7 0v5h5M9 12h6m-6 4h6"
+        />
+      </symbol>
+      <symbol id="i-grid" viewBox="0 0 24 24">
+        <rect x="4" y="4" width="6" height="6" rx="1" />
+        <rect x="14" y="4" width="6" height="6" rx="1" />
+        <rect x="4" y="14" width="6" height="6" rx="1" />
+        <rect x="14" y="14" width="6" height="6" rx="1" />
+      </symbol>
+      <symbol id="i-check" viewBox="0 0 24 24">
+        <path d="m5 12 4 4 10-10" />
+      </symbol>
+    </svg>
+
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a href="index.html" class="brand"
+          ><img src="mark.svg" width="34" height="34" alt="" /><span
+            >Whatsap-Automat</span
+          ></a
+        >
+        <span class="topbar-label">Documentación</span>
+        <a
+          class="topbar-link"
+          href="https://github.com/glender222/whatsap-automat"
+          >Repositorio <svg aria-hidden="true"><use href="#i-out" /></svg
+        ></a>
+      </div>
+    </header>
+
+    <div class="layout">
+      <nav class="rail" aria-label="Contenido de la guía">
+        <p class="eyebrow rail-title">En esta guía</p>
+        <a href="#inicio"
+          ><svg aria-hidden="true"><use href="#i-grid" /></svg> Resumen</a
+        >
+        <a href="#descargas"
+          ><svg aria-hidden="true"><use href="#i-download" /></svg> Descargas</a
+        >
+        <a href="#instalacion"
+          ><svg aria-hidden="true"><use href="#i-terminal" /></svg> Instalación
+          local</a
+        >
+        <a href="#arquitectura"
+          ><svg aria-hidden="true"><use href="#i-grid" /></svg> Arquitectura</a
+        >
+        <a href="#api"
+          ><svg aria-hidden="true"><use href="#i-file" /></svg> API y SDK</a
+        >
+        <a href="#validacion"
+          ><svg aria-hidden="true"><use href="#i-check" /></svg> Validación</a
+        >
+        <div class="rail-meta">
+          <span class="status-dot" aria-hidden="true"></span> Documentación v0.4
+        </div>
+      </nav>
+
+      <main id="contenido" tabindex="-1">
+        <section class="hero" id="inicio" aria-labelledby="hero-title">
+          <div class="hero-copy">
+            <p class="eyebrow">Guía de producto y desarrollo</p>
+            <h1 id="hero-title">Primeros pasos con Whatsap-Automat</h1>
+            <p>
+              Configura tu entorno, consulta la API y prepara tu operación de
+              WhatsApp con automatizaciones y control humano.
+            </p>
+            <div class="hero-actions">
+              <a class="button primary" href="#descargas"
+                >Ver descargas
+                <svg aria-hidden="true"><use href="#i-download" /></svg
+              ></a>
+              <a class="button secondary" href="#instalacion"
+                >Instalación local
+                <svg aria-hidden="true"><use href="#i-arrow" /></svg
+              ></a>
+            </div>
+          </div>
+          <div class="hero-map" aria-hidden="true">
+            <div class="map-title">
+              <span class="status-dot"></span> FLUJO DE OPERACIÓN
+            </div>
+            <div class="map-row">
+              <span class="map-number">01</span><span>Canal de mensajería</span>
+            </div>
+            <div class="map-row">
+              <span class="map-number">02</span><span>Bandeja de entrada</span>
+            </div>
+            <div class="map-row">
+              <span class="map-number">03</span
+              ><span>Automatización o atención humana</span>
+            </div>
+            <div class="map-footer">
+              Persistencia <span></span> Auditoría <span></span> Control de
+              acceso
+            </div>
+          </div>
+        </section>
+
+        <section
+          class="section"
+          id="descargas"
+          aria-labelledby="downloads-title"
+        >
+          <p class="eyebrow">
+            <span class="section-index">01</span> Archivos y versiones
+          </p>
+          <h2 id="downloads-title">Descargas</h2>
+          <p class="section-intro">
+            Obtén la guía y el contrato de API para consultarlos sin conexión.
+            GitHub gestiona el acceso al código fuente y a las versiones que se
+            publiquen.
+          </p>
+          <p class="fine">
+            La primera entrega
+            <a
+              href="https://github.com/glender222/whatsap-automat/releases/tag/v0.4.0"
+              >v0.4.0</a
+            >
+            es una release preliminar de QA. El código de desarrollo y esta web
+            se mantienen en <code>main</code>.
+          </p>
+          <div class="downloads">
+            <a
+              class="download featured"
+              href="downloads/whatsap-automat-docs.zip"
+              download
+            >
+              <span class="file-icon"
+                ><svg aria-hidden="true"><use href="#i-download" /></svg
+              ></span>
+              <span
+                ><strong>Paquete de documentación</strong
+                ><small>Guía, licencia y OpenAPI en JSON y YAML</small></span
+              >
+              <span class="file-type">ZIP</span>
+            </a>
+            <!-- developer-kit:start -->
+            <a
+              class="download"
+              href="downloads/whatsap-automat-developer-kit.zip"
+              download
+            >
+              <span class="file-icon"
+                ><svg aria-hidden="true"><use href="#i-download" /></svg
+              ></span>
+              <span
+                ><strong>Kit de desarrollo</strong
+                ><small
+                  >SDK de TypeScript y Python, CLI y sumas SHA-256</small
+                ></span
+              >
+              <span class="file-type">ZIP</span>
+            </a>
+            <!-- developer-kit:end -->
+            <a class="download" href="downloads/guia-inicio.md" download>
+              <span class="file-icon"
+                ><svg aria-hidden="true"><use href="#i-file" /></svg
+              ></span>
+              <span
+                ><strong>Guía de inicio</strong
+                ><small>Requisitos, preparación y comprobaciones</small></span
+              >
+              <span class="file-type">MD</span>
+            </a>
+            <a class="download" href="downloads/openapi.v1.json" download>
+              <span class="file-icon"
+                ><svg aria-hidden="true"><use href="#i-file" /></svg
+              ></span>
+              <span
+                ><strong>Contrato OpenAPI</strong
+                ><small
+                  >Especificación 3.1 para clientes y herramientas</small
+                ></span
+              >
+              <span class="file-type">JSON</span>
+            </a>
+            <a class="download" href="downloads/openapi.v1.yaml" download>
+              <span class="file-icon"
+                ><svg aria-hidden="true"><use href="#i-file" /></svg
+              ></span>
+              <span
+                ><strong>Contrato OpenAPI</strong
+                ><small>La misma especificación en formato YAML</small></span
+              >
+              <span class="file-type">YAML</span>
+            </a>
+          </div>
+          <div class="link-group">
+            <a
+              href="https://github.com/glender222/whatsap-automat/archive/refs/tags/v0.4.0.zip"
+              >Código fuente v0.4.0
+              <svg aria-hidden="true"><use href="#i-out" /></svg
+            ></a>
+            <a href="https://github.com/glender222/whatsap-automat/releases"
+              >Consultar versiones en GitHub
+              <svg aria-hidden="true"><use href="#i-out" /></svg
+            ></a>
+          </div>
+          <p class="fine">
+            El código y los artefactos de la release requieren acceso al
+            repositorio. v0.4.0 incluye un APK Android ARM64 de QA: compilación
+            y verificaciones estáticas completadas; ejecución en dispositivo
+            pendiente.
+          </p>
+        </section>
+
+        <section class="section" id="instalacion" aria-labelledby="setup-title">
+          <p class="eyebrow">
+            <span class="section-index">02</span> Entorno de desarrollo
+          </p>
+          <h2 id="setup-title">Instalación local</h2>
+          <p class="section-intro">
+            Usa Git, Node.js 22, npm y PostgreSQL 16 para preparar web y
+            backend. Instala FFmpeg y ffprobe para enviar videos por WhatsApp
+            Cloud. Docker con Compose es opcional para la demo de Temporal. Para
+            el SDK de Python necesitas Python 3.10 o posterior.
+          </p>
+          <ol class="steps" role="list">
+            <li>
+              <span class="step-number" aria-hidden="true">01</span>
+              <h3 id="clone-title">Clona la versión de QA</h3>
+              <p>
+                Inicia sesión en GitHub con una cuenta que tenga acceso al
+                repositorio.
+              </p>
+              <div class="code-block">
+                <div class="code-header">
+                  <span>Terminal</span
+                  ><button
+                    type="button"
+                    data-copy="clone-command"
+                    aria-describedby="clone-title"
+                    hidden
+                  >
+                    <svg aria-hidden="true"><use href="#i-copy" /></svg
+                    ><span>Copiar</span>
+                  </button>
+                </div>
+                <pre><code id="clone-command">git clone --branch v0.4.0 https://github.com/glender222/whatsap-automat.git
+cd whatsap-automat</code></pre>
+              </div>
+            </li>
+            <li>
+              <span class="step-number" aria-hidden="true">02</span>
+              <h3 id="install-title">
+                Compila los contratos e instala las aplicaciones
+              </h3>
+              <p>
+                El backend importa el paquete de contratos local. Compílalo
+                antes de verificar el backend.
+              </p>
+              <div class="code-block">
+                <div class="code-header">
+                  <span>Desde la raíz</span
+                  ><button
+                    type="button"
+                    data-copy="install-command"
+                    aria-describedby="install-title"
+                    hidden
+                  >
+                    <svg aria-hidden="true"><use href="#i-copy" /></svg
+                    ><span>Copiar</span>
+                  </button>
+                </div>
+                <pre><code id="install-command">npm --prefix packages/contracts ci
+npm --prefix packages/contracts run build
+PUPPETEER_SKIP_DOWNLOAD=true npm --prefix WhatsaapWeb-JS ci
+npm --prefix Frontend_py_whatsaapweb ci</code></pre>
+              </div>
+            </li>
+            <li>
+              <span class="step-number" aria-hidden="true">03</span>
+              <h3 id="env-title">
+                Configura PostgreSQL y los archivos de entorno
+              </h3>
+              <p>
+                Copia los ejemplos a <code>.env</code> en cada aplicación. Usa
+                una base aislada, rellena <code>DB_*</code> y genera claves
+                independientes de al menos 32 caracteres para
+                <code>JWT_SECRET</code> y <code>MASTER_ENCRYPTION_KEY</code>.
+                WhatsApp Cloud requiere sus valores <code>META_*</code> para
+                arrancar. Usa una cuenta de prueba y configura una clave
+                independiente en <code>META_TOKEN_ENCRYPTION_KEY</code> para
+                producción. En la web, apunta <code>VITE_API_URL</code> al
+                backend local.
+              </p>
+              <div class="code-block">
+                <div class="code-header">
+                  <span>Desde la raíz</span
+                  ><button
+                    type="button"
+                    data-copy="env-command"
+                    aria-describedby="env-title"
+                    hidden
+                  >
+                    <svg aria-hidden="true"><use href="#i-copy" /></svg
+                    ><span>Copiar</span>
+                  </button>
+                </div>
+                <pre><code id="env-command">cp -n WhatsaapWeb-JS/.env.example WhatsaapWeb-JS/.env
+cp -n Frontend_py_whatsaapweb/.env.example Frontend_py_whatsaapweb/.env
+
+# Tras configurar PostgreSQL y el .env del backend:
+npm --prefix WhatsaapWeb-JS run db:migrate
+npm --prefix WhatsaapWeb-JS run db:status</code></pre>
+              </div>
+              <p class="fine">
+                Comprueba que todas las migraciones figuren como aplicadas. El
+                comando devuelve un código de error si falla la conexión o una
+                migración.
+              </p>
+            </li>
+            <li>
+              <span class="step-number" aria-hidden="true">04</span>
+              <h3 id="start-title">Arranca la API y la web</h3>
+              <p>
+                Ejecuta cada comando <code>dev</code> en su propia terminal. Con
+                los puertos por defecto, abre la web en
+                <code>http://localhost:5173</code> y confirma que la API esté
+                lista en <code>http://localhost:3000/ready</code>.
+              </p>
+              <div class="code-block">
+                <div class="code-header">
+                  <span>Desde la raíz</span
+                  ><button
+                    type="button"
+                    data-copy="start-command"
+                    aria-describedby="start-title"
+                    hidden
+                  >
+                    <svg aria-hidden="true"><use href="#i-copy" /></svg
+                    ><span>Copiar</span>
+                  </button>
+                </div>
+                <pre><code id="start-command"># Terminal 1
+npm --prefix WhatsaapWeb-JS run dev
+
+# Terminal 2
+npm --prefix Frontend_py_whatsaapweb run dev
+
+# Comprobación
+curl --fail --silent --show-error http://localhost:3000/ready</code></pre>
+              </div>
+              <p class="fine">
+                Para revisar la demo de Temporal por separado, sigue la
+                <a
+                  href="https://github.com/glender222/whatsap-automat/blob/v0.4.0/deploy/temporal/README.md"
+                  >guía de Temporal del repositorio</a
+                >.
+              </p>
+            </li>
+          </ol>
+        </section>
+
+        <section
+          class="section"
+          id="arquitectura"
+          aria-labelledby="architecture-title"
+        >
+          <p class="eyebrow">
+            <span class="section-index">03</span> Piezas del sistema
+          </p>
+          <h2 id="architecture-title">Arquitectura</h2>
+          <p class="section-intro">
+            La web y la app móvil consumen la API. PostgreSQL mantiene el estado
+            operativo y Temporal se usa en flujos que deben recuperarse tras un
+            fallo.
+          </p>
+          <dl class="architecture">
+            <div>
+              <dt>Web y móvil</dt>
+              <dd>
+                React y Vite para el espacio de trabajo. Expo y React Native
+                para el cliente móvil.
+              </dd>
+              <dd class="path">Frontend_py_whatsaapweb/ · apps/mobile/</dd>
+            </div>
+            <div>
+              <dt>API y canales</dt>
+              <dd>
+                Express y Socket.IO. Los adaptadores traducen eventos de cada
+                proveedor al contrato compartido.
+              </dd>
+              <dd class="path">WhatsaapWeb-JS/ · packages/contracts/</dd>
+            </div>
+            <div>
+              <dt>Flujos y agentes</dt>
+              <dd>
+                La outbox transaccional conserva eventos pendientes. El runtime
+                aplica límites de ejecución y solicita aprobación para acciones
+                de riesgo.
+              </dd>
+              <dd class="path">WhatsaapWeb-JS/ · deploy/temporal/</dd>
+            </div>
+            <div>
+              <dt>Datos y permisos</dt>
+              <dd>
+                El JWT identifica la sesión y PostgreSQL aplica políticas por
+                empresa en las tablas protegidas.
+              </dd>
+              <dd class="path">WhatsaapWeb-JS/src/db/</dd>
+            </div>
+          </dl>
+          <div class="link-group">
+            <a
+              href="https://github.com/glender222/whatsap-automat/blob/v0.4.0/docs/architecture/BLUEPRINT_v0.4.md"
+              >Blueprint v0.4 <svg aria-hidden="true"><use href="#i-out" /></svg
+            ></a>
+            <a
+              href="https://github.com/glender222/whatsap-automat/blob/v0.4.0/docs/architecture/ROADMAP_V1.0.md"
+              >Roadmap v1.0 <svg aria-hidden="true"><use href="#i-out" /></svg
+            ></a>
+          </div>
+        </section>
+
+        <section class="section" id="api" aria-labelledby="api-title">
+          <p class="eyebrow">
+            <span class="section-index">04</span> Integraciones
+          </p>
+          <h2 id="api-title">API y SDK</h2>
+          <p class="section-intro">
+            Importa OpenAPI en tu cliente HTTP o generador de código. Con la API
+            local activa, puedes abrir el visor en
+            <code>http://localhost:3000/api/v1/docs</code>.
+          </p>
+          <dl class="api-list">
+            <div>
+              <dt>Autenticación</dt>
+              <dd>
+                Envía un JWT válido con <code>Authorization: Bearer …</code> en
+                rutas privadas.
+              </dd>
+            </div>
+            <div>
+              <dt>Reintentos</dt>
+              <dd>
+                Los SDK reintentan lecturas y operaciones con clave de
+                idempotencia. Reutiliza el mismo
+                <code>Idempotency-Key</code> para repetir una operación
+                compatible.
+              </dd>
+            </div>
+            <div>
+              <dt>Conflictos</dt>
+              <dd>
+                Si una mutación con <code>expectedVersion</code> devuelve
+                <code>409</code>, recarga el recurso antes de decidir si procede
+                otro intento.
+              </dd>
+            </div>
+            <div>
+              <dt>Adjuntos</dt>
+              <dd>
+                Consulta los IDs de mensaje y archivo en el historial para
+                descargarlos con tu sesión. El envío multipart requiere una
+                clave de idempotencia y la versión vigente de la conversación.
+              </dd>
+            </div>
+          </dl>
+          <div class="link-group">
+            <a
+              href="https://github.com/glender222/whatsap-automat/tree/v0.4.0/docs/api"
+              >Referencia y compatibilidad
+              <svg aria-hidden="true"><use href="#i-out" /></svg
+            ></a>
+            <a
+              href="https://github.com/glender222/whatsap-automat/tree/v0.4.0/packages/sdk"
+              >SDK TypeScript <svg aria-hidden="true"><use href="#i-out" /></svg
+            ></a>
+            <a
+              href="https://github.com/glender222/whatsap-automat/tree/v0.4.0/packages/python-sdk"
+              >SDK Python <svg aria-hidden="true"><use href="#i-out" /></svg
+            ></a>
+          </div>
+        </section>
+
+        <section class="section" id="validacion" aria-labelledby="checks-title">
+          <p class="eyebrow">
+            <span class="section-index">05</span> Verificación
+          </p>
+          <h2 id="checks-title">Pruebas y estado de entrega</h2>
+          <p class="section-intro">
+            Comprueba la ejecución de CI del commit que vas a usar. Para
+            integrar cambios, la guía de QA exige evidencias por módulo,
+            aislamiento entre empresas y validación de los flujos críticos.
+          </p>
+          <div class="code-block">
+            <div class="code-header">
+              <span>Desde la raíz, tras instalar dependencias</span
+              ><button
+                type="button"
+                data-copy="checks-command"
+                aria-describedby="checks-title"
+                hidden
+              >
+                <svg aria-hidden="true"><use href="#i-copy" /></svg
+                ><span>Copiar</span>
+              </button>
+            </div>
+            <pre><code id="checks-command">npm --prefix packages/contracts test
+npm --prefix WhatsaapWeb-JS run typecheck
+npm --prefix WhatsaapWeb-JS run typecheck:scripts
+npm --prefix WhatsaapWeb-JS test
+npm --prefix Frontend_py_whatsaapweb run build
+npm --prefix Frontend_py_whatsaapweb test</code></pre>
+          </div>
+          <h3 id="alcance-pagos">Alcance de Mercado Pago</h3>
+          <p>
+            La conciliación interna es administrativa y está deshabilitada por
+            defecto. Requiere configurar credenciales por empresa y habilitar
+            <code>MERCADOPAGO_RECONCILIATION_ENABLED</code>. Registra pagos
+            pendientes, parciales, liquidados y devueltos; un pago parcial no
+            confirma el pedido.
+          </p>
+          <p>
+            El piloto con una cuenta peruana autorizada sigue pendiente. El
+            checkout público y la recepción de webhooks están pendientes de
+            implementación y validación.
+          </p>
+          <h3>Proveedores y móvil</h3>
+          <p>
+            Las pruebas con proveedores locales no sustituyen la validación de
+            Meta con dos líneas autorizadas ni el piloto real de IA. El APK
+            ARM64 es un candidato de QA y requiere pruebas en dispositivo antes
+            de distribuirse para producción.
+          </p>
+          <p class="fine">
+            Las pruebas locales cubren los casos documentados de cada suite.
+            Comprueba por separado la conexión con proveedores, la migración en
+            una base limpia y la instalación en dispositivos.
+          </p>
+          <div class="link-group">
+            <a
+              href="https://github.com/glender222/whatsap-automat/actions/workflows/ci.yml"
+              >Resultados de CI
+              <svg aria-hidden="true"><use href="#i-out" /></svg
+            ></a>
+            <a
+              href="https://github.com/glender222/whatsap-automat/blob/v0.4.0/docs/qa/QA_GATES_AND_CASES.md"
+              >Criterios de QA
+              <svg aria-hidden="true"><use href="#i-out" /></svg
+            ></a>
+            <a
+              href="https://github.com/glender222/whatsap-automat/blob/v0.4.0/SECURITY.md"
+              >Política de seguridad
+              <svg aria-hidden="true"><use href="#i-out" /></svg
+            ></a>
+          </div>
+        </section>
+
+        <footer class="footer">
+          <span>Whatsap-Automat · Documentación v0.4</span
+          ><a href="downloads/LICENSE.txt" download>Licencia MIT</a
+          ><a href="#inicio">Volver arriba ↑</a>
+        </footer>
+      </main>
+    </div>
+  </body>
+</html>
