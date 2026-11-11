@@ -1,6 +1,6 @@
 # Perfil estricto de router y catálogo
 
-Estado del corte: compilación, ejecución durable y [evaluaciones de Studio](CATALOG_STUDIO_EVALUATIONS.md), 2026-11-11. La evaluación usa el proveedor acotado y evidencia propia; la [publicación versionada de 066](CATALOG_STUDIO_PUBLICATIONS.md) verifica esa evidencia, y el [corte067](CATALOG_WHATSAPP_RUNTIME.md) añade binding explícito y el worker canónico de WhatsApp. La migración 064 y su contrato de recuperación se describen en [checkpoints del perfil](STRICT_CATALOG_ROUTER_CHECKPOINTS.md); la 065 discrimina los perfiles de evaluación. La 063 pertenece a la invalidación por versión canónica de conversación en el runtime de texto y no se modifica aquí.
+Estado del corte: compilación, ejecución durable y [evaluaciones de Studio](CATALOG_STUDIO_EVALUATIONS.md), 2026-11-11. La evaluación usa el proveedor acotado y evidencia propia; la [publicación versionada de 066](CATALOG_STUDIO_PUBLICATIONS.md) verifica esa evidencia, y el [corte 067](CATALOG_WHATSAPP_RUNTIME.md) añade binding explícito y el worker canónico de WhatsApp. La migración 064 y su contrato de recuperación se describen en [checkpoints del perfil](STRICT_CATALOG_ROUTER_CHECKPOINTS.md); la 065 discrimina los perfiles de evaluación. La 063 pertenece a la invalidación por versión canónica de conversación en el runtime de texto y no se modifica aquí.
 
 ## Problema reproducido
 

@@ -54,14 +54,15 @@ async function main() {
   server.unref();
 
   const { App } = await import('../../app');
+  const fetchNetwork = globalThis.fetch;
+  globalThis.fetch = (url, options) => {
+    if (url !== 'https://api.openai.com/v1/chat/completions') return fetchNetwork(url, options);
+    assert.equal(providerMode, true, 'Strict provider execution requires the isolated provider browser fixture');
+    assert.equal(new Headers(options?.headers).get('authorization'), fixtureAuthorization);
+    assert.equal(options?.redirect, 'error');
+    return fetchNetwork(provider.origin + '/v1/chat/completions', options);
+  };
   if (providerMode) {
-    const fetchNetwork = globalThis.fetch;
-    globalThis.fetch = (url, options) => {
-      if (url !== 'https://api.openai.com/v1/chat/completions') return fetchNetwork(url, options);
-      assert.equal(new Headers(options?.headers).get('authorization'), fixtureAuthorization);
-      assert.equal(options?.redirect, 'error');
-      return fetchNetwork(provider.origin + '/v1/chat/completions', options);
-    };
     await new App().start();
     return;
   }

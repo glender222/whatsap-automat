@@ -5,7 +5,7 @@ import { provisionCompanies, type Company } from './fixtures/provisionCompanies'
 const backend = process.env.PRODUCT_SMOKE_URL;
 
 if (process.env.STUDIO_PROVIDER_FIXTURE === '1') {
-  test('provider mode publishes and links catalog revisions for each company', async ({ browser, request }) => {
+  test('provider mode publishes and links catalog revisions for each company', async ({ browser, request }, testInfo) => {
     test.setTimeout(90_000);
     test.skip(!backend || !process.env.STUDIO_FIXTURE_URL || !process.env.PRODUCT_GRAPH_FIXTURE_URL,
       'Requires the local provider, Graph and isolated PostgreSQL');
@@ -110,6 +110,10 @@ if (process.env.STUDIO_PROVIDER_FIXTURE === '1') {
         await bind.press('Enter');
         await expect(binding.getByRole('status').filter({ hasText: `${company.catalogGraphId} · 1 · Sugerencias · Catálogo` })).toBeVisible();
         await expect(panel.getByRole('button', { name: 'Ejecutar revisión publicada' })).toHaveCount(0);
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+        if (index === 0) await testInfo.attach('Catálogo publicado y vinculado en móvil', {
+          body: await page.screenshot({ fullPage: true }), contentType: 'image/png',
+        });
         await page.reload();
         await expect(panel.getByText('Revisión activa para proveedor · 1 · Catálogo', { exact: true })).toBeVisible();
         await panel.getByRole('button', { name: 'Consultar evaluación guardada' }).press('Enter');
@@ -175,6 +179,10 @@ if (process.env.STUDIO_PROVIDER_FIXTURE === '1') {
         expect(await graphAttempts(companies[index])).toEqual([]);
       }
 
+      expect(await inboxes[0].evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      await testInfo.attach('Sugerencia del catálogo en Bandeja móvil', {
+        body: await inboxes[0].screenshot({ fullPage: true }), contentType: 'image/png',
+      });
       await inboxes[0].reload();
       await expect(inboxes[0].getByText(expected[0], { exact: true })).toBeVisible();
       const pause = inboxes[0].getByRole('button', { name: 'Pausar IA', exact: true });

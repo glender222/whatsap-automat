@@ -1,6 +1,6 @@
 # Recuperación durable del perfil de catálogo
 
-Estado: ejecución durable, 2026-11-11. `CatalogRouterCheckpointRuntime` ejecuta router, hasta una lectura existente de catálogo y respuesta final. Sus resultados internos conservan `publicationEvidence:false` y `deliveryAllowed:false`: el checkpoint no concede entrega. La065 incorporó [evaluaciones de Studio](CATALOG_STUDIO_EVALUATIONS.md); la066 añadió [publicación versionada](CATALOG_STUDIO_PUBLICATIONS.md); el [corte067](CATALOG_WHATSAPP_RUNTIME.md) reutiliza los checkpoints bajo la admisión canónica de WhatsApp. No hay ejecución manual ni respuesta de texto directa por HTTP. `linear-text-v1` mantiene su contrato.
+Estado: ejecución durable, 2026-11-11. `CatalogRouterCheckpointRuntime` ejecuta router, hasta una lectura existente de catálogo y respuesta final. Sus resultados internos conservan `publicationEvidence:false` y `deliveryAllowed:false`: el checkpoint no concede entrega. La065 incorporó [evaluaciones de Studio](CATALOG_STUDIO_EVALUATIONS.md); la066 añadió [publicación versionada](CATALOG_STUDIO_PUBLICATIONS.md); el [corte 067](CATALOG_WHATSAPP_RUNTIME.md) reutiliza los checkpoints bajo la admisión canónica de WhatsApp. No hay ejecución manual ni respuesta de texto directa por HTTP. `linear-text-v1` mantiene su contrato.
 
 ## Fallo reproducido
 

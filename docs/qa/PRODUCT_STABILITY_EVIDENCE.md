@@ -2,7 +2,7 @@
 
 Este registro separa los recorridos verificados y los pendientes. Para cerrar un defecto se registra la reproducción, el cambio y el resultado de la regresión. Cuando el recorrido cruza empresas, la evidencia identifica los roles y la separación comprobada.
 
-El job `product-smoke` ejecuta la prueba de sesión Socket.IO y tres pasos de Chromium con bases aisladas y proveedores locales. Los pasos de navegador fallan si omiten algún recorrido y conservan informes y trazas ante fallos. En `62f5b58` pasaron localmente 37 recorridos generales, el recorrido de Studio y WhatsApp con política de proveedor y cuatro recorridos de Mercado Pago. La prueba de sesión Socket.IO tiene nueve casos. [Workflow de CI](../../.github/workflows/ci.yml).
+El job `product-smoke` ejecuta la prueba de sesión Socket.IO y tres pasos de Chromium con bases aisladas y proveedores locales. Los pasos de navegador fallan si omiten algún recorrido y conservan informes y trazas ante fallos. La línea base `eb0424b` tiene los 11 trabajos de CI aprobados. El candidato 067 compone el catálogo publicado con WhatsApp y conserva los recorridos generales y de Mercado Pago. La prueba de sesión Socket.IO tiene nueve casos. [Workflow de CI](../../.github/workflows/ci.yml).
 
 ## UX-01. El tema cambia al navegar
 
@@ -169,6 +169,13 @@ Chromium amplía el recorrido de Studio en modo proveedor con la aplicación y P
 
 La bandeja de Alfa muestra un mensaje entrante y una respuesta automática. Graph registra un solo envío, por la línea de Alfa, y ninguno por la de Bravo. La aceptación del proveedor aparece como «Aceptado por WhatsApp». Un recibo de lectura presentado por Bravo no altera ese estado. Los recibos propios cambian la respuesta a «Enviado» y «Leído». Un recibo «Entregado» posterior y una recarga conservan «Leído» y la misma respuesta única. La bandeja de Bravo muestra su propio mensaje. [Prueba de Studio y WhatsApp](../../Frontend_py_whatsaapweb/e2e/agent-studio.integration.spec.ts).
 
+## UX-14. Vincular un catálogo y recuperar su estado desde Studio y Bandeja
+
+- **Recorrido.** En móvil y con teclado, Alfa y Bravo evalúan, publican y vinculan su propio catálogo. Ambas empresas reciben el mismo contacto e ID externo. Bandeja muestra la sugerencia identificada por perfil y revisión, con el producto de la empresa correspondiente.
+- **Recuperación.** Recargar conserva la sugerencia autorizada. Pausar y reanudar la conversación descarta la anterior. Cambiar a modo automático conserva un único envío ante el webhook duplicado y recibe la marca de lectura desde Graph local.
+- **Administración.** Studio permite consultar y desvincular el pin histórico cuando el perfil deja de admitir nuevas vinculaciones. La prueba combina el binding guardado en PostgreSQL con respuestas de disponibilidad controladas, verifica el DELETE real con CAS y devuelve el foco al título.
+- **Evidencia.** El recorrido usa dos sesiones de Chromium a 390 px, App, PostgreSQL, Socket.IO y transportes locales de modelo y Graph. Las pruebas conservan capturas de Studio y Bandeja y comprueban el ancho de la página.
+
 ## IA-01. Evaluación de ejecución por revisión y empresa
 
 - El evaluador interno carga una revisión inmutable y una suite guardada bajo RLS. Verifica las afirmaciones y el presupuesto del conjunto antes de llamar al proveedor. La ejecución reclama un UUID persistido y guarda las huellas de la revisión y de la suite, los resultados de las afirmaciones y las referencias de consumo. El resumen omite el texto de entrada y salida.
@@ -276,6 +283,13 @@ El ejemplo inicial del editor validaba estructura, pero no preparaba el modelo n
 - **Corrección.** Consultar por empresa, grafo y perfil de la revisión antes de aplicar el límite de 20. Las suites de revisiones del mismo perfil siguen disponibles en el mismo grafo.
 - **Evidencia.** Chromium con App y PostgreSQL reprodujo la ausencia de opciones y pasó con ambas revisiones mostrando su propia suite y el botón de evaluación habilitado. La prueba está en `Frontend_py_whatsaapweb/e2e/agent-studio-catalog.integration.spec.ts` y se ejecuta en el paso de Studio proveedor del CI de producto.
 
+## IA-15. Catálogo publicado en el turno canónico de WhatsApp
+
+- **Reproducción.** Las publicaciones de catálogo evaluadas y aprobadas recibían HTTP 422 al vincularse a WhatsApp. Al conectar el runtime, un SIGKILL después de confirmar las rondas del modelo y antes de copiar el resultado a ready dejaba el turno sin recuperar.
+- **Cambio.** La migración 067 fija perfil y recibo en el binding y en el run canónico. Las rondas de WhatsApp usan la operación completion y la misma cuota compartida. El worker recupera checkpoints confirmados y revalida el vínculo, la conversación, los permisos y el snapshot antes de continuar o entregar.
+- **Pruebas.** Dos empresas publican y vinculan mediante la API, conservan su revisión fijada ante otra publicación y ofrecen sugerencias aisladas. Los casos detienen procesos después del router, del snapshot y antes y después de ready. Comprueban acuses perdidos del modelo y Graph, revocación, restauración de permisos, toma humana y pausa/reanudación.
+- **Navegador.** Los tres recorridos proveedor de Studio pasaron sobre el candidato integrado. Incluyen texto, catálogo y cambio de perfil entre revisiones. Las llamadas al modelo y Graph usan servicios HTTP locales. [Contrato y recuperación](../architecture/CATALOG_WHATSAPP_RUNTIME.md).
+
 ## WF-01. Ingreso mientras se revierte una revisión publicada
 
 - **Antes.** CI devolvió `WORKFLOW_NOT_PUBLISHED` durante una reversión válida. La regresión local mantuvo la reversión abierta hasta observar en PostgreSQL que un webhook esperaba su bloqueo. El ingreso falló al intentar fijar la revisión mediante una consulta que también bloqueaba la definición.
@@ -293,5 +307,5 @@ El ejemplo inicial del editor validaba estructura, pero no preparaba el modelo n
 | --- | --- |
 | Bandeja en tiempo real | Filtro por etiqueta, reconexión, reorden de webhooks e historial paginado cubiertos en MSG-04 y MSG-05. |
 | Envío y recepción | MSG-06 a MSG-08 cubren envíos humanos y automáticos, adjuntos, entrega incierta, recuperación tras reinicio y recibos en la bandeja con Graph local. Falta el recorrido en navegador con dos líneas Meta reales. |
-| Harness IA | IA-03 a IA-14 cubren Studio, cuota, autorización de derivaciones, reclamo de efectos, el perfil de texto y la evaluación, publicación y retención del router de catálogo. Faltan vinculación y ejecución canónica de catálogo en WhatsApp, perfiles con herramientas de efectos, conciliación por proveedor y piloto con proveedor real. |
-| Flujo operativo y navegación | UX-07 a UX-13 cubren conversación, pedido, pago y regreso, aprobación, conexión, conciliación con el proveedor local, pausa del agente publicado y regreso al listado de Studio. Falta el ensayo con una cuenta autorizada de Mercado Pago y la validación independiente del candidato completo. |
+| Harness IA | IA-03 a IA-15 cubren Studio, cuota, derivaciones, reclamo de efectos, texto y el recorrido canónico del catálogo publicado. Faltan perfiles con herramientas de efectos, conciliación por proveedor y piloto con proveedor real. |
+| Flujo operativo y navegación | UX-07 a UX-14 cubren conversación, pedido, pago y regreso, aprobación, conexión, conciliación con el proveedor local, pausa del agente publicado y regreso al listado de Studio. Falta el ensayo con una cuenta autorizada de Mercado Pago y la validación independiente del candidato completo. |
