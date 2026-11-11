@@ -382,7 +382,7 @@ export default function createAgentStudioRoutes(
       mode: access.studio.mode,
       availability: access.availability,
       profile: catalogProfile ?? { compatible: preflight.ok, issue: preflight.ok ? null : preflight.code, model: boundedTextCapability.model },
-      suites: await listExecutionSuites(db, actor.tenantId, draft.graphId),
+      suites: await listExecutionSuites(db, actor.tenantId, draft.graphId, catalogProfile ? catalogRouterExecutionProfile : executionProfile),
       active: (await access.studio.publications.loadActive(db, actor.tenantId, draft.graphId))?.publication ?? null,
     }));
     res.json(status);

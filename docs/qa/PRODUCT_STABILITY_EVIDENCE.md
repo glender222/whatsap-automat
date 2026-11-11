@@ -270,6 +270,12 @@ El ejemplo inicial del editor validaba estructura, pero no preparaba el modelo n
 - **Después.** La aplicación recorre las empresas en páginas y limpia lotes de checkpoints vencidos. El borrado físico es eventual y conserva hashes, reservas y ledgers. Cerrar el servidor detiene nuevas admisiones y espera los lotes iniciados.
 - **Validación.** La prueba de `App.start` observó por SQL la eliminación de cifrados de Alfa y Bravo sin usar HTTP. Una fila bloqueada quedó pendiente y la otra empresa avanzó. Se comprobaron lotes de 100, ejecución concurrente y arranque con el esquema anterior sin clave de cifrado. [Reproducción y comandos](CATALOG_CHECKPOINT_RETENTION.md).
 
+## IA-14. Suites al cambiar el perfil de una revisión
+
+- **Reproducción.** En un grafo con revisión 1 de catálogo y revisión 2 de texto, guardar una suite desde cada revisión y volver a abrir ambas en Studio. La API devolvía las dos suites al consultar cualquiera de las revisiones. El panel rechazaba la respuesta y desaparecía la selección.
+- **Corrección.** Consultar por empresa, grafo y perfil de la revisión antes de aplicar el límite de 20. Las suites de revisiones del mismo perfil siguen disponibles en el mismo grafo.
+- **Evidencia.** Chromium con App y PostgreSQL reprodujo la ausencia de opciones y pasó con ambas revisiones mostrando su propia suite y el botón de evaluación habilitado. La prueba está en `Frontend_py_whatsaapweb/e2e/agent-studio-catalog.integration.spec.ts` y se ejecuta en el paso de Studio proveedor del CI de producto.
+
 ## WF-01. Ingreso mientras se revierte una revisión publicada
 
 - **Antes.** CI devolvió `WORKFLOW_NOT_PUBLISHED` durante una reversión válida. La regresión local mantuvo la reversión abierta hasta observar en PostgreSQL que un webhook esperaba su bloqueo. El ingreso falló al intentar fijar la revisión mediante una consulta que también bloqueaba la definición.
@@ -287,5 +293,5 @@ El ejemplo inicial del editor validaba estructura, pero no preparaba el modelo n
 | --- | --- |
 | Bandeja en tiempo real | Filtro por etiqueta, reconexión, reorden de webhooks e historial paginado cubiertos en MSG-04 y MSG-05. |
 | Envío y recepción | MSG-06 a MSG-08 cubren envíos humanos y automáticos, adjuntos, entrega incierta, recuperación tras reinicio y recibos en la bandeja con Graph local. Falta el recorrido en navegador con dos líneas Meta reales. |
-| Harness IA | IA-03 a IA-13 cubren Studio, cuota, autorización de derivaciones, reclamo de efectos, el perfil de texto y la evaluación, publicación y retención del router de catálogo. Faltan vinculación y ejecución canónica de catálogo en WhatsApp, perfiles con herramientas de efectos, conciliación por proveedor y piloto con proveedor real. |
+| Harness IA | IA-03 a IA-14 cubren Studio, cuota, autorización de derivaciones, reclamo de efectos, el perfil de texto y la evaluación, publicación y retención del router de catálogo. Faltan vinculación y ejecución canónica de catálogo en WhatsApp, perfiles con herramientas de efectos, conciliación por proveedor y piloto con proveedor real. |
 | Flujo operativo y navegación | UX-07 a UX-13 cubren conversación, pedido, pago y regreso, aprobación, conexión, conciliación con el proveedor local, pausa del agente publicado y regreso al listado de Studio. Falta el ensayo con una cuenta autorizada de Mercado Pago y la validación independiente del candidato completo. |

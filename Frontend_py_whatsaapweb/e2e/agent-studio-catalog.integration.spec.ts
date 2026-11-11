@@ -127,4 +127,52 @@ if (process.env.STUDIO_PROVIDER_FIXTURE === '1') {
       await Promise.all(contexts.map((context) => context.close()));
     }
   });
+
+  test('provider mode keeps evaluation suites scoped to each revision profile', async ({ browser, request }) => {
+    test.skip(!backend || !process.env.STUDIO_FIXTURE_URL, 'Requires the local provider and isolated PostgreSQL');
+    const [company] = provisionCompanies('--studio', '--catalog-studio');
+    const graphUrl = `${backend}/api/v1/agent-graphs/${company.catalogGraphId}`;
+    const headers = { authorization: `Bearer ${company.auth.accessToken}` };
+    const revisions = await request.post(graphUrl + '/revisions', { headers, data: {
+      entryNodeId: 'answer', policyRef: 'qa-text', nodes: [
+        { id: 'answer', kind: 'agent', config: { provider: 'openai', model: 'gpt-5.4-mini-2026-03-17', prompt: 'Contexto QA', maxTokens: 40 } },
+        { id: 'end', kind: 'end', config: {} },
+      ], edges: [{ id: 'finish', from: 'answer', to: 'end' }],
+      limits: { maxSteps: 4, maxDelegations: 0, maxParallelNodes: 1, maxDurationSeconds: 10, maxModelTokens: 900000, maxCostMicroUsd: 700000 },
+    } });
+    expect(revisions.status()).toBe(201);
+    expect((await revisions.json()).version).toBe(2);
+
+    const context = await browser.newContext({ viewport: { width: 390, height: 720 } });
+    try {
+      await context.addInitScript((session) => localStorage.setItem('auth', JSON.stringify(session)), company.auth);
+      const page = await context.newPage();
+      await page.goto(`/dashboard/ia/estudio/grafos/${company.catalogGraphId}?version=1`);
+      const panel = page.getByRole('region', { name: 'Evaluación y publicación' });
+      await panel.getByText('Credencial de OpenAI', { exact: true }).press('Enter');
+      await panel.getByLabel('Clave de API').fill('fixture-studio-provider');
+      await panel.getByRole('button', { name: 'Guardar credencial' }).press('Enter');
+      await expect(panel.getByText('Credencial guardada.')).toBeVisible();
+      const scenario = { id: 'lookup', name: 'Búsqueda', mockInput: 'Consultar catálogo', expectedTextPatterns: ['Visible Alfa'] };
+      const catalogSuite = await request.post(graphUrl + '/evaluation-suites?version=1', { headers, data: {
+        id: crypto.randomUUID(), name: 'Suite de catálogo', profile: 'catalog-router-v1',
+        scenarios: [{ ...scenario, expectedTools: ['catalog.search'] }],
+      } });
+      expect(catalogSuite.status()).toBe(200);
+      const textSuite = await request.post(graphUrl + '/evaluation-suites?version=2', { headers, data: {
+        id: crypto.randomUUID(), name: 'Suite de texto', scenarios: [scenario],
+      } });
+      expect(textSuite.status()).toBe(200);
+
+      for (const [version, expected, absent] of [[1, 'Suite de catálogo', 'Suite de texto'], [2, 'Suite de texto', 'Suite de catálogo']] as const) {
+        await page.goto(`/dashboard/ia/estudio/grafos/${company.catalogGraphId}?version=${version}`);
+        await expect(panel.getByRole('option', { name: new RegExp(expected) })).toHaveCount(1);
+        await expect(panel.getByRole('option', { name: new RegExp(absent) })).toHaveCount(0);
+        await expect(panel.getByRole('button', { name: 'Evaluar revisión' })).toBeEnabled();
+      }
+    } finally {
+      await context.close();
+    }
+  });
+
 }

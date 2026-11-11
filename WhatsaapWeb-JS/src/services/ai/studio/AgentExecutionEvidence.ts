@@ -7,12 +7,12 @@ export type ExecutionMode = 'verification' | 'provider';
 export type ExecutionProfile = 'linear-text-v1' | 'catalog-router-v1';
 export const executionRunIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
-export async function listExecutionSuites(db: Queryable, tenantId: number, graphId: string) {
+export async function listExecutionSuites(db: Queryable, tenantId: number, graphId: string, profile: ExecutionProfile) {
   const { rows } = await db.query(`
     SELECT id, name, execution_profile, jsonb_array_length(scenarios) AS count FROM agent_eval_suites
-    WHERE tenant_id = $1 AND agent_graph_id = $2 AND jsonb_typeof(scenarios) = 'array'
+    WHERE tenant_id = $1 AND agent_graph_id = $2 AND execution_profile = $3 AND jsonb_typeof(scenarios) = 'array'
     ORDER BY created_at DESC, id DESC LIMIT 20
-  `, [tenantId, graphId]);
+  `, [tenantId, graphId, profile]);
   return rows.map(({ id, name, count, execution_profile }) => ({ id, name, scenarioCount: count,
     ...(execution_profile === 'catalog-router-v1' ? { profile: execution_profile as ExecutionProfile } : {}) }));
 }
