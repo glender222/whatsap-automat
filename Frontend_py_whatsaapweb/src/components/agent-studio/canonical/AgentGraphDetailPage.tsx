@@ -4,6 +4,7 @@ import { Link, useLocation, useParams, useSearchParams } from 'react-router-dom'
 import AgentGraphComparisonPanel from './AgentGraphComparisonPanel';
 import AgentGraphFixturePanel from './AgentGraphFixturePanel';
 import AgentGraphExecutionPanel from './AgentGraphExecutionPanel';
+import { studioReturnSession } from './studioListHistory';
 import GraphProblemNotice from './GraphProblemNotice';
 import {
   draftSpec, getGraphDraft, graphPath, graphProblem, nodeKinds, readVersion, studioLocation, studioPath,
@@ -166,7 +167,7 @@ function GraphDetails({ graphId }: { graphId: string }) {
 
   return (
     <section className="mx-auto max-w-6xl space-y-4 p-4 sm:p-6">
-      <Link to={studioLocation(studioPath, { after })} state={{ focusGraphId: graphId }}
+      <Link to={studioLocation(studioPath, { after })} state={{ focusGraphId: graphId, returnSession: studioReturnSession() }}
         className="inline-flex min-h-11 items-center gap-2 text-sm font-medium text-emerald-700 dark:text-emerald-300">
         <ArrowLeft size={16} aria-hidden="true" /> Volver a Agent Studio
       </Link>

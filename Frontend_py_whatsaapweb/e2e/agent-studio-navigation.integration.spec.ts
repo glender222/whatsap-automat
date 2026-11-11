@@ -233,4 +233,15 @@ test('Studio history ignores another company and a new login, even with matching
   await expect(card).toContainText('company-b');
   await expect(card).not.toBeFocused();
   expect(await scrollTop(page)).toBe(0);
+
+  await card.press('Enter');
+  await page.getByRole('link', { name: 'Volver a Agent Studio', exact: true }).press('Enter');
+  await focusedInView(page, card);
+  await page.evaluate((auth) => {
+    localStorage.setItem('auth', JSON.stringify({ ...auth, browserSessionId: crypto.randomUUID() }));
+    window.dispatchEvent(new StorageEvent('storage', { key: 'auth' }));
+  }, companyA.auth);
+  await expect(card).toContainText('company-a');
+  await expect(card).not.toBeFocused();
+  expect(await scrollTop(page)).toBe(0);
 });

@@ -20,6 +20,7 @@ El cotejo también confirma la mejora ya presente en `fa159d8`: Anterior/Siguien
 - `sessionStorage` conserva como máximo 20 entradas. La lectura exige coincidencia de `browserSessionId`, usuario y empresa; el identificador opaco de sesión se obtiene del módulo de autenticación. No se guardan tokens, nombres, políticas ni especificaciones de grafos.
 - La clave compartida inicial `default` se sustituye con una clave de entrada propia sin crear otro paso de historial. Una nueva URL directa no reutiliza la posición de una entrada anterior. Recargar el detalle mantiene su `history.state.key`, comprobado en Chromium.
 - POP consulta exclusivamente el registro de la sesión vigente. El estado de un regreso explícito anterior no sustituye al último enlace utilizado ni filtra contexto tras cambiar de empresa.
+- Una segunda reproducción cambió de empresa con la lista ya abierta tras un regreso explícito. La tarjeta de la empresa nueva recibía el foco por el estado anterior de React Router. Ahora los enlaces de regreso llevan el identificador opaco de sesión y la lista solo aplica ese foco a la sesión que lo inició. El navegador verifica también que la posición de la nueva empresa permanezca al inicio.
 - La restauración se realiza una vez por entrada cuando llegan sus resultados. Un destino ausente utiliza el resumen de resultados; almacenamiento bloqueado o inválido no interrumpe la navegación.
 
 ## Cobertura y ejecución
@@ -28,7 +29,7 @@ El cotejo también confirma la mejora ya presente en `fa159d8`: Anterior/Siguien
 
 - Regreso explícito, historial, recarga, edición/cancelación, creación/cancelación y enlaces directos válidos e inválidos: escritorio oscuro y móvil claro, ambos con preferencia del sistema opuesta.
 - Atrás/Adelante, recarga de detalle y lista, segundo borrador después de un regreso explícito, creación/recarga/Atrás y URL directa con el mismo cursor: escritorio y móvil.
-- Dos empresas con los mismos IDs de grafo; cambio de empresa mientras el detalle está abierto y nuevo inicio de sesión de la misma empresa. Ninguno restaura la posición anterior; la empresa nueva puede guardar su propia posición.
+- Dos empresas con los mismos IDs de grafo. Se cambia de empresa desde el detalle y desde la lista después de un regreso explícito. Se comprueba además un nuevo inicio de sesión de la misma empresa y que cada sesión pueda guardar su propia posición.
 
 Las pruebas unitarias adicionales comprueban renovación frente a nuevo inicio de sesión, aislamiento por entrada/cursor/empresa, límite de retención, registros inválidos y almacenamiento bloqueado. Se conservan las pruebas de API y sesión existentes.
 

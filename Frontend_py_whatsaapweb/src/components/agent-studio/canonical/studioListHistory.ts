@@ -14,6 +14,10 @@ export type StudioListPosition = {
 type SessionScope = { sessionId: string; userId: string; companyId: string };
 type HistoryCache = { scope: SessionScope; entries: StudioListPosition[] };
 
+export function studioReturnSession() {
+  return readBrowserSessionId() ?? readSession().generation;
+}
+
 function currentScope(): SessionScope | null {
   const session = readSession();
   const sessionId = readBrowserSessionId();

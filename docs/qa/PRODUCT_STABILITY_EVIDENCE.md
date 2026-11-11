@@ -85,6 +85,12 @@ Para reproducir UX-02 y UX-03, ejecutar `npm run test:e2e -- e2e/orders-navigati
 - **Después.** El cursor del listado viaja en la URL al consultar o editar una revisión y al abrir un grafo nuevo. Volver a la lista enfoca el grafo revisado. Cancelar la creación enfoca «Nuevo grafo» en la misma página.
 - **Validación.** Chromium con API y PostgreSQL recorrió el caso desde Bandeja con teclado y un viewport de 390 px. Verificó la segunda página después de recargar, cambiar de revisión, cancelar o guardar, recuperar el foco y conservar Oscuro con el sistema en Claro. [Prueba de navegador](../../Frontend_py_whatsaapweb/e2e/agent-studio.integration.spec.ts).
 
+## UX-13. Atrás del navegador y cambio de empresa en Agent Studio
+
+- **Antes.** Atrás desde un detalle conservaba la página 2 y devolvía el panel al inicio, con el foco en `BODY`. Una segunda reproducción cambió de empresa tras usar el enlace de regreso y la nueva sesión heredó el foco del grafo homónimo.
+- **Después.** La lista recupera el enlace y el desplazamiento de la entrada de historial de la sesión activa, incluso al recargar el detalle. El enlace de regreso explícito también verifica su sesión de origen.
+- **Validación.** Siete recorridos de Studio en Chromium cubrieron teclado, escritorio, móvil, Claro y Oscuro, recarga, Atrás y Adelante, y cambio entre empresas con los mismos identificadores de grafo. Diez pruebas de grafos y diez de sesión pasaron. [Reproducción y comandos](AGENT_STUDIO_HISTORY_RETURN.md).
+
 ## MSG-01. Conversaciones nuevas y recuperación de la bandeja
 
 La traza de GitHub Actions mostró que el corte de red podía coincidir con la carga inicial de la conversación. La regresión ahora espera que aparezca el mensaje inicial en el historial antes de cortar la red. Así comprueba la recuperación después de una desconexión establecida.
@@ -264,4 +270,4 @@ El ejemplo inicial del editor validaba estructura, pero no preparaba el modelo n
 | Bandeja en tiempo real | Filtro por etiqueta, reconexión, reorden de webhooks e historial paginado cubiertos en MSG-04 y MSG-05. |
 | Envío y recepción | MSG-06 a MSG-08 cubren envíos humanos y automáticos, adjuntos, entrega incierta, recuperación tras reinicio y recibos en la bandeja con Graph local. Falta el recorrido en navegador con dos líneas Meta reales. |
 | Harness IA | IA-03 a IA-10 cubren Studio, cuota, autorización de derivaciones, reclamo de efectos y el perfil de texto del runtime estricto de WhatsApp. Faltan el piloto con proveedor real, los perfiles estrictos de router y herramientas y la conciliación de efectos por proveedor. |
-| Flujo operativo y navegación | UX-07 a UX-12 cubren conversación, pedido, pago y regreso, aprobación, conexión, conciliación con el proveedor local, pausa del agente publicado y regreso al listado de Studio. Falta el ensayo con una cuenta autorizada de Mercado Pago y la validación independiente del candidato completo. |
+| Flujo operativo y navegación | UX-07 a UX-13 cubren conversación, pedido, pago y regreso, aprobación, conexión, conciliación con el proveedor local, pausa del agente publicado y regreso al listado de Studio. Falta el ensayo con una cuenta autorizada de Mercado Pago y la validación independiente del candidato completo. |

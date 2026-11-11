@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import GraphProblemNotice from './GraphProblemNotice';
+import { studioReturnSession } from './studioListHistory';
 import {
   draftSpec, exampleGraph, getGraphDraft, graphIdPattern, graphPath, graphProblem, loadStudioTextTemplate, readVersion,
   saveGraphDraft, studioLocation, studioPath, type GraphProblem,
@@ -109,7 +110,7 @@ function GraphEditor({ graphId }: { graphId?: string }) {
 
   return (
     <section className="mx-auto max-w-4xl space-y-4 p-4 sm:p-6" aria-labelledby="graph-editor-title">
-      <Link to={back} state={graphId ? undefined : { focusNewGraph: true }}
+      <Link to={back} state={graphId ? undefined : { focusNewGraph: true, returnSession: studioReturnSession() }}
         className="inline-flex min-h-11 items-center gap-2 text-sm font-medium text-emerald-700 dark:text-emerald-300">
         <ArrowLeft size={16} aria-hidden="true" /> {graphId ? 'Volver al grafo' : 'Volver a Agent Studio'}
       </Link>

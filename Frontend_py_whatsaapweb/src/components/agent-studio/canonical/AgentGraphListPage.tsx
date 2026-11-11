@@ -3,7 +3,7 @@ import { GitBranch, Plus, Settings2 } from 'lucide-react';
 import { Link, useLocation, useNavigate, useNavigationType, useSearchParams } from 'react-router-dom';
 import GraphProblemNotice from './GraphProblemNotice';
 import { graphPath, graphProblem, legacyAgentsPath, listGraphDrafts, studioLocation, studioPath, type GraphProblem } from './agentGraphApi';
-import { readStudioListPosition, rememberStudioListPosition } from './studioListHistory';
+import { readStudioListPosition, rememberStudioListPosition, studioReturnSession } from './studioListHistory';
 
 export default function AgentGraphListPage() {
   const [params, setParams] = useSearchParams();
@@ -12,7 +12,8 @@ export default function AgentGraphListPage() {
   const navigate = useNavigate();
   const navigationType = useNavigationType();
   const { state, key: entryKey } = location;
-  const explicitReturn = navigationType !== 'POP' && (typeof state?.focusGraphId === 'string' || state?.focusNewGraph === true);
+  const explicitReturn = navigationType !== 'POP' && state?.returnSession === studioReturnSession() &&
+    (typeof state.focusGraphId === 'string' || state.focusNewGraph === true);
   const savedPosition = navigationType === 'POP' ? readStudioListPosition(entryKey, after) : undefined;
   const returnGraphId = explicitReturn && typeof state?.focusGraphId === 'string' ? state.focusGraphId : savedPosition?.graphId;
   const returnToNewGraph = (explicitReturn && state?.focusNewGraph === true) || savedPosition?.graphId === null;
