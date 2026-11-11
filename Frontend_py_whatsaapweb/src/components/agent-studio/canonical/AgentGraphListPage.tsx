@@ -1,15 +1,21 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type MouseEvent } from 'react';
 import { GitBranch, Plus, Settings2 } from 'lucide-react';
-import { Link, useLocation, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useNavigationType, useSearchParams } from 'react-router-dom';
 import GraphProblemNotice from './GraphProblemNotice';
 import { graphPath, graphProblem, legacyAgentsPath, listGraphDrafts, studioLocation, studioPath, type GraphProblem } from './agentGraphApi';
+import { readStudioListPosition, rememberStudioListPosition } from './studioListHistory';
 
 export default function AgentGraphListPage() {
   const [params, setParams] = useSearchParams();
   const after = params.get('after');
-  const { state } = useLocation();
-  const returnGraphId = typeof state?.focusGraphId === 'string' ? state.focusGraphId : null;
-  const returnToNewGraph = state?.focusNewGraph === true;
+  const location = useLocation();
+  const navigate = useNavigate();
+  const navigationType = useNavigationType();
+  const { state, key: entryKey } = location;
+  const explicitReturn = navigationType !== 'POP' && (typeof state?.focusGraphId === 'string' || state?.focusNewGraph === true);
+  const savedPosition = navigationType === 'POP' ? readStudioListPosition(entryKey, after) : undefined;
+  const returnGraphId = explicitReturn && typeof state?.focusGraphId === 'string' ? state.focusGraphId : savedPosition?.graphId;
+  const returnToNewGraph = (explicitReturn && state?.focusNewGraph === true) || savedPosition?.graphId === null;
   const [attempt, setAttempt] = useState(0);
   const [result, setResult] = useState<{ key: string; page?: Awaited<ReturnType<typeof listGraphDrafts>>; error?: GraphProblem }>();
   const key = (after ?? '') + '/' + attempt;
@@ -17,6 +23,14 @@ export default function AgentGraphListPage() {
   const nextPage = useRef<HTMLParagraphElement>(null);
   const returnLink = useRef<HTMLAnchorElement>(null);
   const focusResults = useRef(false);
+  const restoredEntry = useRef<string>(null);
+
+  useEffect(() => {
+    // Initial deep links have the shared "default" key; give this entry its own identity before remembering it.
+    if (entryKey === 'default') navigate({ pathname: location.pathname, search: location.search, hash: location.hash }, {
+      replace: true, state,
+    });
+  }, [entryKey, location.pathname, location.search, location.hash, navigate, state]);
 
   useEffect(() => {
     const request = new AbortController();
@@ -29,11 +43,29 @@ export default function AgentGraphListPage() {
   }, [after, key]);
 
   useEffect(() => {
-    if (current?.page && (focusResults.current || returnGraphId || returnToNewGraph)) {
+    if (current?.page && restoredEntry.current !== entryKey && (focusResults.current || returnGraphId || returnToNewGraph)) {
+      restoredEntry.current = entryKey;
       focusResults.current = false;
-      (returnLink.current ?? nextPage.current)?.focus();
+      const target = returnLink.current ?? nextPage.current;
+      const scroller = target?.closest('main');
+      if (savedPosition && scroller) {
+        scroller.scrollTop = savedPosition.scrollTop;
+        target?.focus({ preventScroll: true });
+        target?.scrollIntoView({ block: 'nearest' });
+      } else {
+        target?.focus();
+        if (explicitReturn && scroller) rememberStudioListPosition({
+          entryKey, after, graphId: returnGraphId ?? null, scrollTop: scroller.scrollTop,
+        });
+      }
     }
-  }, [current, returnGraphId, returnToNewGraph]);
+  }, [current, returnGraphId, returnToNewGraph, savedPosition, entryKey, after, explicitReturn]);
+
+  function remember(event: MouseEvent<HTMLAnchorElement>, graphId: string | null) {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.defaultPrevented) return;
+    const scroller = event.currentTarget.closest('main');
+    if (scroller) rememberStudioListPosition({ entryKey, after, graphId, scrollTop: scroller.scrollTop });
+  }
 
   function go(afterId?: string) {
     focusResults.current = true;
@@ -50,6 +82,7 @@ export default function AgentGraphListPage() {
             <p className="mt-1 text-sm text-gray-700 dark:text-gray-200">Guarda grafos por revisión, consulta el historial y comprueba su estructura.</p>
           </div>
           <Link ref={returnToNewGraph ? returnLink : undefined} to={studioLocation(studioPath + '/nuevo', { after })}
+            onClick={(event) => remember(event, null)}
             className="inline-flex min-h-11 items-center gap-2 rounded-md bg-emerald-700 px-4 text-sm font-semibold text-white hover:bg-emerald-800">
             <Plus size={16} aria-hidden="true" /> Nuevo grafo
           </Link>
@@ -71,6 +104,7 @@ export default function AgentGraphListPage() {
               {current.page.items.map((draft) => (
                 <li key={draft.graphId} className="min-w-0">
                   <Link ref={draft.graphId === returnGraphId ? returnLink : undefined} to={studioLocation(graphPath(draft.graphId), { after })}
+                    onClick={(event) => remember(event, draft.graphId)}
                     className="flex h-full flex-col gap-3 rounded-xl border border-gray-200 bg-white p-4 hover:border-emerald-700 dark:border-gray-700 dark:bg-gray-900 dark:hover:border-emerald-300">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <GitBranch size={20} className="text-emerald-700 dark:text-emerald-300" aria-hidden="true" />

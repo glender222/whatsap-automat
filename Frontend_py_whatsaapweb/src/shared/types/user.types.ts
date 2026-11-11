@@ -18,6 +18,7 @@ export interface BaseEntity {
  * - id_padre = <adminId> → Usuario es EMPLEADO del admin
  */
 export interface User extends BaseEntity {
+  companyId?: number | string;
   nombre: string;
   email: string;
   rol: UserRole;

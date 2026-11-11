@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { test, type TestContext } from 'node:test';
 import { AxiosError, type InternalAxiosRequestConfig } from 'axios';
 import { api } from '../shared/axios/http';
+import { readBrowserSessionId, saveRenewedAccess, saveSession } from '../shared/auth/session';
+import { readStudioListPosition, rememberStudioListPosition } from '../components/agent-studio/canonical/studioListHistory';
 import {
   compareGraphSpecs, draftSpec, exampleGraph, getGraphDraft, graphFixtureProblem, graphPath, graphProblem, listGraphDrafts, saveGraphDraft,
   simulateGraphDraft, validateGraphDraft, type GraphDraft, type GraphFixtureResult, type GraphValidation,
@@ -141,4 +143,67 @@ test('structurally invalid revisions point the operator to the saved revision va
     assert.match(graphFixtureProblem(cause).message, /errores estructurales.*Validar esta revisión/);
     return true;
   });
+});
+
+function historyFixture(t: TestContext) {
+  const stored = ['localStorage', 'sessionStorage'].map((name) => Object.getOwnPropertyDescriptor(globalThis, name));
+  for (const name of ['localStorage', 'sessionStorage']) {
+    const values = new Map<string, string>();
+    Object.defineProperty(globalThis, name, { configurable: true, value: {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key),
+    } });
+  }
+  t.after(() => ['localStorage', 'sessionStorage'].forEach((name, index) => {
+    if (stored[index]) Object.defineProperty(globalThis, name, stored[index]!);
+    else Reflect.deleteProperty(globalThis, name);
+  }));
+  const user = { id: '1', companyId: 27, nombre: 'Fixture', email: 'fixture@example.test', rol: 'ADMIN' as const, idPadre: null };
+  const session = saveSession(user, 'fixture-access', 'fixture-refresh');
+  return { user, session };
+}
+
+const position = { entryKey: 'entry-a', after: 'graph-11', graphId: 'graph-23', scrollTop: 1200 };
+
+test('Studio history follows a session across renewal but never a new login, company or entry', (t) => {
+  const { user, session } = historyFixture(t);
+  rememberStudioListPosition(position);
+  assert.deepEqual(readStudioListPosition('entry-a', 'graph-11'), position);
+  assert.equal(readStudioListPosition('entry-b', 'graph-11'), undefined);
+  assert.equal(readStudioListPosition('entry-a', null), undefined);
+  const sessionId = readBrowserSessionId();
+  saveRenewedAccess(session.generation, 'renewed-access');
+  assert.equal(readBrowserSessionId(), sessionId);
+  assert.deepEqual(readStudioListPosition('entry-a', 'graph-11'), position);
+  const renewedAuth = localStorage.getItem('auth')!;
+  localStorage.setItem('auth', JSON.stringify({ ...JSON.parse(renewedAuth), user: { ...user, companyId: 28 } }));
+  assert.equal(readStudioListPosition('entry-a', 'graph-11'), undefined);
+  localStorage.setItem('auth', renewedAuth);
+  saveSession(user, 'fixture-access', 'fixture-refresh');
+  assert.notEqual(readBrowserSessionId(), sessionId);
+  assert.equal(readStudioListPosition('entry-a', 'graph-11'), undefined);
+});
+
+test('Studio history bounds retained entries and rejects malformed or unidentified origins', (t) => {
+  historyFixture(t);
+  rememberStudioListPosition({ ...position, entryKey: 'default' });
+  assert.equal(sessionStorage.getItem('studio:list-history'), null);
+  for (let index = 0; index < 25; index++) rememberStudioListPosition({ ...position, entryKey: `entry-${index}` });
+  assert.equal(readStudioListPosition('entry-0', 'graph-11'), undefined);
+  assert.deepEqual(readStudioListPosition('entry-24', 'graph-11'), { ...position, entryKey: 'entry-24' });
+  assert.equal(JSON.parse(sessionStorage.getItem('studio:list-history')!).entries.length, 20);
+  assert.doesNotMatch(sessionStorage.getItem('studio:list-history')!, /fixture-access|fixture-refresh|email|nombre/);
+  const valid = sessionStorage.getItem('studio:list-history')!;
+  for (const malformed of ['{', 'null', JSON.stringify({ ...JSON.parse(valid), entries: [{ ...position, scrollTop: -1 }] })]) {
+    sessionStorage.setItem('studio:list-history', malformed);
+    assert.equal(readStudioListPosition('entry-a', 'graph-11'), undefined);
+  }
+});
+
+test('blocked tab storage cannot interrupt Studio navigation', (t) => {
+  historyFixture(t);
+  Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, get() { throw new Error('Storage unavailable'); } });
+  assert.doesNotThrow(() => rememberStudioListPosition(position));
+  assert.equal(readStudioListPosition('entry-a', 'graph-11'), undefined);
 });

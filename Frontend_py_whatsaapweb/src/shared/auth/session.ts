@@ -56,6 +56,11 @@ export function readSession(): SessionSnapshot {
   return observed;
 }
 
+export function readBrowserSessionId(): string | null {
+  readSession();
+  return observedId;
+}
+
 function notifySession() {
   for (const listener of listeners) listener();
 }
