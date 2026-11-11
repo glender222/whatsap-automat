@@ -196,6 +196,18 @@ jobs:
           LEGACY_META_TEST_VIDEO: '1'
         run: |
           node --import tsx --test --test-concurrency=3 src/test/campaign-persistence.integration.test.ts src/test/marketplace-postgres.test.ts src/test/agent-studio-postgres.test.ts src/test/ai-quota-reservations-postgres.test.ts src/test/bounded-agent-dispatch.test.ts src/test/tool-broker-effects-postgres.test.ts src/test/strict-whatsapp-binding-routes-postgres.test.ts src/test/strict-whatsapp-runtime-store-postgres.test.ts src/test/strict-whatsapp-runtime-postgres.test.ts src/test/agent-domains-postgres.test.ts src/test/channel-connections-postgres.test.ts src/test/workflow-console.integration.test.ts src/test/conversation-send-postgres.test.ts src/test/attachment-rls-postgres.test.ts src/test/challenger_f8_immutability_compliance.test.ts src/test/operation-executions-postgres.test.ts src/test/catalog-inventory-postgres.test.ts src/test/orders-postgres.test.ts src/test/payment-gateway-postgres.test.ts src/test/payment-process-list-postgres.test.ts src/test/payment-checkout-intents-postgres.test.ts src/test/payment-checkout-dispatch-postgres.test.ts src/test/payment-checkout-reconciliation-postgres.test.ts src/test/payment-checkout-reconciliation-routes.test.ts src/test/legacy-meta-send-postgres.test.ts
+      - name: Probar recuperación y evaluación de catálogo en PostgreSQL
+        timeout-minutes: 4
+        env:
+          STRICT_CATALOG_TEST_DATABASE_URL: postgres://whatsap_smoke:ci-runtime-only@127.0.0.1:5432/whatsap_automat_smoke
+        run: |
+          set -o pipefail
+          report="$RUNNER_TEMP/catalog-studio.tap"
+          node --import tsx --test --test-concurrency=1 \
+            src/test/catalog-router-execution-profile.test.ts src/test/strict-catalog-router-postgres.test.ts \
+            src/test/catalog-router-checkpoint-store-postgres.test.ts src/test/strict-catalog-checkpoints-postgres.test.ts \
+            src/test/catalog-studio-evaluation-postgres.test.ts | tee "$report"
+          node -e 'if (!/^# skipped 0$/m.test(require("node:fs").readFileSync(process.argv[1], "utf8"))) process.exit(1)' "$report"
       - name: Instalar cliente web y Chromium
         working-directory: Frontend_py_whatsaapweb
         run: |
@@ -249,7 +261,7 @@ jobs:
           npm --prefix ../Frontend_py_whatsaapweb run test:e2e -- --reporter=list,json --output "$evidence/traces"
           node -e 'const { expected, skipped } = require(process.argv[1]).stats;
             if (!expected || skipped) throw new Error(`Expected all browser tests to run. Passed: ${expected}, skipped: ${skipped}`)' "$PLAYWRIGHT_JSON_OUTPUT_FILE"
-      - name: Probar Studio con la política de proveedor y credencial por empresa
+      - name: Probar Studio con proveedor, publicación de texto y evaluación de catálogo
         timeout-minutes: 3
         env:
           DB_NAME: whatsap_automat_browser_smoke
@@ -274,10 +286,10 @@ jobs:
           curl -fsS "$STUDIO_FIXTURE_URL/health"
           curl -fsS "$PRODUCT_GRAPH_FIXTURE_URL/health"
           export PLAYWRIGHT_JSON_OUTPUT_FILE="$evidence/results.json"
-          npm --prefix ../Frontend_py_whatsaapweb run test:e2e -- e2e/agent-studio.integration.spec.ts \
+          npm --prefix ../Frontend_py_whatsaapweb run test:e2e -- e2e/agent-studio.integration.spec.ts e2e/agent-studio-catalog.integration.spec.ts \
             -g 'provider mode' --reporter=list,json --output "$evidence/traces"
           node -e 'const { expected, skipped } = require(process.argv[1]).stats;
-            if (expected !== 1 || skipped) throw new Error("Provider browser test did not pass")' "$PLAYWRIGHT_JSON_OUTPUT_FILE"
+            if (expected !== 2 || skipped) throw new Error("Both provider browser tests must pass")' "$PLAYWRIGHT_JSON_OUTPUT_FILE"
       - name: Probar conciliación de Mercado Pago desde Chromium
         timeout-minutes: 4
         env:
