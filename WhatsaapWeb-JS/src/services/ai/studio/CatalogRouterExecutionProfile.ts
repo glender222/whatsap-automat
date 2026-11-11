@@ -3,6 +3,7 @@ import { boundedTextBudget, boundedTextCapability, isBoundedText } from '../gate
 import { validateDraft } from './AgentStudioDrafts';
 
 export const catalogRouterExecutionProfile = 'catalog-router-v1' as const;
+export const catalogReadTimeoutMs = 1000;
 
 export type CatalogRouterModelConfig = {
   readonly provider: typeof boundedTextCapability.provider;
@@ -127,7 +128,7 @@ export function compileCatalogRouterExecutionProfile(graph: AgentGraphVersionV1)
   const { limits } = graph;
   if (limits.maxSteps !== 4 || limits.maxDelegations !== 0 || limits.maxParallelNodes !== 1 ||
       !integerBetween(limits.maxDurationSeconds, 1, 60) ||
-      limits.maxDurationSeconds * 1000 < routerConfig.timeoutMs + answerConfig.timeoutMs + 1000 ||
+      limits.maxDurationSeconds * 1000 < routerConfig.timeoutMs + answerConfig.timeoutMs + catalogReadTimeoutMs ||
       !integerBetween(limits.maxModelTokens, maxTokens, Number.MAX_SAFE_INTEGER) ||
       !integerBetween(limits.maxCostMicroUsd, maxCostMicroUsd, Number.MAX_SAFE_INTEGER)) {
     return incompatible('PROFILE_LIMITS', 'Allow exactly four steps, zero delegations, one parallel node, both bounded model budgets and their timeouts plus 1000ms within 60 seconds.');

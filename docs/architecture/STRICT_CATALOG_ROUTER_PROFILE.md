@@ -1,6 +1,6 @@
 # Perfil estricto de router y catálogo
 
-Estado del corte: compilación y primer bloque de verificación interno, 2026-11-11. No está habilitado en HTTP, evaluaciones publicables, el binding de WhatsApp ni el worker. No requiere migración. La 063 queda reservada para la invalidación por versión canónica de conversación en el runtime de texto.
+Estado del corte: compilación, lectura y ejecución durable de verificación interna, 2026-11-11. No está habilitado en HTTP, evaluaciones publicables, el binding de WhatsApp ni el worker. La migración 064 y su contrato de recuperación se describen en [checkpoints del perfil](STRICT_CATALOG_ROUTER_CHECKPOINTS.md). La 063 pertenece a la invalidación por versión canónica de conversación en el runtime de texto y no se modifica aquí.
 
 ## Problema reproducido
 
@@ -67,7 +67,7 @@ El resultado de herramienta añade huellas de entrada, autorización y salida. E
 
 ## Adaptación durable necesaria antes de producción
 
-No se debe montar el probe en rutas o workers. El siguiente corte requiere una migración coordinada posterior a 063 y los controles siguientes:
+No se deben montar el probe ni el runtime de verificación en rutas o workers. La migración 064 implementa las rondas, consumo y snapshots de los puntos 3–6 para verificación interna; siguen pendientes la evidencia de evaluación propia y la composición canónica con los controles siguientes:
 
 1. **Pin y compatibilidad.** Añadir un discriminador de perfil a evidencia/publicación/binding. Los registros existentes conservan `linear-text-v1`. Una publicación nueva debe fijar perfil y versión de comportamiento, capability, versión de grafo, specHash, suiteHash y digest de adaptadores/esquemas de tool. Una evaluación de texto o simulación no satisface esa publicación. Publicar otra versión nunca mueve automáticamente el binding.
 2. **Fuente durable.** Mantener la unicidad del run por tenant/inbound ya existente. Fijar el binding y la versión canónica de conversación incorporada por 063. Una pausa, toma humana, nueva revisión del vínculo o cambio de versión de conversación invalida salida y continuación; reanudar no revive el resultado antiguo.
