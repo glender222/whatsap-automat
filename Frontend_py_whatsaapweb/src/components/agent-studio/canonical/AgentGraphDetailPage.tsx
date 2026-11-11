@@ -158,7 +158,7 @@ function GraphDetails({ graphId }: { graphId: string }) {
   }, [graphId, invalidVersion, key, version]);
 
   useEffect(() => {
-    if (current?.draft) title.current?.focus();
+    if (current?.draft && document.activeElement === document.body) title.current?.focus();
   }, [current]);
 
   const draft = current?.draft;

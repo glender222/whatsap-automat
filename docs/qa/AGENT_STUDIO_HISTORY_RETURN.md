@@ -14,6 +14,8 @@ La corrección devuelve el foco al enlace utilizado y restaura la posición del 
 
 El cotejo también confirma la mejora presente en `fa159d8`. Anterior, Siguiente, Última revisión y edición conservan `after`. En `3eb55ff`, Anterior eliminaba ese cursor. Una ejecución móvil de CI reveló que pulsar Tab inmediatamente después de abrir el editor podía alcanzar un control ajeno mientras cargaba la vista. El editor enfoca su encabezado al montarse. La regresión comprueba el foco y usa Mayús+Tab para llegar al enlace de regreso desde el encabezado.
 
+Otra traza móvil mostró que la carga tardía del detalle podía mover el foco del enlace «Volver a Agent Studio» al encabezado durante la pulsación de Enter. La regresión retiene la respuesta HTTP, enfoca el enlace y deja terminar la carga. El detalle conserva el foco en el enlace y Enter vuelve al listado. El encabezado sigue recibiendo foco cuando el documento queda sin un control enfocado.
+
 ## Alcance de la solución
 
 - El registro de cada entrada contiene solamente la clave de historial, el cursor, el identificador de grafo (o el destino Nuevo grafo) y la posición del panel.

@@ -156,10 +156,26 @@ for (const width of [1280, 390]) {
     await focusedInView(page, card);
     await page.screenshot({ path: test.info().outputPath('browser-back-restored.png') });
 
-    // Explicit return leaves location.state behind; the next POP must restore the most recent card.
+    // A graph loading in the background must not take focus from an already usable return link.
+    let releaseDraft!: () => void;
+    const heldDraft = new Promise<void>((resolve) => { releaseDraft = resolve; });
+    await page.route(`${backend}/api/v1/agent-graphs/back-23`, async (route) => {
+      await heldDraft;
+      await route.continue();
+    }, { times: 1 });
     await card.press('Enter');
-    await page.getByRole('link', { name: 'Volver a Agent Studio', exact: true }).press('Enter');
+    const returnLink = page.getByRole('link', { name: 'Volver a Agent Studio', exact: true });
+    try {
+      await expect(page.getByRole('status').filter({ hasText: 'Cargando revisión…' })).toBeVisible();
+      await returnLink.focus();
+      await focusedInView(page, returnLink);
+    } finally { releaseDraft(); }
+    await expect(title).toBeVisible();
+    await focusedInView(page, returnLink);
+    await page.keyboard.press('Enter');
     await focusedInView(page, card);
+
+    // Explicit return leaves location.state behind; the next POP must restore the most recent card.
     const secondCard = page.getByRole('link', { name: /back-12/ });
     await secondCard.press('Enter');
     await focusedInView(page, page.getByRole('heading', { name: 'back-12', exact: true }));
