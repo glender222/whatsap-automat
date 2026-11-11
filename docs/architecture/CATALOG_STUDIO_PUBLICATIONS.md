@@ -33,7 +33,7 @@ El recibo de catálogo conserva `graphId`, `version`, `evaluationId`, `mode`, `s
 
 El manifiesto persistido contiene versiones de perfil, verificador, capability y adaptador, IDs de revisión/suite/evaluación, límites, UUID de rondas, referencias a ledgers, hashes de peticiones/resultados/aserciones/herramientas, consumos y latencias. Una proyección explícita excluye entradas, prompts, nombres/precios de productos, respuestas y ciphertext. El hash ordena claves de objetos para ser estable después de almacenar JSONB. El recibo permanece consultable cuando el TTL de los checkpoints ha vencido; no prolonga la retención del texto.
 
-El campo `active` de `GET /execution` muestra la publicación más reciente del grafo en el modo de ejecución. No filtran por la revisión o perfil consultado ni recuperan silenciosamente una publicación de texto anterior. La interfaz debe comparar versión y perfil antes de ofrecer acciones. Un binding existente continúa fijado a su revisión exacta; ninguna publicación posterior lo mueve.
+El campo `active` de `GET /execution` muestra la publicación más reciente del grafo en el modo de ejecución. Studio muestra su versión y perfil y comprueba ambos antes de ofrecer acciones. Un binding existente continúa fijado a su revisión exacta.
 
 Los resultados de evaluación añaden `evidenceVersion: 'catalog-evaluation-v1' | null`, `publicationAllowed: boolean`, `publicationEvidence: boolean` y `publicationBlocker: string | null`. En evaluaciones aprobadas, observar vuelve a verificar el gate sin cambiar `status` o `passed` históricos. Esta disponibilidad es orientativa: POST vuelve a verificar todo al escribir.
 
@@ -48,6 +48,10 @@ Los resultados de evaluación añaden `evidenceVersion: 'catalog-evaluation-v1' 
 Sin bloqueo, ambos booleanos son verdaderos. En `SUPERSEDED`, `publicationEvidence` sigue verdadero pero `publicationAllowed` es falso. Conceder de nuevo un permiso puede producir `EVIDENCE` si su huella ya cambió. Los conflictos POST mantienen ProblemDetails `code=CONFLICT` con el motivo en `detail`; la pausa mantiene la respuesta de proveedor no disponible existente.
 
 `GET /execution.profile` conserva `publicationAllowed:false` porque no identifica una evaluación seleccionada. Añade `publicationSupported`, verdadero cuando el proveedor y los límites admiten al menos los dos casos requeridos, más `executionAllowed:false` y `whatsappBindingAllowed:false`. La compatibilidad de compilación por sí sola no constituye evidencia.
+
+Si cambian los permisos entre consultar la evaluación y publicar, Studio usa el `409` para volver a leer la disponibilidad y el recibo activo. Bloquea la acción anterior, conserva el resultado histórico y enfoca la explicación del bloqueo. Con el permiso restablecido, una evaluación nueva puede reunir evidencia vigente. Chromium reproduce este recorrido con un cambio del modo de Alfa y verifica también la publicación y consulta independiente de Bravo.
+
+El TTL de los checkpoints invalida el contenido al vencer y un barrido de `App.start` retira el texto cifrado en lotes por empresa. El manifiesto de publicación y la contabilidad se conservan. [Retención y pruebas](../qa/CATALOG_CHECKPOINT_RETENTION.md).
 
 ## Integración de WhatsApp pendiente
 

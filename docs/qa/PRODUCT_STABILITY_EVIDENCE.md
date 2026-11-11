@@ -258,6 +258,18 @@ El ejemplo inicial del editor validaba estructura, pero no preparaba el modelo n
 - **Después.** `catalog-router-v1` fija cada ronda y la lectura autorizada en PostgreSQL. Studio guarda suites con expectativas de texto y de herramientas. La evaluación contrasta las expectativas con el registro de la herramienta y los dos ledgers de cada caso. Reintentar el mismo run recupera lo confirmado y un resultado incompleto no aprueba la suite.
 - **Validación.** La instalación limpia y la actualización desde 064 pasaron. Ochenta y cuatro pruebas combinadas cubrieron catálogo, Studio, cuotas y runtime estricto de texto. Chromium usó la aplicación y PostgreSQL con Alfa y Bravo, el mismo identificador de grafo y productos distintos. Cada empresa aprobó un caso con búsqueda y otro sin ella, recuperó el resultado al recargar y comprobó cuatro ledgers propios. El API rechaza publicar esta evaluación y la interfaz omite esa acción. [Arquitectura, contrato y reproducción](../architecture/CATALOG_STUDIO_EVALUATIONS.md) · [Prueba de navegador](../../Frontend_py_whatsaapweb/e2e/agent-studio-catalog.integration.spec.ts).
 
+## IA-12. Publicación del perfil de catálogo con evidencia vigente
+
+- **Antes.** Una evaluación aprobada del router de catálogo sólo producía evidencia de Studio. La API rechazaba publicar el perfil. En la primera prueba de la nueva publicación, revocar el modo de Alfa después de evaluar producía `409`, pero dejaba habilitado el botón con la evidencia anterior.
+- **Después.** Studio publica una revisión exacta cuando la suite acredita un caso con `catalog.search` y otro con la herramienta prohibida. El recibo fija revisión, evidencia y permisos mediante hashes. Ante conflicto, Studio consulta el estado actual y enfoca la explicación. La revisión publicada sigue disponible como recibo histórico.
+- **Validación.** Alfa y Bravo publicaron desde Chromium con el mismo identificador de grafo y catálogos separados. En Alfa, una suite de un solo camino quedó bloqueada y una revocación posterior a evaluar deshabilitó la publicación. Restablecer el acceso exigió una evaluación nueva. Ambas empresas consultaron su publicación tras recargar. El binding previo de texto conserva su revisión y los endpoints de ejecución y vínculo de catálogo permanecen cerrados en este corte. [Contrato y casos PostgreSQL](../architecture/CATALOG_STUDIO_PUBLICATIONS.md) · [Prueba de Studio](../../Frontend_py_whatsaapweb/e2e/agent-studio-catalog.integration.spec.ts).
+
+## IA-13. Retención sin tráfico de Studio
+
+- **Antes.** Dos empresas con checkpoints vencidos conservaban sus cifrados si nadie volvía a consultar una evaluación.
+- **Después.** La aplicación recorre las empresas en páginas y limpia lotes de checkpoints vencidos. El borrado físico es eventual y conserva hashes, reservas y ledgers. Cerrar el servidor detiene nuevas admisiones y espera los lotes iniciados.
+- **Validación.** La prueba de `App.start` observó por SQL la eliminación de cifrados de Alfa y Bravo sin usar HTTP. Una fila bloqueada quedó pendiente y la otra empresa avanzó. Se comprobaron lotes de 100, ejecución concurrente y arranque con el esquema anterior sin clave de cifrado. [Reproducción y comandos](CATALOG_CHECKPOINT_RETENTION.md).
+
 ## WF-01. Ingreso mientras se revierte una revisión publicada
 
 - **Antes.** CI devolvió `WORKFLOW_NOT_PUBLISHED` durante una reversión válida. La regresión local mantuvo la reversión abierta hasta observar en PostgreSQL que un webhook esperaba su bloqueo. El ingreso falló al intentar fijar la revisión mediante una consulta que también bloqueaba la definición.
@@ -275,5 +287,5 @@ El ejemplo inicial del editor validaba estructura, pero no preparaba el modelo n
 | --- | --- |
 | Bandeja en tiempo real | Filtro por etiqueta, reconexión, reorden de webhooks e historial paginado cubiertos en MSG-04 y MSG-05. |
 | Envío y recepción | MSG-06 a MSG-08 cubren envíos humanos y automáticos, adjuntos, entrega incierta, recuperación tras reinicio y recibos en la bandeja con Graph local. Falta el recorrido en navegador con dos líneas Meta reales. |
-| Harness IA | IA-03 a IA-11 cubren Studio, cuota, autorización de derivaciones, reclamo de efectos, el perfil de texto y la evaluación del router de catálogo. Faltan publicación y ejecución canónica de catálogo en WhatsApp, perfiles con herramientas de efectos, conciliación por proveedor y piloto con proveedor real. |
+| Harness IA | IA-03 a IA-13 cubren Studio, cuota, autorización de derivaciones, reclamo de efectos, el perfil de texto y la evaluación, publicación y retención del router de catálogo. Faltan vinculación y ejecución canónica de catálogo en WhatsApp, perfiles con herramientas de efectos, conciliación por proveedor y piloto con proveedor real. |
 | Flujo operativo y navegación | UX-07 a UX-13 cubren conversación, pedido, pago y regreso, aprobación, conexión, conciliación con el proveedor local, pausa del agente publicado y regreso al listado de Studio. Falta el ensayo con una cuenta autorizada de Mercado Pago y la validación independiente del candidato completo. |
