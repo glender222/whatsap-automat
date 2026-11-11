@@ -1,6 +1,6 @@
 # Evaluaciones de catálogo en Studio
 
-Estado del corte: 2026-11-11. `catalog-router-v1` participa en el flujo normal de evaluaciones de Studio con proveedor real acotado. **La publicación exige además el gate versionado de 066; vincular con WhatsApp, ejecutar manualmente una publicación y enviar mensajes siguen bloqueados.** Véase [publicaciones de catálogo](CATALOG_STUDIO_PUBLICATIONS.md). La API devuelve scorecards y referencias de evidencia; no devuelve texto generado o contenido del catálogo.
+Estado del corte: 2026-11-11. `catalog-router-v1` participa en el flujo normal de evaluaciones de Studio con proveedor real acotado. **La publicación exige el gate versionado de066; el [corte067](CATALOG_WHATSAPP_RUNTIME.md) añade binding explícito y WhatsApp canónico. La ejecución manual permanece bloqueada.** Véase [publicaciones de catálogo](CATALOG_STUDIO_PUBLICATIONS.md). La API devuelve scorecards y referencias de evidencia; no devuelve texto generado o contenido del catálogo.
 
 ## Discriminador y compatibilidad
 
@@ -69,9 +69,9 @@ La eliminación física es eventual: el TTL de una hora bloquea reutilizar el co
 
 ## Publicación y próximos controles
 
-`AgentStudioPublications` permite el perfil mediante el [gate de publicación 066](CATALOG_STUDIO_PUBLICATIONS.md): evidencia durable versionada, cobertura de consulta y respuesta sin herramientas, suite/revisión exactas y permisos vigentes. El binding de WhatsApp conserva explícitamente el perfil de texto. No existe un endpoint para devolver directamente la respuesta del nuevo runtime.
+`AgentStudioPublications` permite el perfil mediante el [gate de publicación 066](CATALOG_STUDIO_PUBLICATIONS.md): evidencia durable versionada, cobertura de consulta y respuesta sin herramientas, suite/revisión exactas y permisos vigentes. El [binding de067](CATALOG_WHATSAPP_RUNTIME.md) exige perfil y recibo explícitos para catálogo; conserva los bindings previos de texto. No existe un endpoint para devolver directamente la respuesta del runtime de checkpoints.
 
-Para habilitar catálogo fuera de evaluación aún hacen falta binding explícito que no mueva revisiones antiguas, fuente única tenant/inbound, controles canónicos `ownership_epoch`/`ia_paused_at` de 063 y entrega/sugerencia bajo el flujo existente. Publicar no omite esos controles.
+La integración067 exige binding explícito que no mueve revisiones antiguas, fuente única tenant/inbound, controles canónicos `ownership_epoch`/`ia_paused_at` de063 y entrega/sugerencia bajo el flujo existente. Publicar no omite esos controles.
 
 ## Pruebas
 

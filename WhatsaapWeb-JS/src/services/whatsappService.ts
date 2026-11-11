@@ -715,7 +715,9 @@ export class WhatsAppService {
       action: 'suggest', reason: 'strict_published_agent',
       expiresAt: suggestion.expiresAt,
       origin: { kind: 'published_graph', graphId: suggestion.graphId, version: suggestion.version,
-        specHash: suggestion.specHash, runId: suggestion.runId } };
+        specHash: suggestion.specHash, runId: suggestion.runId,
+        ...(suggestion.profile ? { profile: suggestion.profile, evidenceVersion: suggestion.evidenceVersion,
+          evidenceHash: suggestion.evidenceHash } : {}) } };
     emitConversation(work.companyId, notification.chatId, 'agent:suggestion', notification);
   }
 

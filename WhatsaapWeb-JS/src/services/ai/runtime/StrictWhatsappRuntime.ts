@@ -7,7 +7,7 @@ import { isBoundedText, type BoundedTextResult } from '../gateway/BoundedTextCom
 import { BoundedAgentDispatch } from '../studio/BoundedAgentDispatch';
 import { StrictWhatsappRuntimeStore, type StrictWhatsappRun } from './StrictWhatsappRuntimeStore';
 
-/** One published linear-text-v1 turn. Router/tool profiles are intentionally not inferred from a text publication. */
+/** One canonical inbound, with its explicitly bound profile. Text bindings never acquire tools implicitly. */
 export class StrictWhatsappRuntime {
   private readonly execution;
   constructor(
@@ -29,7 +29,29 @@ export class StrictWhatsappRuntime {
     if (!run) throw new AiDispatchUnavailableError();
     await this.assertAuthorized(input, run, false);
     if (run.state === 'completed') return this.result(run, 'none', '', 'strict_already_completed');
-    if (run.state === 'prepared') {
+    if (run.state === 'prepared' && run.binding.profile === 'catalog-router-v1') {
+      const { CatalogRouterCheckpointRuntime } = await import('./CatalogRouterCheckpointRuntime');
+      const pinned = run;
+      const guard = async (db: Queryable) => {
+        await this.assertAuthorized(input,pinned,false,db);
+        const { rowCount } = await db.query(`SELECT id FROM strict_whatsapp_runs WHERE tenant_id=$1 AND id=$2
+          AND execution_profile='catalog-router-v1' AND state IN ('prepared','ready') AND output_expires_at>clock_timestamp()`,
+        [input.companyId,pinned.id]);
+        if (rowCount !== 1) throw new AiDispatchUnavailableError();
+      };
+      const outcome = await new CatalogRouterCheckpointRuntime(this.uow,undefined,undefined,this.execution).execute({
+        tenantId:input.companyId,runId:run.id,graphId:run.binding.graphId,version:run.binding.version,
+        specHash:run.binding.specHash,input:input.message,operation:'completion',signal:input.signal,
+      },guard);
+      if (outcome.status === 'completed') {
+        await this.store.recordCatalogCompletion(input.companyId,run.id,guard);
+        run = (await this.store.getRun(input.companyId,run.id))!;
+      } else if (outcome.status === 'uncertain' || outcome.status === 'in_progress') {
+        return this.result(run,'none','','strict_model_unconfirmed','uncertain');
+      } else {
+        throw new AiDispatchUnavailableError();
+      }
+    } else if (run.state === 'prepared') {
       const { adapter, isByok } = await this.execution.resolveTransport({ tenantId: input.companyId });
       let captured: BoundedTextResult | undefined;
       const quota = this.execution.quota;
@@ -63,16 +85,25 @@ export class StrictWhatsappRuntime {
       }
     }
     if (run.state !== 'ready' || !run.output) return this.result(run, 'none', '', 'strict_model_unconfirmed', 'uncertain');
-    const mode = await this.assertAuthorized(input, run, false);
+    const mode = await this.uow.run(input.companyId,async (db) => {
+      const mode = await this.assertAuthorized(input,run,false,db);
+      await this.store.verifyCatalogResult(db,input.companyId,run!);
+      return mode;
+    });
     const action = mode === 'automator' && run.binding.mode === 'auto' ? 'auto_reply' : 'suggest';
     return this.result(run, action, run.output, 'strict_published_agent');
   }
 
   /** Also used by the canonical send transaction, so a pause, unbind or mode change fences an automatic send. */
   async canDeliver(input: OrchestratorInput, runId: string, db?: Queryable): Promise<boolean> {
-    const run = await this.store.getRun(input.companyId, runId, db);
-    if (!run || run.state !== 'ready') return false;
-    try { await this.assertAuthorized(input, run, true, db); return true; } catch { return false; }
+    const check = async (client: Queryable) => {
+      const run = await this.store.getRun(input.companyId,runId,client);
+      if (!run || run.state !== 'ready') return false;
+      await this.assertAuthorized(input,run,true,client);
+      await this.store.verifyCatalogResult(client,input.companyId,run);
+      return true;
+    };
+    try { return db ? await check(db) : await this.uow.run(input.companyId,check); } catch { return false; }
   }
 
   async finish(tenantId: number, runId: string, outcome: 'completed' | 'uncertain') {
@@ -126,7 +157,8 @@ export class StrictWhatsappRuntime {
   private result(run: StrictWhatsappRun, action: OrchestratorResult['action'], reply: string, reason: string,
     strictOutcome?: 'uncertain'): OrchestratorResult {
     return { routerMissing: false, route: 'published_agent', agentId: null, action, reply,
-      confidence: 1, reason, handoffTicketId: null, toolResults: [], rounds: 1, strictRunId: run.id, strictOutcome };
+      confidence: 1, reason, handoffTicketId: null, toolResults: [],
+      rounds: run.binding.profile === 'catalog-router-v1' ? 2 : 1, strictRunId: run.id, strictOutcome };
   }
 }
 

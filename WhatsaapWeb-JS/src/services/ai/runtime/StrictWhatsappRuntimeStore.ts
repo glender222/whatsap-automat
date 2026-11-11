@@ -6,13 +6,14 @@ import { SecretCipher } from '../../security/SecretCipher';
 import { boundedTextCapability, isBoundedText } from '../gateway/BoundedTextCompletion';
 import { loadDraft } from '../studio/AgentStudioDrafts';
 import { preflightBoundedAgentDispatch } from '../studio/BoundedAgentDispatch';
+import type { CatalogWhatsappPin } from './CatalogWhatsappPublication';
 
 const uuid = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i;
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 const positive = (value: number) => Number.isSafeInteger(value) && value > 0;
 const sourceId = (value: string) => /^[1-9]\d{0,18}$/.test(value) && BigInt(value) <= 9_223_372_036_854_775_807n;
 
-export interface StrictWhatsappBinding {
+export interface StrictWhatsappBinding extends CatalogWhatsappPin {
   revision: string;
   graphId: string;
   version: number;
@@ -48,6 +49,9 @@ export interface StrictWhatsappSuggestion {
   conversationId: string;
   reply: string;
   expiresAt: string;
+  profile?: 'catalog-router-v1';
+  evidenceVersion?: string;
+  evidenceHash?: string;
 }
 
 interface PrepareCommand {
@@ -78,29 +82,36 @@ export class StrictWhatsappBindingConflictError extends Error {
 
 function binding(row: Record<string, any>): StrictWhatsappBinding {
   return { revision: row.binding_revision ?? row.revision, graphId: row.graph_id, version: row.graph_version, specHash: row.spec_hash,
-    mode: row.binding_mode ?? row.mode, boundBy: Number(row.bound_by), boundAt: row.bound_at.toISOString() };
+    mode: row.binding_mode ?? row.mode, boundBy: Number(row.bound_by), boundAt: row.bound_at.toISOString(),
+    ...(row.execution_profile === 'catalog-router-v1' ? { profile: row.execution_profile,
+      evidenceVersion: row.publication_evidence_version, evidenceHash: row.publication_evidence_hash } : {}) };
 }
 
 /** Stores durable identity and short-lived encrypted output; callers authorize the actor and provider dispatch. */
 export class StrictWhatsappRuntimeStore {
   constructor(private readonly uow: TenantScopedUoW = tenantScopedUoW, private readonly cipher = new SecretCipher()) {}
 
-  async bind(tenantId: number, command: Pick<StrictWhatsappBinding, 'graphId' | 'version' | 'specHash' | 'mode'> & { actorId: number },
+  async bind(tenantId: number, command: Pick<StrictWhatsappBinding, 'graphId' | 'version' | 'specHash' | 'mode' | 'profile' | 'evidenceVersion' | 'evidenceHash'> & { actorId: number },
     expectedRevision: string | null) {
     if (!positive(command.actorId) || !positive(command.version) || command.version > 2_147_483_647 ||
         !/^[A-Za-z0-9_-]{1,128}$/.test(command.graphId) || !/^[0-9a-f]{64}$/.test(command.specHash) ||
-        !['suggest', 'auto'].includes(command.mode)) throw new TypeError('Invalid WhatsApp binding');
+        !['suggest', 'auto'].includes(command.mode) ||
+        (command.profile === undefined && (command.evidenceHash !== undefined || command.evidenceVersion !== undefined)) ||
+        (command.profile !== undefined && command.profile !== 'catalog-router-v1')) throw new TypeError('Invalid WhatsApp binding');
     return this.uow.run(tenantId, async (db) => {
       await this.assertBindingRevision(db, tenantId, expectedRevision);
       await this.loadPin(db, tenantId, command);
       const { rows: [row] } = await db.query(`
-        INSERT INTO strict_whatsapp_bindings (tenant_id, graph_id, graph_version, spec_hash, mode, bound_by, revision)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        INSERT INTO strict_whatsapp_bindings (tenant_id, graph_id, graph_version, spec_hash, mode, bound_by, revision,
+          execution_profile,publication_evidence_version,publication_evidence_hash)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         ON CONFLICT (tenant_id) DO UPDATE SET graph_id = EXCLUDED.graph_id, graph_version = EXCLUDED.graph_version,
           spec_hash = EXCLUDED.spec_hash, mode = EXCLUDED.mode, bound_by = EXCLUDED.bound_by, bound_at = clock_timestamp(),
-          revision = EXCLUDED.revision
+          revision = EXCLUDED.revision, execution_profile=EXCLUDED.execution_profile,
+          publication_evidence_version=EXCLUDED.publication_evidence_version, publication_evidence_hash=EXCLUDED.publication_evidence_hash
         RETURNING *
-      `, [tenantId, command.graphId, command.version, command.specHash, command.mode, command.actorId, randomUUID()]);
+      `, [tenantId, command.graphId, command.version, command.specHash, command.mode, command.actorId, randomUUID(),
+        command.profile ?? 'linear-text-v1',command.evidenceVersion ?? null,command.evidenceHash ?? null]);
       return binding(row);
     });
   }
@@ -156,18 +167,24 @@ export class StrictWhatsappRuntimeStore {
       const pin = binding(selected);
       const graph = await this.loadPin(db, tenantId, pin);
       const timeoutMs = Math.min(command.timeoutMs, graph.limits.maxDurationSeconds * 1000, 30000);
-      const plan = preflightBoundedAgentDispatch({ tenantId, graph, input: command.inputText, timeoutMs });
+      const plan = pin.profile === 'catalog-router-v1'
+        ? { ok: command.inputText.length <= 1024 && JSON.stringify(command.inputText).length <= 1536,
+          requestHash: hash(JSON.stringify(['catalog-whatsapp-v1',tenantId,command.jobId,command.messageId,command.conversationId,
+            pin.revision,pin.specHash,pin.evidenceHash,source.ownership_epoch,source.ia_paused_at,hash(command.inputText)])) }
+        : preflightBoundedAgentDispatch({ tenantId, graph, input: command.inputText, timeoutMs });
       if (!plan.ok) throw new StrictWhatsappBindingError();
       const { rows: [row] } = await db.query(`
         INSERT INTO strict_whatsapp_runs (tenant_id, id, job_id, inbound_message_id, conversation_id, attempt_id,
           graph_id, graph_version, spec_hash, binding_mode, bound_by, bound_at, input_hash, request_hash, timeout_ms,
-          output_expires_at, created_at, binding_revision, ownership_epoch, ia_paused_at)
+          output_expires_at, created_at, binding_revision, ownership_epoch, ia_paused_at,
+          execution_profile,publication_evidence_version,publication_evidence_hash)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-          LEAST($16::timestamptz + interval '24 hours', statement_timestamp() + interval '1 hour'), statement_timestamp(), $17, $18, $19)
+          LEAST($16::timestamptz + interval '24 hours', statement_timestamp() + interval '1 hour'), statement_timestamp(), $17, $18, $19, $20, $21, $22)
         RETURNING *
       `, [tenantId, randomUUID(), command.jobId, command.messageId, command.conversationId, randomUUID(),
         pin.graphId, pin.version, pin.specHash, pin.mode, pin.boundBy, pin.boundAt, hash(command.inputText),
-        plan.requestHash, timeoutMs, source.occurred_at, pin.revision, source.ownership_epoch, source.ia_paused_at]);
+        plan.requestHash, timeoutMs, source.occurred_at, pin.revision, source.ownership_epoch, source.ia_paused_at,
+        pin.profile ?? 'linear-text-v1',pin.evidenceVersion ?? null,pin.evidenceHash ?? null]);
       return this.asRun(db, tenantId, row);
     });
   }
@@ -206,14 +223,72 @@ export class StrictWhatsappRuntimeStore {
               AND newer.id > run.inbound_message_id
           )
         ORDER BY run.created_at DESC, run.id DESC LIMIT 1
-        FOR UPDATE OF run FOR SHARE OF binding, policy
+        FOR UPDATE OF run FOR SHARE OF binding, policy, settings, conversation
       `, [tenantId, conversationId]);
       if (!row) return null;
-      const run = await this.asRun(db, tenantId, row);
-      if (!run.output) return null;
-      return { runId: run.id, graphId: run.binding.graphId, version: run.binding.version, specHash: run.binding.specHash,
-        inboundMessageId: run.messageId, conversationId: run.conversationId, reply: run.output, expiresAt: run.outputExpiresAt };
+      try {
+        const run = await this.asRun(db, tenantId, row);
+        if (!run.output) return null;
+        await this.verifyCatalogResult(db,tenantId,run);
+        return { runId: run.id, graphId: run.binding.graphId, version: run.binding.version, specHash: run.binding.specHash,
+          inboundMessageId: run.messageId, conversationId: run.conversationId, reply: run.output, expiresAt: run.outputExpiresAt,
+          ...(run.binding.profile ? { profile: run.binding.profile, evidenceVersion: run.binding.evidenceVersion,
+            evidenceHash: run.binding.evidenceHash } : {}) };
+      } catch (error) {
+        if (error instanceof StrictWhatsappBindingError || error instanceof StrictWhatsappRunConflictError ||
+            typeof error === 'object' && error !== null && 'code' in error &&
+              typeof error.code === 'string' && /^(CATALOG_|AI_ADMISSION_)/.test(error.code)) return null;
+        throw error;
+      }
     });
+  }
+
+  /** Copies a confirmed completion checkpoint; a crash before this commit reuses its two settled rounds. */
+  async recordCatalogCompletion(tenantId: number, runId: string,
+    authorize: (db: Queryable, run: StrictWhatsappRun) => Promise<unknown>): Promise<void> {
+    await this.uow.run(tenantId, async (db) => {
+      const run = await this.getRun(tenantId,runId,db);
+      if (!run || run.binding.profile !== 'catalog-router-v1') throw new StrictWhatsappRunConflictError();
+      if (run.state !== 'prepared' && run.state !== 'ready') return;
+      await authorize(db,run);
+      const proof = await this.catalogResult(db,tenantId,run);
+      const answer = proof.rounds.find(({ slot }) => slot === 'answer')!;
+      const outputHash = hash(proof.text);
+      if (run.state === 'ready') {
+        if (run.ledgerId !== answer.ledgerId || run.output !== proof.text) throw new StrictWhatsappRunConflictError();
+        return;
+      }
+      await db.query(`WITH eligibility AS MATERIALIZED (
+          SELECT output_expires_at>clock_timestamp() AS live FROM strict_whatsapp_runs WHERE tenant_id=$1 AND id=$2
+        ) UPDATE strict_whatsapp_runs SET ledger_id=$3,output_hash=$4,
+          output_encrypted=CASE WHEN eligibility.live THEN $5 ELSE NULL END,
+          state=CASE WHEN eligibility.live THEN 'ready' ELSE 'uncertain' END,updated_at=clock_timestamp()
+        FROM eligibility WHERE tenant_id=$1 AND id=$2 AND execution_profile='catalog-router-v1' AND state='prepared'`,
+      [tenantId,runId,answer.ledgerId,outputHash,this.cipher.encrypt(proof.text)]);
+    });
+  }
+
+  /** Rechecks the actual snapshot before delivery or a suggestion read; the historical publication grants no live data access. */
+  async verifyCatalogResult(db: Queryable, tenantId: number, run: StrictWhatsappRun): Promise<void> {
+    if (run.binding.profile !== 'catalog-router-v1') return;
+    const proof = await this.catalogResult(db,tenantId,run);
+    if (run.state !== 'ready' || run.output !== proof.text || run.ledgerId !== proof.rounds.find(({ slot }) => slot === 'answer')?.ledgerId) {
+      throw new StrictWhatsappRunConflictError();
+    }
+  }
+
+  private async catalogResult(db: Queryable, tenantId: number, run: StrictWhatsappRun) {
+    const { compileCatalogRouterExecutionProfile } = await import('../studio/CatalogRouterExecutionProfile');
+    const { CatalogEvaluationEvidence } = await import('../studio/CatalogEvaluationEvidence');
+    const compiled = compileCatalogRouterExecutionProfile(run.graph);
+    if (!compiled.compatible) throw new StrictWhatsappBindingError();
+    const { rows: [message] } = await db.query(`SELECT raw_payload_json #>> '{text,body}' AS input
+      FROM messages WHERE company_id=$1 AND id=$2 AND conversation_id=$3 AND direction='inbound'`,
+    [tenantId,run.messageId,run.conversationId]);
+    if (!message || typeof message.input !== 'string' || hash(message.input) !== run.inputHash) throw new StrictWhatsappRunConflictError();
+    return new CatalogEvaluationEvidence(this.uow,this.cipher).verify(db,{ tenantId,runId:run.id,
+      graphId:run.binding.graphId,version:run.binding.version,specHash:run.binding.specHash,
+      input:message.input,operation:'completion' },compiled.plan);
   }
 
   /** Called by quota settlement with its tenant transaction; failure rolls back output and accounting together. */
@@ -228,7 +303,7 @@ export class StrictWhatsappRuntimeStore {
         AND ledger.operation = 'completion' AND ledger.status = 'success' AND ledger.provider = $4 AND ledger.model = $5
       WHERE run.tenant_id = $1 AND run.id = $2 FOR UPDATE OF run
     `, [tenantId, runId, ledgerId, boundedTextCapability.provider, boundedTextCapability.model]);
-    if (!run) throw new StrictWhatsappRunConflictError();
+    if (!run || run.execution_profile !== 'linear-text-v1') throw new StrictWhatsappRunConflictError();
     const outputHash = hash(output);
     if (run.ledger_id !== null) {
       if (Number(run.ledger_id) !== ledgerId || run.output_hash !== outputHash) throw new StrictWhatsappRunConflictError();
@@ -244,10 +319,15 @@ export class StrictWhatsappRuntimeStore {
 
   async finish(tenantId: number, runId: string, outcome: 'completed' | 'uncertain'): Promise<boolean> {
     if (!uuid.test(runId) || !['completed', 'uncertain'].includes(outcome)) throw new TypeError('Invalid WhatsApp outcome');
-    return this.uow.run(tenantId, async (db) => (await db.query(`
+    const result = await this.uow.run(tenantId, async (db) => db.query(`
       UPDATE strict_whatsapp_runs SET state = $3, output_encrypted = NULL, updated_at = clock_timestamp()
-      WHERE tenant_id = $1 AND id = $2 AND state IN ('prepared', 'ready', $3)
-    `, [tenantId, runId, outcome])).rowCount === 1);
+      WHERE tenant_id = $1 AND id = $2 AND state IN ('prepared', 'ready', $3) RETURNING execution_profile
+    `, [tenantId, runId, outcome]));
+    if (result.rows[0]?.execution_profile === 'catalog-router-v1') {
+      const { CatalogRouterCheckpointStore } = await import('./CatalogRouterCheckpointStore');
+      await new CatalogRouterCheckpointStore(this.uow,this.cipher).invalidate(tenantId,runId);
+    }
+    return result.rowCount === 1;
   }
 
   /** Bounded tenant cleanup for the worker; reads also erase an expired run before returning it. */
@@ -261,7 +341,12 @@ export class StrictWhatsappRuntimeStore {
     `, [tenantId])).rowCount ?? 0);
   }
 
-  private async loadPin(db: Queryable, tenantId: number, pin: Pick<StrictWhatsappBinding, 'graphId' | 'version' | 'specHash'>) {
+  private async loadPin(db: Queryable, tenantId: number, pin: CatalogWhatsappPin) {
+    if (pin.profile === 'catalog-router-v1') {
+      const { loadCatalogWhatsappPublication } = await import('./CatalogWhatsappPublication');
+      try { return (await loadCatalogWhatsappPublication(db,this.uow,tenantId,pin)).graph; }
+      catch { throw new StrictWhatsappBindingError(); }
+    }
     const { rows } = await db.query(`
       SELECT graph_id FROM agent_studio_publications WHERE tenant_id = $1 AND graph_id = $2
         AND version = $3 AND spec_hash = $4 AND execution_mode = 'provider' AND execution_profile = 'linear-text-v1'

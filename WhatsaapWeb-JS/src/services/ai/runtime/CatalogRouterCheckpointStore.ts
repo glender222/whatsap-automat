@@ -22,6 +22,7 @@ export type CatalogRouterRoundSlot = 'router' | 'answer';
 export type CatalogRouterToolOutput = Record<string, unknown>;
 
 export interface CatalogRouterPrepareCommand {
+  operation?: 'eval' | 'completion';
   id: string;
   graphId: string;
   version: number;
@@ -61,6 +62,7 @@ export interface CatalogRouterToolCheckpoint {
   output: CatalogRouterToolOutput;
 }
 type RunRow = {
+  operation: 'eval' | 'completion';
   id: string; graph_id: string; graph_version: number; spec_hash: string; input_hash: string; authorization_hash: string;
   max_tokens: string; max_cost_micro_usd: string; max_duration_seconds: number; tokens_used: string; cost_micro_usd: string;
   deadline_at: Date; expires_at: Date; state: CatalogRouterCheckpointRun['state'];
@@ -84,6 +86,7 @@ function requireIntent(command: CatalogRouterRoundIntent): void {
 }
 function asRun(row: RunRow): CatalogRouterCheckpointRun {
   return {
+    ...(row.operation === 'completion' ? { operation: row.operation } : {}),
     id: row.id, graphId: row.graph_id, version: row.graph_version, specHash: row.spec_hash,
     inputHash: row.input_hash, authorizationHash: row.authorization_hash, maxTokens: Number(row.max_tokens),
     maxCostMicroUsd: Number(row.max_cost_micro_usd), maxDurationSeconds: row.max_duration_seconds,
@@ -124,19 +127,19 @@ export class CatalogRouterCheckpointStore {
 
   async prepare(tenantId: number, command: CatalogRouterPrepareCommand): Promise<CatalogRouterCheckpointRun> {
     requireId(command.id);
-    if (!/^[A-Za-z0-9_-]{1,128}$/.test(command.graphId) || !positive(command.version) || command.version > 2_147_483_647 ||
+    if (!['eval','completion'].includes(command.operation ?? 'eval') || !/^[A-Za-z0-9_-]{1,128}$/.test(command.graphId) || !positive(command.version) || command.version > 2_147_483_647 ||
         ![command.specHash, command.inputHash, command.authorizationHash].every((value) => sha256.test(value)) ||
         !positive(command.maxTokens) || !positive(command.maxCostMicroUsd) ||
         !positive(command.maxDurationSeconds) || command.maxDurationSeconds > 60) throw new CatalogRouterCheckpointError('CHECKPOINT_INVALID');
     return this.transaction(tenantId, async (db) => {
       await db.query(`WITH instant AS (SELECT clock_timestamp() AS now)
         INSERT INTO catalog_router_runs (tenant_id,id,graph_id,graph_version,spec_hash,input_hash,authorization_hash,
-          max_tokens,max_cost_micro_usd,max_duration_seconds,created_at,deadline_at,expires_at)
-        SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10::integer,now,now+$10::integer*interval '1 second',now+interval '1 hour' FROM instant
+          max_tokens,max_cost_micro_usd,max_duration_seconds,created_at,deadline_at,expires_at,operation,strict_whatsapp_run_id)
+        SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10::integer,now,now+$10::integer*interval '1 second',now+interval '1 hour',$11,CASE WHEN $11='completion' THEN $2::uuid ELSE NULL END FROM instant
         ON CONFLICT (tenant_id,id) DO NOTHING`, [tenantId,command.id,command.graphId,command.version,command.specHash,
-        command.inputHash,command.authorizationHash,command.maxTokens,command.maxCostMicroUsd,command.maxDurationSeconds]);
+        command.inputHash,command.authorizationHash,command.maxTokens,command.maxCostMicroUsd,command.maxDurationSeconds,command.operation ?? 'eval']);
       const row = await this.lockRun(db, tenantId, command.id);
-      if (!row || row.graph_id !== command.graphId || row.graph_version !== command.version || row.spec_hash !== command.specHash ||
+      if (!row || row.operation !== (command.operation ?? 'eval') || row.graph_id !== command.graphId || row.graph_version !== command.version || row.spec_hash !== command.specHash ||
           row.input_hash !== command.inputHash || row.authorization_hash !== command.authorizationHash ||
           BigInt(row.max_tokens) !== BigInt(command.maxTokens) || BigInt(row.max_cost_micro_usd) !== BigInt(command.maxCostMicroUsd) ||
           row.max_duration_seconds !== command.maxDurationSeconds) throw new CatalogRouterCheckpointError('CHECKPOINT_CONFLICT');
@@ -215,9 +218,9 @@ export class CatalogRouterCheckpointStore {
       JOIN ai_token_cost_ledger ledger ON ledger.tenant_id=reservation.tenant_id AND ledger.id=reservation.ledger_id
       WHERE reservation.tenant_id=$1 AND reservation.id=$2 AND reservation.request_hash=$3
         AND reservation.status='settled' AND reservation.ledger_id=$4
-        AND reservation.operation='eval' AND reservation.provider=$5 AND reservation.model=$6
-        AND ledger.operation='eval' AND ledger.provider=$5 AND ledger.model=$6`,
-    [tenantId,command.roundId,command.requestHash,command.ledgerId,boundedTextCapability.provider,boundedTextCapability.model]);
+        AND reservation.operation=$7 AND reservation.provider=$5 AND reservation.model=$6
+        AND ledger.operation=$7 AND ledger.provider=$5 AND ledger.model=$6`,
+    [tenantId,command.roundId,command.requestHash,command.ledgerId,boundedTextCapability.provider,boundedTextCapability.model,run.operation]);
     if (!ledger || ledger.total_tokens !== ledger.prompt_tokens + ledger.completion_tokens) {
       throw new CatalogRouterCheckpointError('CHECKPOINT_CONFLICT');
     }

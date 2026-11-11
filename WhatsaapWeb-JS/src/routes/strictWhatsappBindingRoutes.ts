@@ -15,6 +15,9 @@ type BindingInput = {
   specHash: string;
   mode: 'suggest' | 'auto';
   expectedRevision: string | null;
+  profile?: 'catalog-router-v1';
+  evidenceVersion?: string;
+  evidenceHash?: string;
 };
 
 function problem(req: Request, res: Response, code: StandardErrorCode, detail: string, bindingConflict = false) {
@@ -38,13 +41,18 @@ function readBindingInput(body: unknown): BindingInput | null {
   const value = body as Record<string, unknown>;
   const expectedRevision = readExpectedRevision(value.expectedRevision);
   if (expectedRevision === undefined ||
-      Object.keys(value).some((key) => !['graphId', 'version', 'specHash', 'mode', 'expectedRevision'].includes(key)) ||
+      Object.keys(value).some((key) => !['graphId', 'version', 'specHash', 'mode', 'expectedRevision', 'profile', 'evidenceVersion', 'evidenceHash'].includes(key)) ||
       typeof value.graphId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(value.graphId) ||
       typeof value.version !== 'number' || !Number.isSafeInteger(value.version) ||
       value.version < 1 || value.version > 2_147_483_647 ||
       typeof value.specHash !== 'string' || !/^[0-9a-f]{64}$/.test(value.specHash) ||
       (value.mode !== 'suggest' && value.mode !== 'auto')) return null;
-  return { graphId: value.graphId, version: value.version, specHash: value.specHash, mode: value.mode, expectedRevision };
+  if (value.profile === undefined && (value.evidenceVersion !== undefined || value.evidenceHash !== undefined) ||
+      value.profile !== undefined && (value.profile !== 'catalog-router-v1' || value.evidenceVersion !== 'catalog-publication-v1' ||
+        typeof value.evidenceHash !== 'string' || !/^[0-9a-f]{64}$/.test(value.evidenceHash))) return null;
+  return { graphId: value.graphId, version: value.version, specHash: value.specHash, mode: value.mode, expectedRevision,
+    ...(value.profile === 'catalog-router-v1' ? { profile: value.profile, evidenceVersion: value.evidenceVersion as string,
+      evidenceHash: value.evidenceHash as string } : {}) };
 }
 
 export default function createStrictWhatsappBindingRoutes(uow?: TenantScopedUoW): Router {

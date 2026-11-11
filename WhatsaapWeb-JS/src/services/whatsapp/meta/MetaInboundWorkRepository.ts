@@ -116,7 +116,34 @@ export class MetaInboundWorkRepository {
           AND run.tenant_id = work.tenant_id AND run.job_id = work.id
           AND run.inbound_message_id::text = work.payload->>'messageId'
           AND run.conversation_id::text = work.payload->>'conversationId'
-          AND (run.state = 'completed' OR (run.state = 'ready' AND run.output_expires_at > clock_timestamp()))
+          AND (run.state = 'completed' OR (run.state = 'ready' AND run.output_expires_at > clock_timestamp())
+            OR (run.state='prepared' AND run.execution_profile='catalog-router-v1' AND run.output_expires_at>clock_timestamp()
+              AND EXISTS (
+                SELECT 1 FROM catalog_router_runs checkpoint
+                WHERE checkpoint.tenant_id=run.tenant_id AND checkpoint.id=run.id AND checkpoint.strict_whatsapp_run_id=run.id
+                  AND checkpoint.operation='completion' AND checkpoint.state='active' AND checkpoint.expires_at>clock_timestamp()
+                  AND checkpoint.graph_id=run.graph_id AND checkpoint.graph_version=run.graph_version AND checkpoint.spec_hash=run.spec_hash
+                  -- Router confirmation permits continuation. A confirmed answer also permits just copying after the dispatch deadline.
+                  AND EXISTS (SELECT 1 FROM catalog_router_rounds router WHERE router.tenant_id=checkpoint.tenant_id
+                    AND router.run_id=checkpoint.id AND router.slot='router' AND router.state='completed')
+                  AND (checkpoint.deadline_at>clock_timestamp() OR EXISTS (
+                    SELECT 1 FROM catalog_router_rounds answer WHERE answer.tenant_id=checkpoint.tenant_id
+                      AND answer.run_id=checkpoint.id AND answer.slot='answer' AND answer.state='completed'))
+                  -- Never turn an unknown provider outcome into a retry, even if another round was confirmed.
+                  AND NOT EXISTS (
+                    SELECT 1 FROM catalog_router_rounds round
+                    LEFT JOIN ai_quota_reservations reservation ON reservation.tenant_id=round.tenant_id AND reservation.id=round.round_id
+                    LEFT JOIN ai_token_cost_ledger ledger ON ledger.tenant_id=round.tenant_id AND ledger.id=round.ledger_id
+                    WHERE round.tenant_id=checkpoint.tenant_id AND round.run_id=checkpoint.id AND (
+                      round.state='terminal'
+                      OR (round.state='prepared' AND reservation.status IN ('claimed','settled','released'))
+                      OR (round.state='completed' AND (round.output_encrypted IS NULL
+                        OR reservation.status IS DISTINCT FROM 'settled' OR reservation.operation IS DISTINCT FROM 'completion'
+                        OR reservation.ledger_id IS DISTINCT FROM round.ledger_id OR reservation.request_hash IS DISTINCT FROM round.request_hash
+                        OR ledger.status IS DISTINCT FROM 'success' OR ledger.operation IS DISTINCT FROM 'completion'))
+                    )
+                  )
+              )))
       `, [companyId, META_INBOUND_EVENT_TYPE]);
       return (result.rowCount ?? 0) + (resumed.rowCount ?? 0);
     });

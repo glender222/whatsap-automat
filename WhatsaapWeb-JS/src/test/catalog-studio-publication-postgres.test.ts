@@ -32,7 +32,7 @@ const jwt = require('jsonwebtoken') as { sign(claims: Record<string, unknown>, k
 
 const databaseUrl = process.env.STRICT_CATALOG_TEST_DATABASE_URL;
 
-test('Studio publishes catalog evidence without granting execution or WhatsApp binding', {
+test('Studio publishes catalog evidence without granting manual execution or an implicit WhatsApp binding', {
   skip: !databaseUrl && 'STRICT_CATALOG_TEST_DATABASE_URL must select a local _smoke database', timeout: 60000,
 }, async (t) => {
   const url = new URL(databaseUrl!);
@@ -248,7 +248,7 @@ test('Studio publishes catalog evidence without granting execution or WhatsApp b
       assert.match(result.body.evidenceHash, /^[0-9a-f]{64}$/);
       assert.match(result.body.authorizationHash, /^[0-9a-f]{64}$/);
       assert.equal(result.body.executionAllowed, false);
-      assert.equal(result.body.whatsappBindingAllowed, false);
+      assert.equal(result.body.whatsappBindingAllowed, true);
       assert.equal(result.body.graphId, tenant.graph.graphId);
       assert.equal(result.body.version, tenant.graph.version);
       assert.equal(result.body.specHash, tenant.graph.specHash);
@@ -301,6 +301,14 @@ test('Studio publishes catalog evidence without granting execution or WhatsApp b
       assert.ok(JSON.stringify(replay.body).includes('CATALOG_PUBLICATION_EVIDENCE'));
       const state = await request(tenant, '/execution');
       assert.equal(state.status, 200);
+      assert.equal(state.body.mode, 'provider');
+      assert.equal(state.body.profile.name, 'catalog-router-v1');
+      assert.equal(state.body.profile.compatible, false);
+      assert.equal(state.body.profile.issue, 'CATALOG_PROFILE');
+      assert.equal(state.body.profile.whatsappBindingAllowed, false);
+      assert.equal(state.body.profile.maxScenarios, 0);
+      assert.equal(state.body.profile.minScenarioTimeoutMs, 1);
+      assert.equal(state.body.profile.maxScenarioTimeoutMs, 1);
       assert.deepEqual(state.body.active, published.get(bravo)!.body);
       assert.deepEqual((await publicationRow(tenant))[0].receipt, persisted.get(bravo));
       assert.equal(requests.length, before, 'A changed compiler cannot bypass replay verification or call a provider');
@@ -431,7 +439,7 @@ test('Studio publishes catalog evidence without granting execution or WhatsApp b
     assert.equal(newer.body.version, pending.tenant.graph.version);
     assert.notEqual(newer.body.specHash, tenant.graph.specHash);
     assert.equal(newer.body.executionAllowed, false);
-    assert.equal(newer.body.whatsappBindingAllowed, false);
+    assert.equal(newer.body.whatsappBindingAllowed, true);
     assert.deepEqual((await request(pending.tenant, '/execution')).body.active, newer.body);
     assert.deepEqual((await publicationRow(tenant))[0].receipt, persisted.get(alpha));
     assert.equal((await request(pending.tenant, '/execute', { attemptId: randomUUID(), input: 'Visible', timeoutMs: 1000 })).status, 409);

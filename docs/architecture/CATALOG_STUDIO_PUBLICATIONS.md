@@ -1,6 +1,6 @@
 # Publicación del perfil de catálogo
 
-La migración 066 permite publicar `catalog-router-v1` mediante el flujo existente de Studio. Publicar confirma una revisión evaluada; **no habilita ejecución manual, binding, sugerencias ni envío de WhatsApp**. Esos caminos siguen rechazando catálogo hasta integrar la admisión canónica de conversación y su recorrido completo.
+La migración 066 permite publicar `catalog-router-v1` mediante el flujo existente de Studio. Publicar confirma una revisión evaluada. El [corte 067](CATALOG_WHATSAPP_RUNTIME.md) permite después un binding explícito y el recorrido canónico de WhatsApp; publicar por sí solo no vincula ni envía. La ejecución manual continúa bloqueada.
 
 ## Puerta de publicación
 
@@ -27,7 +27,7 @@ El recibo de catálogo conserva `graphId`, `version`, `evaluationId`, `mode`, `s
   evidenceHash: string;       // SHA-256 del manifiesto canónico
   authorizationHash: string; // revisión y permisos observados
   executionAllowed: false;
-  whatsappBindingAllowed: false;
+  whatsappBindingAllowed: true; // soporte explícito desde 067, no crea un binding
 }
 ```
 
@@ -47,17 +47,15 @@ Los resultados de evaluación añaden `evidenceVersion: 'catalog-evaluation-v1' 
 
 Sin bloqueo, ambos booleanos son verdaderos. En `SUPERSEDED`, `publicationEvidence` sigue verdadero pero `publicationAllowed` es falso. Conceder de nuevo un permiso puede producir `EVIDENCE` si su huella ya cambió. Los conflictos POST mantienen ProblemDetails `code=CONFLICT` con el motivo en `detail`; la pausa mantiene la respuesta de proveedor no disponible existente.
 
-`GET /execution.profile` conserva `publicationAllowed:false` porque no identifica una evaluación seleccionada. Añade `publicationSupported`, verdadero cuando el proveedor y los límites admiten al menos los dos casos requeridos, más `executionAllowed:false` y `whatsappBindingAllowed:false`. La compatibilidad de compilación por sí sola no constituye evidencia.
+`GET /execution.profile` conserva `publicationAllowed:false` porque no identifica una evaluación seleccionada. Añade `publicationSupported`, verdadero cuando el proveedor y los límites admiten al menos los dos casos requeridos, más `executionAllowed:false` y `whatsappBindingAllowed` según la disponibilidad canónica de 067. La compatibilidad de compilación por sí sola no constituye evidencia.
 
 Si cambian los permisos entre consultar la evaluación y publicar, Studio usa el `409` para volver a leer la disponibilidad y el recibo activo. Bloquea la acción anterior, conserva el resultado histórico y enfoca la explicación del bloqueo. Con el permiso restablecido, una evaluación nueva puede reunir evidencia vigente. Chromium reproduce este recorrido con un cambio del modo de Alfa y verifica también la publicación y consulta independiente de Bravo.
 
 El TTL de los checkpoints invalida el contenido al vencer y un barrido de `App.start` retira el texto cifrado en lotes por empresa. El manifiesto de publicación y la contabilidad se conservan. [Retención y pruebas](../qa/CATALOG_CHECKPOINT_RETENTION.md).
 
-## Integración de WhatsApp pendiente
+## Integración de WhatsApp
 
-`dispatchPublishedAgent` rechaza catálogo antes del dispatcher; `StrictWhatsappRuntimeStore.loadPin` sólo admite publicaciones `linear-text-v1`. No se registra un runner alternativo ni un endpoint que devuelva texto de evaluación.
-
-La siguiente integración debe seleccionar explícitamente perfil, versión, specHash y evidencia publicada con CAS, derivar una identidad estable desde tenant/inbound y usar la conversación canónica de 063 (`ownership_epoch`, `ia_paused_at`). Debe revalidar permisos/binding/política y pausa/toma de control antes de cada admisión y entrega, conservar los checkpoints y la cuota compartida, y entregar o sugerir por el outbox existente. Ningún permiso de mutación, aprobación o envío se hereda del perfil de sólo lectura. La huella de publicación es un recibo de revisión, no una autorización permanente sobre productos vivos.
+`dispatchPublishedAgent` sigue rechazando catálogo antes del dispatcher manual. El [corte 067](CATALOG_WHATSAPP_RUNTIME.md) añade binding explícito al recibo publicado, CAS, identidad canónica de inbound, autoridad de 063 y ejecución completion con los mismos checkpoints. Mantiene sugerencias y envíos en el flujo de WhatsApp existente. La publicación no concede herramientas mutativas ni evita permisos actuales. El recibo es evidencia de revisión, no autorización permanente sobre productos vivos.
 
 ## Evidencia reproducible
 

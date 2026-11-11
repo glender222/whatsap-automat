@@ -72,7 +72,7 @@ function publication(row: PublicationRow) {
     publishedAt: row.published_at.toISOString(),
     ...(row.execution_profile === 'catalog-router-v1' ? {
       profile: row.execution_profile, evidenceVersion: row.evidence_version!, evidenceHash: row.evidence_hash!,
-      authorizationHash: row.evidence_manifest!.authorizationHash, executionAllowed: false, whatsappBindingAllowed: false,
+      authorizationHash: row.evidence_manifest!.authorizationHash, executionAllowed: false, whatsappBindingAllowed: true,
     } : {}),
   };
 }

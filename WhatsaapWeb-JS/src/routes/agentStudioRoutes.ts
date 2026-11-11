@@ -89,7 +89,7 @@ const executeInput = createGraphDraftSchema.pick({}).extend({
 type StudioActor = TenantContext & { userId: number };
 type StudioHandler = (req: Request, res: Response, actor: StudioActor) => Promise<void>;
 
-function catalogExecutionStatus(plan: CatalogRouterExecutionPlan, provider: boolean) {
+function catalogExecutionStatus(plan: CatalogRouterExecutionPlan, provider: boolean, ready: boolean) {
   const minScenarioTimeoutMs = plan.router.timeoutMs + plan.answer.timeoutMs + catalogReadTimeoutMs;
   const maxSuiteDurationMs = plan.limits.maxDurationSeconds * 1000;
   const maxScenarioTimeoutMs = Math.min(boundedTextCapability.maxTimeoutMs, maxSuiteDurationMs);
@@ -101,8 +101,15 @@ function catalogExecutionStatus(plan: CatalogRouterExecutionPlan, provider: bool
   return { name: catalogRouterExecutionProfile, compatible: issue === null, issue,
     model: boundedTextCapability.model, publicationAllowed: false,
     publicationSupported: provider && issue === null && maxScenarios >= 2,
-    executionAllowed: false, whatsappBindingAllowed: false,
+    executionAllowed: false, whatsappBindingAllowed: provider && ready && issue === null,
     minScenarioTimeoutMs, maxScenarioTimeoutMs, maxSuiteDurationMs, maxScenarios, maxInputLength: 1024, maxSerializedInputLength: 1536 };
+}
+
+function incompatibleCatalogExecutionStatus() {
+  return { name: catalogRouterExecutionProfile, compatible: false, issue: 'CATALOG_PROFILE', model: boundedTextCapability.model,
+    publicationAllowed: false, publicationSupported: false, executionAllowed: false, whatsappBindingAllowed: false,
+    minScenarioTimeoutMs: 1, maxScenarioTimeoutMs: 1, maxSuiteDurationMs: 1, maxScenarios: 0,
+    maxInputLength: 1024, maxSerializedInputLength: 1536 };
 }
 
 function problem(res: Response, code: StandardErrorCode, detail: string, invalidParams?: InvalidParamDetail[]) {
@@ -372,12 +379,19 @@ export default function createAgentStudioRoutes(
   router.get('/:id/execution', withDraft(async (res, draft, _req, actor) => {
     const access = await resolveAccess(actor.tenantId);
     if (!access) {
-      res.json({ mode: null, suites: [], active: null });
+      const catalog = compileCatalogRouterExecutionProfile(draft);
+      const profile = catalog.compatible ? catalogExecutionStatus(catalog.plan,false,false)
+        : draft.nodes.some((node) => node.kind === 'router' && node.config.profile === catalogRouterExecutionProfile)
+          ? incompatibleCatalogExecutionStatus() : null;
+      res.json({ mode: null, suites: [], active: null, ...(profile ? { profile } : {}) });
       return;
     }
     const preflight = preflightBoundedAgentDispatch({ tenantId: actor.tenantId, graph: draft, input: 'Verification preflight', timeoutMs: 1000 });
     const catalog = preflight.ok ? null : compileCatalogRouterExecutionProfile(draft);
-    const catalogProfile = catalog?.compatible ? catalogExecutionStatus(catalog.plan, access.studio.mode === 'provider') : null;
+    const catalogProfile = catalog?.compatible
+      ? catalogExecutionStatus(catalog.plan, access.studio.mode === 'provider', access.availability === 'ready')
+      : draft.nodes.some((node) => node.kind === 'router' && node.config.profile === catalogRouterExecutionProfile)
+        ? incompatibleCatalogExecutionStatus() : null;
     const status = await actor.runInScope(async (db) => ({
       mode: access.studio.mode,
       availability: access.availability,

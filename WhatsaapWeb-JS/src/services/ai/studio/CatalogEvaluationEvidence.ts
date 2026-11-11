@@ -44,7 +44,7 @@ export class CatalogEvaluationEvidence {
   async verify(db: Queryable, command: CatalogRouterCheckpointCommand, plan: CatalogRouterExecutionPlan) {
     const receipt = await this.inspect(db, command);
     const { run } = receipt;
-    if (!run || !run.live || run.state !== 'active' || run.profile !== plan.profile ||
+    if (!run || run.operation !== (command.operation ?? 'eval') || !run.live || run.state !== 'active' || run.profile !== plan.profile ||
         run.graph_id !== command.graphId || run.graph_version !== command.version || run.spec_hash !== command.specHash ||
         run.input_hash !== digest(command.input) || Number(run.max_tokens) !== plan.maxTokens ||
         Number(run.max_cost_micro_usd) !== plan.maxCostMicroUsd || run.max_duration_seconds !== plan.limits.maxDurationSeconds ||
@@ -91,7 +91,7 @@ export class CatalogEvaluationEvidence {
       const expected = catalogCheckpointRoundPlan(command, plan, slot, input);
       if (row.state !== 'completed' || row.round_id !== expected.roundId || row.request_hash !== expected.requestHash ||
           row.reservation_hash !== expected.requestHash || row.reservation_status !== 'settled' || row.ledger_status !== 'success' ||
-          row.operation !== 'eval' || row.reservation_operation !== 'eval' ||
+          row.operation !== (command.operation ?? 'eval') || row.reservation_operation !== (command.operation ?? 'eval') ||
           row.provider !== boundedTextCapability.provider || row.model !== boundedTextCapability.model ||
           row.reservation_provider !== row.provider || row.reservation_model !== row.model ||
           Number(row.max_tokens) !== expected.maxTokens || Number(row.max_cost_micro_usd) !== expected.maxCostMicroUsd ||
