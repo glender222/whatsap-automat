@@ -12,7 +12,7 @@ En ambos commits, Atrás conserva el cursor pero pierde el foco y el desplazamie
 
 La corrección devuelve el foco al enlace utilizado y restaura la posición del panel. En esa reproducción, el desplazamiento recuperado es `1766` y la tarjeta queda entre `446` y `600`. La prueba comprueba foco, geometría dentro de `main`, ausencia de elementos superpuestos y de desbordamiento horizontal, además del valor de desplazamiento.
 
-El cotejo también confirma la mejora ya presente en `fa159d8`: Anterior/Siguiente/Última revisión y edición/cancelación conservan `after`. En `3eb55ff`, Anterior eliminaba ese cursor. El primer Tab del editor llega a su enlace de regreso visible en ambas versiones; no se ha cambiado ese comportamiento.
+El cotejo también confirma la mejora presente en `fa159d8`. Anterior, Siguiente, Última revisión y edición conservan `after`. En `3eb55ff`, Anterior eliminaba ese cursor. Una ejecución móvil de CI reveló que pulsar Tab inmediatamente después de abrir el editor podía alcanzar un control ajeno mientras cargaba la vista. El editor enfoca su encabezado al montarse. La regresión comprueba el foco y usa Mayús+Tab para llegar al enlace de regreso desde el encabezado.
 
 ## Alcance de la solución
 

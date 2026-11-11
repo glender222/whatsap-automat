@@ -88,7 +88,7 @@ Para reproducir UX-02 y UX-03, ejecutar `npm run test:e2e -- e2e/orders-navigati
 ## UX-13. Atrás del navegador y cambio de empresa en Agent Studio
 
 - **Antes.** Atrás desde un detalle conservaba la página 2 y devolvía el panel al inicio, con el foco en `BODY`. Una segunda reproducción cambió de empresa tras usar el enlace de regreso y la nueva sesión heredó el foco del grafo homónimo.
-- **Después.** La lista recupera el enlace y el desplazamiento de la entrada de historial de la sesión activa, incluso al recargar el detalle. El enlace de regreso explícito también verifica su sesión de origen.
+- **Después.** La lista recupera el enlace y el desplazamiento de la entrada de historial de la sesión activa, incluso al recargar el detalle. El enlace de regreso explícito verifica su sesión de origen. El editor enfoca el encabezado al montarse, corrigiendo una carrera de teclado observada en móvil en CI.
 - **Validación.** Siete recorridos de Studio en Chromium cubrieron teclado, escritorio, móvil, Claro y Oscuro, recarga, Atrás y Adelante, y cambio entre empresas con los mismos identificadores de grafo. Diez pruebas de grafos y diez de sesión pasaron. [Reproducción y comandos](AGENT_STUDIO_HISTORY_RETURN.md).
 
 ## MSG-01. Conversaciones nuevas y recuperación de la bandeja

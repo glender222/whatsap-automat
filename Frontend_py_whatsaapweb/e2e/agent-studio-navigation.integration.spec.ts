@@ -70,7 +70,8 @@ for (const [width, theme] of [[1280, 'Oscuro'], [390, 'Claro']] as const) {
     await page.getByRole('link', { name: 'Crear revisión desde este borrador', exact: true }).press('Enter');
     await expect(page).toHaveURL(`${studio}/grafos/${target}/revisiones/nueva?from=2&after=review-11`);
     await expect(page.getByRole('button', { name: 'Guardar borrador' })).toBeEnabled();
-    await page.keyboard.press('Tab');
+    await focusedInView(page, page.getByRole('heading', { name: 'Nuevo borrador de revisión', exact: true }));
+    await page.keyboard.press('Shift+Tab');
     await focusedInView(page, page.getByRole('link', { name: 'Volver al grafo', exact: true }));
     await page.getByRole('link', { name: 'Volver al grafo', exact: true }).press('Enter');
     await expect(page).toHaveURL(`${studio}/grafos/${target}?version=2&after=review-11`);
@@ -82,7 +83,8 @@ for (const [width, theme] of [[1280, 'Oscuro'], [390, 'Claro']] as const) {
     await page.screenshot({ path: test.info().outputPath('returned-last-card.png') });
     await page.getByRole('link', { name: 'Nuevo grafo', exact: true }).press('Enter');
     await expect(page).toHaveURL(`${studio}/nuevo?after=review-11`);
-    await page.keyboard.press('Tab');
+    await focusedInView(page, page.getByRole('heading', { name: 'Nuevo grafo de agente', exact: true }));
+    await page.keyboard.press('Shift+Tab');
     await focusedInView(page, page.getByRole('link', { name: 'Volver a Agent Studio', exact: true }));
     await page.getByRole('link', { name: 'Volver a Agent Studio', exact: true }).press('Enter');
     await focusedInView(page, page.getByRole('link', { name: 'Nuevo grafo', exact: true }));

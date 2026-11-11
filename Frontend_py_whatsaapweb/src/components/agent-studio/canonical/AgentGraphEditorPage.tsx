@@ -41,9 +41,12 @@ function GraphEditor({ graphId }: { graphId?: string }) {
   const [saving, setSaving] = useState(false);
   const [loadingTemplate, setLoadingTemplate] = useState(false);
   const [templateLoaded, setTemplateLoaded] = useState(false);
+  const heading = useRef<HTMLHeadingElement>(null);
   const lock = useRef(false);
   const templateRequest = useRef<AbortController>(null);
   const waiting = Boolean(graphId && !loaded);
+
+  useEffect(() => { heading.current?.focus(); }, []);
 
   useEffect(() => {
     if (!graphId || invalidSource) return;
@@ -115,7 +118,7 @@ function GraphEditor({ graphId }: { graphId?: string }) {
         <ArrowLeft size={16} aria-hidden="true" /> {graphId ? 'Volver al grafo' : 'Volver a Agent Studio'}
       </Link>
       <header>
-        <h1 id="graph-editor-title" className="text-2xl font-semibold">{graphId ? 'Nuevo borrador de revisión' : 'Nuevo grafo de agente'}</h1>
+        <h1 ref={heading} id="graph-editor-title" tabIndex={-1} className="text-2xl font-semibold">{graphId ? 'Nuevo borrador de revisión' : 'Nuevo grafo de agente'}</h1>
         {graphId && <p className="mt-1 break-all text-sm text-gray-600 dark:text-gray-300">{graphId}{from && ` · Origen revisión ${from}`}</p>}
         <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">Guarda una nueva revisión del JSON canónico. Luego podrás validar la estructura desde su ficha.</p>
       </header>
