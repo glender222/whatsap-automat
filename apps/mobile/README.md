@@ -111,3 +111,5 @@ sha256sum "$qa_apk"
 ```
 
 El APK usa el paquete `com.whatsapautomat.mobile.qa`, la firma de depuración y JavaScript Hermes incluido. Se abre de forma autónoma sin Metro. Es una compilación de pruebas y requiere validación en un dispositivo ARM64 antes de dar por probado el recorrido nativo.
+
+La plantilla Expo de `6fd05ca` activa R8. Para elegir un empaquetado QA sin optimización, añade `-Pandroid.enableMinifyInReleaseBuilds=false -Pandroid.enableShrinkResourcesInReleaseBuilds=false` a la invocación de Gradle anterior y registra esa opción junto al checksum del APK. Esta variante permite acotar recursos durante las pruebas locales.
