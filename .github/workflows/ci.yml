@@ -290,7 +290,7 @@ jobs:
           npm --prefix ../Frontend_py_whatsaapweb run test:e2e -- e2e/agent-studio.integration.spec.ts e2e/agent-studio-catalog.integration.spec.ts \
             -g 'provider mode' --reporter=list,json --output "$evidence/traces"
           node -e 'const { expected, skipped } = require(process.argv[1]).stats;
-            if (expected !== 2 || skipped) throw new Error("Both provider browser tests must pass")' "$PLAYWRIGHT_JSON_OUTPUT_FILE"
+            if (expected < 3 || skipped) throw new Error("At least three provider browser tests must pass without skips")' "$PLAYWRIGHT_JSON_OUTPUT_FILE"
       - name: Probar conciliación de Mercado Pago desde Chromium
         timeout-minutes: 4
         env:
