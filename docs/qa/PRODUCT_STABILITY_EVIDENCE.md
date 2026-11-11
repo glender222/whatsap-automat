@@ -157,6 +157,12 @@ Desde el frontend, con las mismas variables de prueba exportadas, ejecutar `npm 
 - **Segundo corte.** Graph local recibió el POST y el proceso murió antes de recibir el acuse. La reserva persistida conservó el envío incierto. Tras reiniciar, el webhook duplicado no produjo otro POST. Un recibo firmado confirmó la entrega y el mensaje siguiente recibió su propia respuesta. Las pruebas de envío también comprobaron dos empresas, rechazo de recibos ajenos y pausa o toma de control antes de admitir un envío.
 - **Validación.** Pasaron 31 pruebas de PostgreSQL y procesos, las dos pruebas del producto con réplicas de la API, 251 pruebas del backend y 18 recorridos de Chromium. [Procedimiento y límites de recuperación](META_INBOUND_DURABLE_RECOVERY.md).
 
+## MSG-08. Respuesta automática publicada y recibos en la bandeja
+
+Chromium amplía el recorrido de Studio en modo proveedor con la aplicación y PostgreSQL reales, un modelo local y dos líneas de Graph local. Alfa vincula su revisión en modo automático y habilita la automatización de la empresa. Alfa recibe dos veces el mismo webhook firmado. Bravo recibe un texto distinto con el mismo remitente e identificador externo.
+
+La bandeja de Alfa muestra un mensaje entrante y una respuesta automática. Graph registra un solo envío, por la línea de Alfa, y ninguno por la de Bravo. La aceptación del proveedor aparece como «Aceptado por WhatsApp». Un recibo de lectura presentado por Bravo no altera ese estado. Los recibos propios cambian la respuesta a «Enviado» y «Leído». Un recibo «Entregado» posterior y una recarga conservan «Leído» y la misma respuesta única. La bandeja de Bravo muestra su propio mensaje. [Prueba de Studio y WhatsApp](../../Frontend_py_whatsaapweb/e2e/agent-studio.integration.spec.ts).
+
 ## IA-01. Evaluación de ejecución por revisión y empresa
 
 - El evaluador interno carga una revisión inmutable y una suite guardada bajo RLS. Verifica las afirmaciones y el presupuesto del conjunto antes de llamar al proveedor. La ejecución reclama un UUID persistido y guarda las huellas de la revisión y de la suite, los resultados de las afirmaciones y las referencias de consumo. El resumen omite el texto de entrada y salida.
@@ -256,6 +262,6 @@ El ejemplo inicial del editor validaba estructura, pero no preparaba el modelo n
 | Recorrido | Evidencia pendiente |
 | --- | --- |
 | Bandeja en tiempo real | Filtro por etiqueta, reconexión, reorden de webhooks e historial paginado cubiertos en MSG-04 y MSG-05. |
-| Envío y recepción | MSG-06 y MSG-07 cubren envíos humanos y automáticos, adjuntos, entrega incierta y recuperación tras reinicio con Graph local. Falta el recorrido en navegador con dos líneas Meta reales. |
+| Envío y recepción | MSG-06 a MSG-08 cubren envíos humanos y automáticos, adjuntos, entrega incierta, recuperación tras reinicio y recibos en la bandeja con Graph local. Falta el recorrido en navegador con dos líneas Meta reales. |
 | Harness IA | IA-03 a IA-10 cubren Studio, cuota, autorización de derivaciones, reclamo de efectos y el perfil de texto del runtime estricto de WhatsApp. Faltan el piloto con proveedor real, los perfiles estrictos de router y herramientas y la conciliación de efectos por proveedor. |
 | Flujo operativo y navegación | UX-07 a UX-12 cubren conversación, pedido, pago y regreso, aprobación, conexión, conciliación con el proveedor local, pausa del agente publicado y regreso al listado de Studio. Falta el ensayo con una cuenta autorizada de Mercado Pago y la validación independiente del candidato completo. |

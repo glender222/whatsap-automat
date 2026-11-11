@@ -1,6 +1,7 @@
-import { createHmac, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { expect, test } from '@playwright/test';
-import { provisionCompanies } from './fixtures/provisionCompanies';
+import { provisionCompanies, type Company } from './fixtures/provisionCompanies';
+import { postWebhook } from './fixtures/metaWebhook';
 
 const backend = process.env.PRODUCT_SMOKE_URL;
 test.skip(!backend || !process.env.STUDIO_FIXTURE_URL, 'Requires the local Studio verification backend and isolated PostgreSQL');
@@ -256,6 +257,10 @@ if (process.env.STUDIO_PROVIDER_FIXTURE === '1') {
       const whatsapp = alpha.panel.getByRole('region', { name: 'Revisión para WhatsApp' });
       await expect(whatsapp.getByText('Sin revisión vinculada.', { exact: true })).toBeVisible();
       const contact = '12025550145';
+      const inboundText = (id: string, body: string) => ({
+        messages: [{ id, from: contact, timestamp: String(Math.floor(Date.now() / 1000)),
+          type: 'text', text: { body } }],
+      });
       const notifications: Record<string, unknown>[][] = [[], []];
       const inboxes = await Promise.all(contexts.map(async (context, index) => {
         const page = await context.newPage();
@@ -296,17 +301,7 @@ if (process.env.STUDIO_PROVIDER_FIXTURE === '1') {
       const inboundId = 'wamid.' + randomUUID();
       const texts = ['Consulta publicada de Alfa', 'Consulta sin vinculación de Bravo'];
       for (const [index, company] of companies.entries()) {
-        const payload = JSON.stringify({ entry: [{ changes: [{ field: 'messages', value: {
-          metadata: { phone_number_id: company.phoneNumberId },
-          messages: [{ id: inboundId, from: contact, timestamp: String(Math.floor(Date.now() / 1000)),
-            type: 'text', text: { body: texts[index] } }],
-        } }] }] });
-        const signature = createHmac('sha256', process.env.META_APP_SECRET!).update(payload).digest('hex');
-        const accepted = await request.post(backend + '/api/webhooks/meta/whatsapp', {
-          headers: { 'content-type': 'application/json', 'x-hub-signature-256': 'sha256=' + signature },
-          data: payload,
-        });
-        expect(accepted.status()).toBe(200);
+        await postWebhook(request, company, inboundText(inboundId, texts[index]));
       }
       const suggestion = 'Resultado de prueba: ' + texts[0];
       await expect(inboxes[0].getByText(suggestion, { exact: true })).toBeVisible();
@@ -332,16 +327,7 @@ if (process.env.STUDIO_PROVIDER_FIXTURE === '1') {
       expect(await (await suggestionAfterResume).json()).toEqual({ suggestion: null });
       await expect(inboxes[0].getByText('Sugerencia de la revisión publicada 1', { exact: true })).toHaveCount(0);
       const freshText = 'Consulta después de reanudar Alfa';
-      const freshPayload = JSON.stringify({ entry: [{ changes: [{ field: 'messages', value: {
-        metadata: { phone_number_id: companies[0].phoneNumberId },
-        messages: [{ id: 'wamid.' + randomUUID(), from: contact, timestamp: String(Math.floor(Date.now() / 1000)),
-          type: 'text', text: { body: freshText } }],
-      } }] }] });
-      const freshSignature = createHmac('sha256', process.env.META_APP_SECRET!).update(freshPayload).digest('hex');
-      const freshAccepted = await request.post(backend + '/api/webhooks/meta/whatsapp', {
-        headers: { 'content-type': 'application/json', 'x-hub-signature-256': 'sha256=' + freshSignature }, data: freshPayload,
-      });
-      expect(freshAccepted.status()).toBe(200);
+      await postWebhook(request, companies[0], inboundText('wamid.' + randomUUID(), freshText));
       const freshSuggestion = 'Resultado de prueba: ' + freshText;
       await expect(inboxes[0].getByText(freshSuggestion, { exact: true })).toBeVisible();
       await expect(inboxes[0].getByRole('button', { name: 'Aceptar y editar', exact: true })).toHaveCount(0);
@@ -356,8 +342,12 @@ if (process.env.STUDIO_PROVIDER_FIXTURE === '1') {
       await expect(pause).toBeEnabled();
       await expect(inboxes[0].getByText('Sugerencia de la revisión publicada 1', { exact: true })).toHaveCount(0);
       expect(await inboxes[0].evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-      const attempts = await request.get(`${process.env.PRODUCT_GRAPH_FIXTURE_URL}/attempts?line=${companies[0].phoneNumberId}`);
-      expect(await attempts.json()).toEqual([]);
+      async function graphAttempts(company: Company): Promise<{ id: string; callback: string; to: string; type: string }[]> {
+        const response = await request.get(`${process.env.PRODUCT_GRAPH_FIXTURE_URL}/attempts?line=${company.phoneNumberId}`);
+        expect(response.status()).toBe(200);
+        return response.json();
+      }
+      expect(await graphAttempts(companies[0])).toEqual([]);
 
       const observed = await request.get(bindingUrl, { headers: alpha.headers });
       expect(observed.status()).toBe(200);
@@ -373,6 +363,45 @@ if (process.env.STUDIO_PROVIDER_FIXTURE === '1') {
       await expect(whatsapp.getByRole('status').filter({ hasText: `${graphId} · 1 · Respuestas automáticas` })).toBeVisible();
       const bravoBinding = await request.get(bindingUrl, { headers: bravo.headers });
       expect(await bravoBinding.json()).toEqual({ binding: null });
+
+      const automaticMode = await request.put(`${backend}/api/agents/company-mode`, {
+        headers: alpha.headers, data: { mode: 'automator' },
+      });
+      expect(automaticMode.status()).toBe(200);
+      const automaticText = 'Consulta para respuesta automática Alfa';
+      const autoInboundId = 'wamid.' + randomUUID();
+      const automaticInbound = inboundText(autoInboundId, automaticText);
+      await postWebhook(request, companies[0], automaticInbound);
+      await postWebhook(request, companies[0], automaticInbound);
+      await postWebhook(request, companies[1], inboundText(autoInboundId, 'Consulta paralela Bravo'));
+      const history = inboxes[0].getByRole('region', { name: 'Historial de mensajes' });
+      const automaticReply = 'Resultado de prueba: ' + automaticText;
+      const automaticMessage = history.locator('[data-history-message]').filter({ hasText: automaticReply });
+      const delivery = automaticMessage.getByTestId('message-delivery-status');
+      await expect(history.getByText(automaticText, { exact: true })).toHaveCount(1);
+      await expect(automaticMessage).toHaveCount(1);
+      await expect(delivery).toHaveText('Aceptado por WhatsApp');
+      await expect(inboxes[1].getByRole('region', { name: 'Historial de mensajes' })
+        .getByText('Consulta paralela Bravo', { exact: true })).toBeVisible();
+      await expect(inboxes[1].getByText(automaticReply, { exact: true })).toHaveCount(0);
+      const outbound = await graphAttempts(companies[0]);
+      expect(outbound).toEqual([expect.objectContaining({ to: contact, type: 'text', callback: expect.stringMatching(/^automat:/) })]);
+      expect(await graphAttempts(companies[1])).toEqual([]);
+
+      const signedStatus = { id: outbound[0].id, recipient_id: contact,
+        timestamp: String(Math.floor(Date.now() / 1000)), biz_opaque_callback_data: outbound[0].callback };
+      await postWebhook(request, companies[1], { statuses: [{ ...signedStatus, status: 'read' }] });
+      await expect(delivery).toHaveText('Aceptado por WhatsApp');
+      await postWebhook(request, companies[0], { statuses: [{ ...signedStatus, status: 'sent' }] });
+      await expect(delivery).toHaveText('Enviado');
+      await postWebhook(request, companies[0], { statuses: [{ ...signedStatus, status: 'read' }] });
+      await expect(delivery).toHaveText('Leído');
+      await postWebhook(request, companies[0], { statuses: [{ ...signedStatus, status: 'delivered' }] });
+      await inboxes[0].reload();
+      await expect(delivery).toHaveText('Leído');
+      await expect(automaticMessage).toHaveCount(1);
+      expect(await graphAttempts(companies[0])).toEqual(outbound);
+
       await whatsapp.getByRole('button', { name: 'Desvincular de WhatsApp' }).press('Enter');
       await expect(whatsapp.getByText('Sin revisión vinculada.', { exact: true })).toBeVisible();
       await expect(responseMode).toBeFocused();
