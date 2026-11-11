@@ -166,8 +166,49 @@ test('Studio restores the draft list page and focus after reviewing a graph on m
   await edit.press('Enter');
   await page.getByRole('link', { name: 'Volver al grafo' }).press('Enter');
   await expect(page.getByText('Revisión 1 de 2', { exact: true })).toBeVisible();
-  await edit.press('Enter');
-  await page.getByRole('button', { name: 'Guardar borrador' }).press('Enter');
+  const sourceCaptured = Promise.withResolvers<void>();
+  const releaseSource = Promise.withResolvers<void>();
+  await page.route(`${apiPath}/${target}?version=1`, async (route) => {
+    const response = await route.fetch();
+    sourceCaptured.resolve();
+    await releaseSource.promise;
+    await route.fulfill({ response });
+  }, { times: 1 });
+  const saves: unknown[] = [];
+  page.on('request', (request) => {
+    if (request.url() === `${apiPath}/${target}/revisions` && request.method() === 'POST') saves.push(request.postDataJSON());
+  });
+  const save = page.getByRole('button', { name: 'Guardar borrador' });
+  const editor = page.getByRole('textbox', { name: 'Especificación del grafo en JSON' });
+  const editorHeading = page.getByRole('heading', { name: 'Nuevo borrador de revisión', exact: true });
+  try {
+    await edit.press('Enter');
+    await sourceCaptured.promise;
+    await expect(editorHeading).toBeFocused();
+    await expect(editor).toBeDisabled();
+    await expect(save).toBeDisabled();
+    // press() sends keys even when the target is disabled; it does not wait for readiness.
+    await save.press('Enter');
+    expect(saves).toHaveLength(0);
+    await expect(editorHeading).toBeFocused();
+  } finally {
+    releaseSource.resolve();
+  }
+  await expect(save).toBeEnabled();
+  await expect(editor).toBeEditable();
+  expect(JSON.parse(await editor.inputValue())).toEqual(graph);
+  const editedSpec = { ...graph, policyRef: 'qa-mobile-edited' };
+  await editor.fill(JSON.stringify(editedSpec, null, 2));
+  await expect(editor).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(save).toBeFocused();
+  const saved = page.waitForResponse((response) => response.url() === `${apiPath}/${target}/revisions` &&
+    response.request().method() === 'POST');
+  await page.keyboard.press('Enter');
+  const receipt = await saved;
+  expect(receipt.status()).toBe(201);
+  expect(await receipt.json()).toMatchObject({ graphId: target, version: 3, policyRef: editedSpec.policyRef });
+  expect(saves).toEqual([editedSpec]);
   await expect(page.getByRole('status').filter({ hasText: 'El servidor guardó esta revisión.' })).toBeVisible();
   await page.getByRole('link', { name: 'Volver a Agent Studio' }).press('Enter');
   await expect(page).toHaveURL(pageTwo);
