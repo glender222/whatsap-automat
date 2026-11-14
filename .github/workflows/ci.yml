@@ -324,7 +324,7 @@ jobs:
             --reporter=list,json --output "$evidence/traces"
           node -e 'const { expected, skipped } = require(process.argv[1]).stats;
             if (expected !== 4 || skipped) throw new Error("Mercado Pago browser tests did not pass")' "$PLAYWRIGHT_JSON_OUTPUT_FILE"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: browser-smoke-diagnostics
@@ -558,7 +558,7 @@ jobs:
         run: |
           python docs-site/build.py --developer-kit "$RUNNER_TEMP/whatsap-automat-developer-kit.zip"
           python -m zipfile -t docs-site/dist/downloads/whatsap-automat-docs.zip
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: whatsap-automat-docs-site
           path: docs-site/dist
